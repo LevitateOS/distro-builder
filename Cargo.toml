@@ -1,0 +1,16 @@
+[package]
+name = "distro-builder"
+version = "0.1.0"
+edition = "2021"
+description = "Shared infrastructure for building LevitateOS and AcornOS ISOs"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/LevitateOS/distro-builder"
+keywords = ["linux", "distro", "iso", "build"]
+categories = ["development-tools::build-utils"]
+
+[dependencies]
+anyhow = "1.0"
+distro-spec = { path = "../distro-spec" }
+
+[dev-dependencies]
+tempfile = "3"

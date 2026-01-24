@@ -59,6 +59,7 @@ pub mod artifact;
 pub mod build;
 pub mod component;
 pub mod preflight;
+pub mod process;
 
 pub use build::context::{BuildContext, DistroConfig, InitSystem};
 pub use component::{Installable, Op, Phase};

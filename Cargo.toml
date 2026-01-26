@@ -11,6 +11,8 @@ categories = ["development-tools::build-utils"]
 [dependencies]
 anyhow = "1.0"
 distro-spec = { path = "../distro-spec" }
+sha2 = "0.10"
+walkdir = "2"
 
 [dev-dependencies]
 tempfile = "3"

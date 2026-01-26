@@ -28,7 +28,7 @@ use std::path::{Path, PathBuf};
 ///     fn squashfs_block_size(&self) -> &str { "1M" }
 /// }
 /// ```
-pub trait DistroConfig {
+pub trait DistroConfig: crate::build::kernel::KernelInstallConfig {
     /// OS name for display (e.g., "LevitateOS", "AcornOS").
     fn os_name(&self) -> &str;
 

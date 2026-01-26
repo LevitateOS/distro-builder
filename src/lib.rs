@@ -62,4 +62,13 @@ pub mod preflight;
 pub mod process;
 
 pub use build::context::{BuildContext, DistroConfig, InitSystem};
+pub use build::kernel::KernelInstallConfig;
 pub use component::{Installable, Op, Phase};
+
+// Re-export commonly used artifact utilities
+pub use artifact::cpio::build_cpio;
+pub use artifact::filesystem::{atomic_move, copy_dir_recursive, create_initramfs_dirs};
+pub use artifact::iso_utils::{
+    create_efi_boot_image, create_efi_dirs_in_fat, create_fat16_image, generate_iso_checksum,
+    mcopy_to_fat, run_xorriso, setup_iso_structure,
+};

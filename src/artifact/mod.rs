@@ -1,16 +1,24 @@
 //! Artifact builders for distribution images.
 //!
-//! This module provides wrappers for building:
+//! This module provides utilities and wrappers for building:
+//! - [`cpio`] - Compressed cpio archives for initramfs
+//! - [`filesystem`] - Directory copying, initramfs structure creation
+//! - [`iso_utils`] - ISO creation utilities (xorriso, checksums, EFI boot images)
 //! - [`squashfs`] - Compressed filesystem images (mksquashfs)
-//! - [`initramfs`] - Initial RAM filesystem archives (cpio + gzip)
-//! - [`iso`] - Bootable ISO images (xorriso)
+//! - [`initramfs`] - Initial RAM filesystem archives (trait definitions)
+//! - [`iso`] - Bootable ISO images (trait definitions)
 //!
-//! # Status
+//! # Usage
 //!
-//! These are placeholder modules with interface definitions.
-//! The actual implementations remain in leviso until they can be
-//! properly abstracted and tested with both LevitateOS and AcornOS.
+//! The utility modules (`cpio`, `filesystem`, `iso_utils`) provide ready-to-use
+//! functions that both LevitateOS and AcornOS can call directly.
+//!
+//! The trait modules (`initramfs`, `iso`, `squashfs`) define interfaces that
+//! each distro implements with their specific configuration.
 
+pub mod cpio;
+pub mod filesystem;
 pub mod initramfs;
 pub mod iso;
+pub mod iso_utils;
 pub mod squashfs;

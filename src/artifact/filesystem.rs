@@ -13,6 +13,9 @@ use std::path::Path;
 /// - Symbolic links (preserved, not followed)
 /// - File permissions
 ///
+/// This uses the overwrite variant from `leviso-elf`, which replaces existing
+/// symlinks. This is the desired behavior for overlay creation.
+///
 /// # Arguments
 ///
 /// * `src` - Source directory to copy
@@ -30,38 +33,9 @@ use std::path::Path;
 /// )?;
 /// ```
 pub fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
-    if !dst.exists() {
-        fs::create_dir_all(dst)
-            .with_context(|| format!("Failed to create directory: {}", dst.display()))?;
-    }
-
-    for entry in fs::read_dir(src)
-        .with_context(|| format!("Failed to read directory: {}", src.display()))?
-    {
-        let entry = entry?;
-        let src_path = entry.path();
-        let dst_path = dst.join(entry.file_name());
-
-        let file_type = entry.file_type()?;
-
-        if file_type.is_symlink() {
-            // Preserve symlinks
-            let target = fs::read_link(&src_path)?;
-            if dst_path.exists() || dst_path.is_symlink() {
-                fs::remove_file(&dst_path)?;
-            }
-            std::os::unix::fs::symlink(&target, &dst_path)
-                .with_context(|| format!("Failed to create symlink: {}", dst_path.display()))?;
-        } else if file_type.is_dir() {
-            // Recurse into directories
-            copy_dir_recursive(&src_path, &dst_path)?;
-        } else {
-            // Copy regular files
-            fs::copy(&src_path, &dst_path)
-                .with_context(|| format!("Failed to copy file: {}", src_path.display()))?;
-        }
-    }
-
+    // Use leviso-elf's overwrite variant (replaces existing symlinks)
+    // and discard the byte count since callers expect Result<()>
+    leviso_elf::copy_dir_recursive_overwrite(src, dst)?;
     Ok(())
 }
 

@@ -17,7 +17,7 @@ distro-builder (this crate)
     │   └── filesystem FHS directory structure utilities
     │
     ├── artifact/      Artifact builder interfaces
-    │   ├── squashfs   mksquashfs wrapper
+    │   ├── rootfs     mkfs.erofs wrapper (EROFS only)
     │   ├── initramfs  cpio+gzip builder
     │   └── iso        xorriso wrapper
     │
@@ -66,7 +66,7 @@ This crate is currently a **structural skeleton**. The abstractions are defined 
 - Host tool preflight validation
 
 ### Placeholder (future work)
-- Squashfs builder (interface only)
+- EROFS builder (interface only)
 - Initramfs builder (interface only)
 - ISO builder (interface only)
 

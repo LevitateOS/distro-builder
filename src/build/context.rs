@@ -21,11 +21,9 @@ use std::path::{Path, PathBuf};
 ///     fn os_name(&self) -> &str { "MyDistro" }
 ///     fn os_id(&self) -> &str { "mydistro" }
 ///     fn iso_label(&self) -> &str { "MYDISTRO" }
-///     fn boot_modules(&self) -> &[&str] { &["squashfs", "overlay"] }
+///     fn boot_modules(&self) -> &[&str] { &["erofs", "overlay"] }
 ///     fn default_shell(&self) -> &str { "/bin/bash" }
 ///     fn init_system(&self) -> InitSystem { InitSystem::Systemd }
-///     fn squashfs_compression(&self) -> &str { "gzip" }
-///     fn squashfs_block_size(&self) -> &str { "1M" }
 /// }
 /// ```
 pub trait DistroConfig: crate::build::kernel::KernelInstallConfig {
@@ -46,12 +44,6 @@ pub trait DistroConfig: crate::build::kernel::KernelInstallConfig {
 
     /// Init system type.
     fn init_system(&self) -> InitSystem;
-
-    /// Squashfs compression algorithm.
-    fn squashfs_compression(&self) -> &str;
-
-    /// Squashfs block size.
-    fn squashfs_block_size(&self) -> &str;
 }
 
 /// Init system types supported by distro-builder.

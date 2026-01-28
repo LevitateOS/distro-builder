@@ -307,6 +307,38 @@ pub fn exists(program: &str) -> bool {
 }
 
 // =============================================================================
+// Path utilities
+// =============================================================================
+
+/// Ensure a path exists, returning an error if it doesn't.
+///
+/// # Example
+/// ```ignore
+/// ensure_exists(&kernel_path, "kernel")?;
+/// ```
+pub fn ensure_exists(path: &Path, description: &str) -> Result<()> {
+    if !path.exists() {
+        bail!("{} not found at {}", description, path.display());
+    }
+    Ok(())
+}
+
+/// Find the first existing path from a list of candidates.
+///
+/// Returns `None` if no paths exist.
+///
+/// # Example
+/// ```ignore
+/// let boot_file = find_first_existing(&[
+///     rootfs.join("usr/lib/systemd/boot/efi/systemd-bootx64.efi"),
+///     Path::new("/usr/lib/systemd/boot/efi/systemd-bootx64.efi").to_path_buf(),
+/// ]);
+/// ```
+pub fn find_first_existing<P: AsRef<Path>>(paths: &[P]) -> Option<&P> {
+    paths.iter().find(|p| p.as_ref().exists())
+}
+
+// =============================================================================
 // Tests
 // =============================================================================
 
@@ -409,5 +441,39 @@ mod tests {
     fn test_run_in_directory() {
         let result = run_in("pwd", [] as [&str; 0], Path::new("/tmp")).unwrap();
         assert!(result.stdout_trimmed().contains("tmp"));
+    }
+
+    #[test]
+    fn test_ensure_exists_success() {
+        // /tmp should always exist
+        assert!(ensure_exists(Path::new("/tmp"), "temp directory").is_ok());
+    }
+
+    #[test]
+    fn test_ensure_exists_failure() {
+        let err = ensure_exists(Path::new("/nonexistent_path_xyz_123"), "test file").unwrap_err();
+        assert!(err.to_string().contains("test file"));
+        assert!(err.to_string().contains("not found"));
+    }
+
+    #[test]
+    fn test_find_first_existing_found() {
+        let paths = vec![
+            std::path::PathBuf::from("/nonexistent_1"),
+            std::path::PathBuf::from("/tmp"),
+            std::path::PathBuf::from("/nonexistent_2"),
+        ];
+        let found = find_first_existing(&paths);
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().as_path(), Path::new("/tmp"));
+    }
+
+    #[test]
+    fn test_find_first_existing_not_found() {
+        let paths = vec![
+            std::path::PathBuf::from("/nonexistent_1"),
+            std::path::PathBuf::from("/nonexistent_2"),
+        ];
+        assert!(find_first_existing(&paths).is_none());
     }
 }

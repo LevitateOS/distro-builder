@@ -73,3 +73,6 @@ pub use artifact::iso_utils::{
     mcopy_to_fat, run_xorriso, setup_iso_structure,
 };
 pub use artifact::rootfs::{build_erofs_default, create_erofs};
+
+// Re-export process utilities
+pub use process::{ensure_exists, find_first_existing, Cmd, CommandResult};

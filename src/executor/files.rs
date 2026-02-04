@@ -116,8 +116,12 @@ mod tests {
     fn test_handle_writefile_creates_content() {
         let (_temp, _source, staging) = temp_dirs();
 
-        handle_writefile(&staging, "etc/test-config.conf", "test-content-12345\nline two\n")
-            .unwrap();
+        handle_writefile(
+            &staging,
+            "etc/test-config.conf",
+            "test-content-12345\nline two\n",
+        )
+        .unwrap();
 
         let file_path = staging.join("etc/test-config.conf");
         assert!(file_path.exists(), "File should be created");

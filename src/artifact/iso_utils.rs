@@ -86,11 +86,7 @@ pub fn generate_iso_checksum(iso_path: &Path) -> Result<std::path::PathBuf> {
 
     // Print abbreviated hash for visual confirmation
     if hash.len() >= 16 {
-        println!(
-            "  SHA512: {}...{}",
-            &hash[..8],
-            &hash[hash.len() - 8..]
-        );
+        println!("  SHA512: {}...{}", &hash[..8], &hash[hash.len() - 8..]);
     }
     println!("  Wrote: {}", checksum_path.display());
 
@@ -256,7 +252,12 @@ pub fn run_xorriso(
         .args(["-V", label]) // Volume label for device detection
         .args(["-partition_offset", &XORRISO_PARTITION_OFFSET.to_string()])
         .args(XORRISO_FS_FLAGS)
-        .args(["-e", efiboot_filename, "-no-emul-boot", "-isohybrid-gpt-basdat"])
+        .args([
+            "-e",
+            efiboot_filename,
+            "-no-emul-boot",
+            "-isohybrid-gpt-basdat",
+        ])
         .arg_path(iso_root)
         .error_msg("xorriso failed. Install xorriso.")
         .run()?;

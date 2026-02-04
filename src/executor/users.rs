@@ -98,17 +98,20 @@ pub fn ensure_user(
     // - If file doesn't exist, start with empty string (first user)
     // - If file exists but unreadable, FAIL FAST (don't silently overwrite)
     let mut passwd = if passwd_path.exists() {
-        fs::read_to_string(&passwd_path).with_context(|| {
-            format!("Failed to read passwd file at {}", passwd_path.display())
-        })?
+        fs::read_to_string(&passwd_path)
+            .with_context(|| format!("Failed to read passwd file at {}", passwd_path.display()))?
     } else {
         String::new()
     };
 
     if !passwd.contains(&format!("{}:", username)) {
         // Try to get UID/GID from source rootfs, fall back to defaults if user doesn't exist
-        let (uid, gid) = read_uid_from_rootfs(source, username)?.unwrap_or((default_uid, default_gid));
-        let entry = format!("{}:x:{}:{}:{}:{}:{}\n", username, uid, gid, username, home, shell);
+        let (uid, gid) =
+            read_uid_from_rootfs(source, username)?.unwrap_or((default_uid, default_gid));
+        let entry = format!(
+            "{}:x:{}:{}:{}:{}:{}\n",
+            username, uid, gid, username, home, shell
+        );
         passwd.push_str(&entry);
         fs::write(&passwd_path, passwd)
             .with_context(|| format!("Failed to write passwd for user {}", username))?;
@@ -129,9 +132,8 @@ pub fn ensure_group(
     // - If file doesn't exist, start with empty string (first group)
     // - If file exists but unreadable, FAIL FAST (don't silently overwrite)
     let mut group = if group_path.exists() {
-        fs::read_to_string(&group_path).with_context(|| {
-            format!("Failed to read group file at {}", group_path.display())
-        })?
+        fs::read_to_string(&group_path)
+            .with_context(|| format!("Failed to read group file at {}", group_path.display()))?
     } else {
         String::new()
     };
@@ -223,8 +225,16 @@ mod tests {
 
         fs::create_dir_all(staging.join("etc")).unwrap();
 
-        ensure_user(&source, &staging, "testuser", 1000, 1000, "/home/testuser", "/bin/bash")
-            .unwrap();
+        ensure_user(
+            &source,
+            &staging,
+            "testuser",
+            1000,
+            1000,
+            "/home/testuser",
+            "/bin/bash",
+        )
+        .unwrap();
 
         let passwd_content = fs::read_to_string(staging.join("etc/passwd")).unwrap();
         assert!(passwd_content.contains("testuser:x:1000:1000:testuser:/home/testuser:/bin/bash"));
@@ -236,13 +246,25 @@ mod tests {
 
         // Create source passwd with specific UID
         fs::create_dir_all(source.join("etc")).unwrap();
-        fs::write(source.join("etc/passwd"), "testuser:x:1234:5678:::/bin/sh\n").unwrap();
+        fs::write(
+            source.join("etc/passwd"),
+            "testuser:x:1234:5678:::/bin/sh\n",
+        )
+        .unwrap();
 
         fs::create_dir_all(staging.join("etc")).unwrap();
 
         // Request with different defaults - should use source values
-        ensure_user(&source, &staging, "testuser", 9999, 9999, "/home/test", "/bin/bash")
-            .unwrap();
+        ensure_user(
+            &source,
+            &staging,
+            "testuser",
+            9999,
+            9999,
+            "/home/test",
+            "/bin/bash",
+        )
+        .unwrap();
 
         let passwd_content = fs::read_to_string(staging.join("etc/passwd")).unwrap();
         assert!(passwd_content.contains("testuser:x:1234:5678"));
@@ -254,10 +276,26 @@ mod tests {
 
         fs::create_dir_all(staging.join("etc")).unwrap();
 
-        ensure_user(&source, &staging, "testuser", 1000, 1000, "/home/testuser", "/bin/bash")
-            .unwrap();
-        ensure_user(&source, &staging, "testuser", 1000, 1000, "/home/testuser", "/bin/bash")
-            .unwrap();
+        ensure_user(
+            &source,
+            &staging,
+            "testuser",
+            1000,
+            1000,
+            "/home/testuser",
+            "/bin/bash",
+        )
+        .unwrap();
+        ensure_user(
+            &source,
+            &staging,
+            "testuser",
+            1000,
+            1000,
+            "/home/testuser",
+            "/bin/bash",
+        )
+        .unwrap();
 
         let passwd_content = fs::read_to_string(staging.join("etc/passwd")).unwrap();
         // Count lines that start with "testuser:" (full username match)
@@ -265,7 +303,10 @@ mod tests {
             .lines()
             .filter(|line| line.starts_with("testuser:"))
             .count();
-        assert_eq!(entry_count, 1, "Should only have one passwd entry for testuser");
+        assert_eq!(
+            entry_count, 1,
+            "Should only have one passwd entry for testuser"
+        );
     }
 
     #[test]
@@ -286,7 +327,16 @@ mod tests {
 
         fs::create_dir_all(staging.join("etc")).unwrap();
 
-        handle_user(&source, &staging, "myuser", 1001, 1001, "/home/myuser", "/bin/sh").unwrap();
+        handle_user(
+            &source,
+            &staging,
+            "myuser",
+            1001,
+            1001,
+            "/home/myuser",
+            "/bin/sh",
+        )
+        .unwrap();
 
         let passwd_content = fs::read_to_string(staging.join("etc/passwd")).unwrap();
         assert!(passwd_content.contains("myuser:x:1001:1001:myuser:/home/myuser:/bin/sh"));

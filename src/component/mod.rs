@@ -246,7 +246,10 @@ mod tests {
     #[test]
     fn test_op_helpers() {
         assert_eq!(dir("etc/foo"), Op::Dir("etc/foo".into()));
-        assert_eq!(dir_mode("etc/foo", 0o755), Op::DirMode("etc/foo".into(), 0o755));
+        assert_eq!(
+            dir_mode("etc/foo", 0o755),
+            Op::DirMode("etc/foo".into(), 0o755)
+        );
         assert_eq!(
             write_file("etc/foo", "bar"),
             Op::WriteFile("etc/foo".into(), "bar".into())

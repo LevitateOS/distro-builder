@@ -143,12 +143,9 @@ impl Cmd {
             cmd.current_dir(dir);
         }
 
-        let output = cmd.output().with_context(|| {
-            format!(
-                "Failed to execute '{}'. Is it installed?",
-                self.program
-            )
-        })?;
+        let output = cmd
+            .output()
+            .with_context(|| format!("Failed to execute '{}'. Is it installed?", self.program))?;
 
         let result = CommandResult {
             status: output.status,
@@ -188,12 +185,9 @@ impl Cmd {
             cmd.current_dir(dir);
         }
 
-        let status = cmd.status().with_context(|| {
-            format!(
-                "Failed to execute '{}'. Is it installed?",
-                self.program
-            )
-        })?;
+        let status = cmd
+            .status()
+            .with_context(|| format!("Failed to execute '{}'. Is it installed?", self.program))?;
 
         if !self.allow_fail && !status.success() {
             let prefix = self
@@ -402,11 +396,7 @@ mod tests {
 
     #[test]
     fn test_cmd_builder_chaining() {
-        let result = Cmd::new("echo")
-            .arg("hello")
-            .arg("world")
-            .run()
-            .unwrap();
+        let result = Cmd::new("echo").arg("hello").arg("world").run().unwrap();
 
         assert_eq!(result.stdout_trimmed(), "hello world");
     }

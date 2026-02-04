@@ -48,11 +48,7 @@ use std::path::Path;
 /// // Execute a directory creation operation
 /// executor::execute_generic_op(source, staging, &Op::Dir("etc/config".into()))?;
 /// ```
-pub fn execute_generic_op(
-    source: &Path,
-    staging: &Path,
-    op: &super::Op,
-) -> anyhow::Result<()> {
+pub fn execute_generic_op(source: &Path, staging: &Path, op: &super::Op) -> anyhow::Result<()> {
     match op {
         // Directory operations
         super::Op::Dir(path) => directories::handle_dir(staging, path)?,

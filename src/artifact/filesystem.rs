@@ -66,18 +66,7 @@ pub fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
 pub fn create_initramfs_dirs(root: &Path, extra_dirs: &[&str]) -> Result<()> {
     // Standard initramfs directories
     let standard_dirs = [
-        "bin",
-        "sbin",
-        "lib",
-        "lib64",
-        "dev",
-        "proc",
-        "sys",
-        "run",
-        "mnt",
-        "tmp",
-        "root",
-        "newroot",
+        "bin", "sbin", "lib", "lib64", "dev", "proc", "sys", "run", "mnt", "tmp", "root", "newroot",
     ];
 
     for dir in standard_dirs.iter().chain(extra_dirs.iter()) {
@@ -103,10 +92,10 @@ pub fn atomic_move(src: &Path, dst: &Path) -> Result<()> {
         Ok(()) => Ok(()),
         Err(_) => {
             // Different filesystem, fall back to copy+delete
-            fs::copy(src, dst)
-                .with_context(|| format!("Failed to copy {} to {}", src.display(), dst.display()))?;
-            fs::remove_file(src)
-                .with_context(|| format!("Failed to remove {}", src.display()))?;
+            fs::copy(src, dst).with_context(|| {
+                format!("Failed to copy {} to {}", src.display(), dst.display())
+            })?;
+            fs::remove_file(src).with_context(|| format!("Failed to remove {}", src.display()))?;
             Ok(())
         }
     }
@@ -136,7 +125,10 @@ mod tests {
         assert!(dst.join("file.txt").exists());
         assert!(dst.join("subdir/nested.txt").exists());
         assert!(dst.join("link").is_symlink());
-        assert_eq!(fs::read_link(dst.join("link")).unwrap().to_str().unwrap(), "file.txt");
+        assert_eq!(
+            fs::read_link(dst.join("link")).unwrap().to_str().unwrap(),
+            "file.txt"
+        );
     }
 
     #[test]

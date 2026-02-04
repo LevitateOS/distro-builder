@@ -77,16 +77,10 @@ pub fn create_erofs(
 ) -> Result<()> {
     // Validate source directory
     if !source_dir.exists() {
-        bail!(
-            "Source directory does not exist: {}",
-            source_dir.display()
-        );
+        bail!("Source directory does not exist: {}", source_dir.display());
     }
     if !source_dir.is_dir() {
-        bail!(
-            "Source path is not a directory: {}",
-            source_dir.display()
-        );
+        bail!("Source path is not a directory: {}", source_dir.display());
     }
 
     // Check tool availability
@@ -155,7 +149,9 @@ pub fn create_erofs(
 /// )?;
 /// ```
 pub fn build_erofs_default(source_dir: &Path, output: &Path) -> Result<()> {
-    use distro_spec::shared::rootfs::{EROFS_CHUNK_SIZE, EROFS_COMPRESSION, EROFS_COMPRESSION_LEVEL};
+    use distro_spec::shared::rootfs::{
+        EROFS_CHUNK_SIZE, EROFS_COMPRESSION, EROFS_COMPRESSION_LEVEL,
+    };
 
     create_erofs(
         source_dir,

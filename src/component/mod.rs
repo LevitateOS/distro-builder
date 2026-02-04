@@ -255,4 +255,78 @@ mod tests {
             Op::WriteFile("etc/foo".into(), "bar".into())
         );
     }
+
+    #[test]
+    fn test_installable_trait_implementation() {
+        /// Mock component for testing trait implementation.
+        struct TestComponent;
+
+        impl Installable for TestComponent {
+            fn name(&self) -> &str {
+                "test-component"
+            }
+
+            fn phase(&self) -> Phase {
+                Phase::Config
+            }
+
+            fn ops(&self) -> Vec<Op> {
+                vec![
+                    Op::Dir("etc/test".into()),
+                    Op::WriteFile("etc/test/config".into(), "test=true".into()),
+                ]
+            }
+        }
+
+        let component = TestComponent;
+        assert_eq!(component.name(), "test-component");
+        assert_eq!(component.phase(), Phase::Config);
+        assert_eq!(component.ops().len(), 2);
+    }
+
+    #[test]
+    fn test_op_enum_variants() {
+        // Verify all Op variants can be constructed
+        let ops = vec![
+            Op::Dir("etc".into()),
+            Op::DirMode("etc".into(), 0o755),
+            Op::Dirs(vec!["etc".into(), "var".into()]),
+            Op::WriteFile("etc/config".into(), "value".into()),
+            Op::WriteFileMode("etc/config".into(), "value".into(), 0o644),
+            Op::Symlink("bin".into(), "usr/bin".into()),
+            Op::CopyFile("etc/template".into()),
+            Op::CopyTree("usr".into()),
+            Op::Bin("ls".into()),
+            Op::Sbin("init".into()),
+            Op::Bins(vec!["ls".into(), "cat".into()]),
+            Op::Sbins(vec!["init".into()]),
+            Op::User {
+                name: "test".into(),
+                uid: 1000,
+                gid: 1000,
+                home: "/home/test".into(),
+                shell: "/bin/sh".into(),
+            },
+            Op::Group {
+                name: "users".into(),
+                gid: 100,
+            },
+            Op::Custom("test-op".into()),
+        ];
+
+        assert_eq!(ops.len(), 15);
+    }
+
+    #[test]
+    fn test_phase_display() {
+        assert_eq!(Phase::Filesystem.to_string(), "Filesystem");
+        assert_eq!(Phase::Binaries.to_string(), "Binaries");
+        assert_eq!(Phase::Init.to_string(), "Init");
+        assert_eq!(Phase::MessageBus.to_string(), "MessageBus");
+        assert_eq!(Phase::Services.to_string(), "Services");
+        assert_eq!(Phase::Config.to_string(), "Config");
+        assert_eq!(Phase::Packages.to_string(), "Packages");
+        assert_eq!(Phase::Firmware.to_string(), "Firmware");
+        assert_eq!(Phase::Final.to_string(), "Final");
+    }
 }

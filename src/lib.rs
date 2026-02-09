@@ -63,6 +63,8 @@ pub mod component;
 pub mod executor;
 pub mod preflight;
 pub mod process;
+pub mod qemu;
+pub mod recipe;
 
 pub use build::context::{BuildContext, DistroConfig, InitSystem};
 pub use build::kernel::KernelInstallConfig;

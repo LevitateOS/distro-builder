@@ -17,6 +17,7 @@
 //! each distro implements with their specific configuration.
 
 pub mod cpio;
+pub mod disk;
 pub mod filesystem;
 pub mod initramfs;
 pub mod iso;

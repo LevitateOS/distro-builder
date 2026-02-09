@@ -9,6 +9,7 @@
 //! 3. `RECIPE_BIN` env var (path to binary)
 //! 4. `RECIPE_SRC` env var (path to source, will build)
 
+pub mod alpine;
 pub mod linux;
 
 use crate::process::ensure_exists;
@@ -17,6 +18,16 @@ use distro_spec::shared::LEVITATE_CARGO_TOOLS;
 use std::env;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+
+/// Extract the distro directory name from a base_dir path.
+///
+/// e.g., `/home/user/LevitateOS/AcornOS` → `"AcornOS"`
+fn distro_name(base_dir: &Path) -> &str {
+    base_dir
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("unknown")
+}
 
 /// How the recipe binary was built from source.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -234,8 +245,8 @@ pub fn run_recipe(recipe_bin: &Path, recipe_path: &Path, build_dir: &Path) -> Re
 ///
 /// # Arguments
 /// * `base_dir` - distro crate root (e.g., `/path/to/AcornOS`)
-/// * `distro_name` - name for error messages (e.g., "AcornOS")
-pub fn install_tools(base_dir: &Path, distro_name: &str) -> Result<()> {
+pub fn install_tools(base_dir: &Path) -> Result<()> {
+    let distro_name = distro_name(base_dir);
     let monorepo_dir = base_dir
         .parent()
         .map(|p| p.to_path_buf())
@@ -288,8 +299,8 @@ pub fn install_tools(base_dir: &Path, distro_name: &str) -> Result<()> {
 ///
 /// # Arguments
 /// * `base_dir` - distro crate root
-/// * `distro_name` - name for error messages (e.g., "AcornOS")
-pub fn packages(base_dir: &Path, distro_name: &str) -> Result<()> {
+pub fn packages(base_dir: &Path) -> Result<()> {
+    let distro_name = distro_name(base_dir);
     let monorepo_dir = base_dir
         .parent()
         .map(|p| p.to_path_buf())

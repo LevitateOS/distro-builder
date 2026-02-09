@@ -27,8 +27,8 @@ impl LinuxPaths {
 ///
 /// # Arguments
 /// * `base_dir` - distro crate root (e.g., `/path/to/AcornOS`)
-/// * `distro_name` - name for error messages (e.g., "AcornOS")
-pub fn linux(base_dir: &Path, distro_name: &str) -> Result<LinuxPaths> {
+pub fn linux(base_dir: &Path) -> Result<LinuxPaths> {
+    let distro_name = super::distro_name(base_dir);
     let monorepo_dir = base_dir
         .parent()
         .map(|p| p.to_path_buf())

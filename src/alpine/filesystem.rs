@@ -9,19 +9,17 @@ use super::context::BuildContext;
 
 /// Create FHS symlinks for merged /usr.
 ///
-/// Alpine uses merged /usr, so we create symlinks:
-/// - /bin -> usr/bin
-/// - /sbin -> usr/sbin
-/// - /lib -> usr/lib
-///
-/// Note: musl doesn't use multilib, so we use /usr/lib (not /usr/lib64).
-pub fn create_fhs_symlinks(ctx: &BuildContext) -> Result<()> {
+/// The caller passes the FHS and var symlinks to create.
+/// This keeps distro-builder independent of any particular symlink list.
+pub fn create_fhs_symlinks(
+    ctx: &BuildContext,
+    fhs_symlinks: &[(&str, &str)],
+    var_symlinks: &[(&str, &str)],
+) -> Result<()> {
     let staging = &ctx.staging;
 
     // Merged /usr symlinks
-    let symlinks = [("bin", "usr/bin"), ("sbin", "usr/sbin"), ("lib", "usr/lib")];
-
-    for (link, target) in symlinks {
+    for (link, target) in fhs_symlinks {
         let link_path = staging.join(link);
         if !link_path.exists() && !link_path.is_symlink() {
             std::os::unix::fs::symlink(target, &link_path)?;
@@ -29,8 +27,6 @@ pub fn create_fhs_symlinks(ctx: &BuildContext) -> Result<()> {
     }
 
     // /var symlinks
-    let var_symlinks = [("var/run", "/run"), ("var/lock", "/run/lock")];
-
     for (link, target) in var_symlinks {
         let link_path = staging.join(link);
         if !link_path.exists() && !link_path.is_symlink() {
@@ -97,12 +93,9 @@ pub fn setup_device_manager(ctx: &BuildContext) -> Result<()> {
 /// This is necessary because glibc's ldd can't analyze musl binaries,
 /// so we can't detect library dependencies automatically. We copy ALL
 /// shared libraries from the source rootfs to ensure binaries work.
-pub fn copy_all_libraries(ctx: &BuildContext) -> Result<()> {
+pub fn copy_all_libraries(ctx: &BuildContext, lib_dirs: &[&str]) -> Result<()> {
     let source = &ctx.source;
     let staging = &ctx.staging;
-
-    // Library directories to copy
-    let lib_dirs = ["lib", "usr/lib"];
 
     let mut copied = 0;
     for lib_dir in lib_dirs {

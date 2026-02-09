@@ -12,7 +12,14 @@ use super::context::BuildContext;
 ///
 /// Busybox provides many utilities through a single binary.
 /// Each utility is accessed via a symlink to busybox.
-pub fn create_applet_symlinks(ctx: &BuildContext) -> Result<()> {
+///
+/// The caller passes `sbin_applets` (which go in /usr/sbin) and
+/// `common_applets` (fallback if `busybox --list` fails).
+pub fn create_applet_symlinks(
+    ctx: &BuildContext,
+    sbin_applets: &[&str],
+    common_applets: &[&str],
+) -> Result<()> {
     let staging = &ctx.staging;
 
     // Find busybox in staging
@@ -31,7 +38,7 @@ pub fn create_applet_symlinks(ctx: &BuildContext) -> Result<()> {
     }
 
     // Get list of applets from busybox
-    let applets = get_busybox_applets(&busybox_path)?;
+    let applets = get_busybox_applets(&busybox_path, common_applets)?;
 
     // Create symlinks
     let bin_dir = staging.join("usr/bin");
@@ -41,7 +48,7 @@ pub fn create_applet_symlinks(ctx: &BuildContext) -> Result<()> {
 
     for applet in &applets {
         // Determine if this is a sbin command
-        let (dir, target) = if is_sbin_applet(applet) {
+        let (dir, target) = if sbin_applets.contains(&applet.as_str()) {
             (&sbin_dir, "/usr/bin/busybox")
         } else {
             (&bin_dir, "/usr/bin/busybox")
@@ -72,7 +79,10 @@ pub fn create_applet_symlinks(ctx: &BuildContext) -> Result<()> {
 }
 
 /// Get list of busybox applets.
-fn get_busybox_applets(busybox_path: &std::path::Path) -> Result<Vec<String>> {
+fn get_busybox_applets(
+    busybox_path: &std::path::Path,
+    common_applets: &[&str],
+) -> Result<Vec<String>> {
     // Try running busybox --list
     let output = Command::new(busybox_path)
         .arg("--list")
@@ -89,236 +99,5 @@ fn get_busybox_applets(busybox_path: &std::path::Path) -> Result<Vec<String>> {
     }
 
     // Fallback: use hardcoded list of common applets
-    Ok(COMMON_APPLETS.iter().map(|s| s.to_string()).collect())
+    Ok(common_applets.iter().map(|s| s.to_string()).collect())
 }
-
-/// Check if an applet should go in /sbin.
-fn is_sbin_applet(applet: &str) -> bool {
-    SBIN_APPLETS.contains(&applet)
-}
-
-/// Applets that belong in /sbin.
-const SBIN_APPLETS: &[&str] = &[
-    "acpid",
-    "adjtimex",
-    "blkid",
-    "blockdev",
-    "bootchartd",
-    "depmod",
-    "devmem",
-    "fdisk",
-    "findfs",
-    "fsck",
-    "fstrim",
-    "getty",
-    "halt",
-    "hdparm",
-    "hwclock",
-    "ifconfig",
-    "ifdown",
-    "ifenslave",
-    "ifup",
-    "init",
-    "insmod",
-    "ip",
-    "ipaddr",
-    "iplink",
-    "ipneigh",
-    "iproute",
-    "iprule",
-    "iptunnel",
-    "klogd",
-    "loadfont",
-    "loadkmap",
-    "logread",
-    "losetup",
-    "lsmod",
-    "makedevs",
-    "mdev",
-    "mkdosfs",
-    "mke2fs",
-    "mkfs.ext2",
-    "mkfs.fat",
-    "mkfs.minix",
-    "mkfs.vfat",
-    "mkswap",
-    "modinfo",
-    "modprobe",
-    "nameif",
-    "nologin",
-    "pivot_root",
-    "poweroff",
-    "reboot",
-    "rmmod",
-    "route",
-    "run-init",
-    "setconsole",
-    "slattach",
-    "start-stop-daemon",
-    "sulogin",
-    "swapoff",
-    "swapon",
-    "switch_root",
-    "sysctl",
-    "syslogd",
-    "tunctl",
-    "udhcpc",
-    "vconfig",
-    "watchdog",
-    "zcip",
-];
-
-/// Common busybox applets (fallback if --list fails).
-const COMMON_APPLETS: &[&str] = &[
-    // Core utilities
-    "ash",
-    "sh",
-    "cat",
-    "chgrp",
-    "chmod",
-    "chown",
-    "cp",
-    "date",
-    "dd",
-    "df",
-    "dmesg",
-    "echo",
-    "false",
-    "hostname",
-    "kill",
-    "ln",
-    "login",
-    "ls",
-    "mkdir",
-    "mknod",
-    "mount",
-    "mv",
-    "pidof",
-    "ps",
-    "pwd",
-    "rm",
-    "rmdir",
-    "sed",
-    "sleep",
-    "stat",
-    "stty",
-    "su",
-    "sync",
-    "true",
-    "umount",
-    "uname",
-    // Extended utilities
-    "awk",
-    "base64",
-    "basename",
-    "bunzip2",
-    "bzcat",
-    "bzip2",
-    "cal",
-    "chroot",
-    "clear",
-    "cmp",
-    "comm",
-    "cut",
-    "diff",
-    "dirname",
-    "du",
-    "env",
-    "expr",
-    "find",
-    "fold",
-    "free",
-    "grep",
-    "gzip",
-    "head",
-    "hexdump",
-    "id",
-    "install",
-    "killall",
-    "less",
-    "logger",
-    "md5sum",
-    "mkfifo",
-    "mktemp",
-    "more",
-    "nc",
-    "nohup",
-    "od",
-    "patch",
-    "pgrep",
-    "ping",
-    "ping6",
-    "pkill",
-    "printf",
-    "readlink",
-    "realpath",
-    "renice",
-    "rev",
-    "seq",
-    "sha1sum",
-    "sha256sum",
-    "sha512sum",
-    "sort",
-    "split",
-    "strings",
-    "tail",
-    "tar",
-    "tee",
-    "test",
-    "time",
-    "timeout",
-    "touch",
-    "tr",
-    "traceroute",
-    "tty",
-    "uniq",
-    "unlink",
-    "unxz",
-    "unzip",
-    "uptime",
-    "vi",
-    "watch",
-    "wc",
-    "wget",
-    "which",
-    "whoami",
-    "xargs",
-    "xz",
-    "yes",
-    "zcat",
-    // Init and system
-    "init",
-    "halt",
-    "poweroff",
-    "reboot",
-    // Networking
-    "ifconfig",
-    "ip",
-    "route",
-    "udhcpc",
-    "ping",
-    // sbin utilities
-    "blkid",
-    "fdisk",
-    "fsck",
-    "getty",
-    "hwclock",
-    "insmod",
-    "klogd",
-    "loadkmap",
-    "losetup",
-    "lsmod",
-    "mdev",
-    "mkfs.ext2",
-    "mkfs.vfat",
-    "mkswap",
-    "modinfo",
-    "modprobe",
-    "pivot_root",
-    "rmmod",
-    "swapoff",
-    "swapon",
-    "switch_root",
-    "sysctl",
-    "syslogd",
-];

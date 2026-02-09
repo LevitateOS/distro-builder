@@ -12,7 +12,12 @@ use super::context::BuildContext;
 /// # Arguments
 /// * `ctx` - Build context
 /// * `host_comment` - Comment for the key (e.g., "root@acornos" or "root@iuppiter")
-pub fn setup_ssh(ctx: &BuildContext, host_comment: &str) -> Result<()> {
+/// * `sshd_settings` - Key/value pairs to set in sshd_config
+pub fn setup_ssh(
+    ctx: &BuildContext,
+    host_comment: &str,
+    sshd_settings: &[(&str, &str)],
+) -> Result<()> {
     let staging = &ctx.staging;
     let ssh_dir = staging.join("etc/ssh");
 
@@ -63,7 +68,7 @@ pub fn setup_ssh(ctx: &BuildContext, host_comment: &str) -> Result<()> {
     }
 
     // Configure sshd_config for live ISO (allow root login with password)
-    configure_sshd(&ssh_dir)?;
+    configure_sshd(&ssh_dir, sshd_settings)?;
 
     Ok(())
 }
@@ -72,20 +77,14 @@ pub fn setup_ssh(ctx: &BuildContext, host_comment: &str) -> Result<()> {
 ///
 /// For the live ISO, we allow root login with password authentication
 /// to make it easy for users to SSH in during testing.
-fn configure_sshd(ssh_dir: &std::path::Path) -> Result<()> {
+fn configure_sshd(ssh_dir: &std::path::Path, sshd_settings: &[(&str, &str)]) -> Result<()> {
     let sshd_config_path = ssh_dir.join("sshd_config");
 
     // Read existing configuration
     let mut config = fs::read_to_string(&sshd_config_path).unwrap_or_else(|_| String::new());
 
-    // Ensure critical settings are present and uncommented
-    let critical_settings = vec![
-        ("PermitRootLogin", "yes"),        // Allow root login for live ISO
-        ("PasswordAuthentication", "yes"), // Allow password auth
-        ("PubkeyAuthentication", "yes"),   // Also allow key auth
-    ];
-
-    for (setting, value) in critical_settings {
+    // Ensure all settings from distro-spec are present and uncommented
+    for (setting, value) in sshd_settings {
         // Check if the setting is active (uncommented) with the correct value.
         // We need to check line-by-line to avoid matching commented-out lines
         // (e.g., "#PermitRootLogin yes" contains "PermitRootLogin yes" as substring).

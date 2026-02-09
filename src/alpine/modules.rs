@@ -9,21 +9,6 @@ use std::path::Path;
 use super::context::BuildContext;
 use crate::process::Cmd;
 
-/// Module metadata files needed by modprobe.
-const MODULE_METADATA_FILES: &[&str] = &[
-    "modules.dep",
-    "modules.dep.bin",
-    "modules.alias",
-    "modules.alias.bin",
-    "modules.softdep",
-    "modules.symbols",
-    "modules.symbols.bin",
-    "modules.builtin",
-    "modules.builtin.bin",
-    "modules.builtin.modinfo",
-    "modules.order",
-];
-
 /// Copy kernel modules to the final staging directory.
 ///
 /// Modules are already installed to output/staging/lib/modules/ by the kernel build.
@@ -32,7 +17,12 @@ const MODULE_METADATA_FILES: &[&str] = &[
 /// # Arguments
 /// * `ctx` - Build context
 /// * `build_cmd_hint` - Command hint for error messages (e.g., "acornos build kernel")
-pub fn copy_modules(ctx: &BuildContext, build_cmd_hint: &str) -> Result<()> {
+/// * `metadata_files` - List of module metadata files to copy (e.g., modules.dep, modules.alias)
+pub fn copy_modules(
+    ctx: &BuildContext,
+    build_cmd_hint: &str,
+    metadata_files: &[&str],
+) -> Result<()> {
     println!("Setting up kernel modules...");
 
     // Modules are installed to output/staging/lib/modules/ during kernel build
@@ -59,7 +49,7 @@ pub fn copy_modules(ctx: &BuildContext, build_cmd_hint: &str) -> Result<()> {
 
     // Copy module metadata files
     println!("  Copying module metadata for modprobe...");
-    for metadata_file in MODULE_METADATA_FILES {
+    for metadata_file in metadata_files {
         let src = src_modules.join(metadata_file);
         if src.exists() {
             fs::copy(&src, dst_modules.join(metadata_file))?;

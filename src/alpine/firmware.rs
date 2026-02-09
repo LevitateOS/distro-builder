@@ -8,50 +8,16 @@ use std::path::Path;
 
 use super::context::BuildContext;
 
-/// WiFi firmware directories to copy.
+/// Copy specific firmware directories from source to staging.
 ///
-/// These cover the most common WiFi chipsets:
-/// - Intel: iwlwifi (most common on laptops)
-/// - Realtek: rtlwifi, rtw88, rtw89
-/// - Atheros: ath9k, ath10k, ath11k
-/// - MediaTek: mediatek (mt76xx)
-/// - Broadcom: brcm
-const WIFI_FIRMWARE_DIRS: &[&str] = &[
-    // Intel
-    "iwlwifi",
-    // Realtek
-    "rtlwifi",
-    "rtl_bt",
-    "rtl_nic",
-    "rtw88",
-    "rtw89",
-    // Atheros
-    "ath9k_htc",
-    "ath10k",
-    "ath11k",
-    // MediaTek
-    "mediatek",
-    // Broadcom
-    "brcm",
-    // Marvell
-    "mrvl",
-    // Ralink
-    "rt2870.bin",
-    "rt3070.bin",
-    "rt3290.bin",
-];
-
-/// Copy WiFi firmware from source to staging.
-///
-/// This copies only the WiFi firmware needed for most laptops.
-/// For a daily driver, this is essential - many laptops have no
-/// Ethernet port and depend entirely on WiFi.
-pub fn copy_wifi_firmware(ctx: &BuildContext) -> Result<()> {
+/// The caller passes which firmware directories to copy (e.g., WiFi chipset dirs).
+/// This keeps distro-builder independent of any particular firmware list.
+pub fn copy_firmware_dirs(ctx: &BuildContext, dirs: &[&str]) -> Result<()> {
     let fw_src = ctx.source.join("lib/firmware");
     let fw_dst = ctx.staging.join("lib/firmware");
 
     if !fw_src.exists() {
-        println!("  Warning: firmware source not found, skipping WiFi firmware");
+        println!("  Warning: firmware source not found, skipping firmware dirs");
         return Ok(());
     }
 
@@ -60,7 +26,7 @@ pub fn copy_wifi_firmware(ctx: &BuildContext) -> Result<()> {
     let mut copied_dirs = 0;
     let mut total_size: u64 = 0;
 
-    for dir_name in WIFI_FIRMWARE_DIRS {
+    for dir_name in dirs {
         let src = fw_src.join(dir_name);
         if src.exists() {
             let dst = fw_dst.join(dir_name);
@@ -73,7 +39,7 @@ pub fn copy_wifi_firmware(ctx: &BuildContext) -> Result<()> {
     }
 
     println!(
-        "  Copied {} WiFi firmware directories ({:.1} MB)",
+        "  Copied {} firmware directories ({:.1} MB)",
         copied_dirs,
         total_size as f64 / 1024.0 / 1024.0
     );

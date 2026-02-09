@@ -21,8 +21,10 @@
 //! users::ensure_user(source, staging, "myuser", 1000, 1000, "/home/myuser", "/bin/bash")?;
 //! ```
 
+pub mod binaries;
 pub mod directories;
 pub mod files;
+pub mod openrc;
 pub mod users;
 
 use std::path::Path;

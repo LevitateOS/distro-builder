@@ -57,6 +57,7 @@
 
 pub mod artifact;
 pub mod build;
+pub mod cache;
 pub mod component;
 pub mod executor;
 pub mod preflight;
@@ -65,7 +66,7 @@ pub mod process;
 pub use build::context::{BuildContext, DistroConfig, InitSystem};
 pub use build::kernel::KernelInstallConfig;
 pub use component::{Installable, Op, Phase};
-pub use executor::{directories, files, users};
+pub use executor::{binaries, directories, files, openrc, users};
 
 // Re-export commonly used artifact utilities
 pub use artifact::cpio::build_cpio;

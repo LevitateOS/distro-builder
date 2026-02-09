@@ -55,6 +55,7 @@
 //! but not all functionality is extracted from leviso yet. Full extraction
 //! requires testing with both LevitateOS and AcornOS builds.
 
+pub mod alpine;
 pub mod artifact;
 pub mod build;
 pub mod cache;

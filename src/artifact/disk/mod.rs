@@ -13,8 +13,8 @@ pub mod partitions;
 
 pub use helpers::DiskUuids;
 
-use anyhow::{Context, Result};
 use crate::process::Cmd;
+use anyhow::{Context, Result};
 use std::fs;
 use std::path::{Path, PathBuf};
 

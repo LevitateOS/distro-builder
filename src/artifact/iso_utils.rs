@@ -168,7 +168,7 @@ pub fn mcopy_to_fat(fat_image: &Path, src: &Path, dst: &str) -> Result<()> {
         .args(["-i", &img_str])
         .arg_path(src)
         .arg(dst)
-        .error_msg(&format!("mcopy failed to copy {}", src.display()))
+        .error_msg(format!("mcopy failed to copy {}", src.display()))
         .run()?;
 
     Ok(())

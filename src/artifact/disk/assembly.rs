@@ -1,8 +1,8 @@
 //! Disk assembly — GPT creation and partition splicing.
 
 use super::helpers::DiskUuids;
-use anyhow::{bail, Context, Result};
 use crate::process::Cmd;
+use anyhow::{bail, Context, Result};
 use std::fs;
 use std::io::Write;
 use std::path::Path;

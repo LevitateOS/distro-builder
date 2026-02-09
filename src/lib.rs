@@ -69,12 +69,14 @@ pub use executor::{directories, files, users};
 
 // Re-export commonly used artifact utilities
 pub use artifact::cpio::build_cpio;
+pub use artifact::disk::{
+    build_disk_image, build_disk_image_with_uuids, DiskImageConfig, DiskUuids,
+};
 pub use artifact::filesystem::{atomic_move, copy_dir_recursive, create_initramfs_dirs};
 pub use artifact::iso_utils::{
     create_efi_boot_image, create_efi_dirs_in_fat, create_fat16_image, generate_iso_checksum,
     mcopy_to_fat, run_xorriso, setup_iso_structure,
 };
-pub use artifact::disk::{build_disk_image, build_disk_image_with_uuids, DiskImageConfig, DiskUuids};
 pub use artifact::rootfs::{build_erofs_default, create_erofs};
 
 // Re-export process utilities

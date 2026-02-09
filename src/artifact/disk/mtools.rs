@@ -1,7 +1,7 @@
 //! mtools file operations for FAT32 image manipulation.
 
-use anyhow::Result;
 use crate::process::Cmd;
+use anyhow::Result;
 use std::fs;
 use std::path::Path;
 
@@ -23,7 +23,7 @@ pub fn mtools_copy(image: &Path, src: &Path, dest: &str) -> Result<()> {
         .arg_path(image)
         .arg_path(src)
         .arg(format!("::{}", dest))
-        .error_msg(&format!("mcopy failed: {} -> {}", src.display(), dest))
+        .error_msg(format!("mcopy failed: {} -> {}", src.display(), dest))
         .run()?;
     Ok(())
 }

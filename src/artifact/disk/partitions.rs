@@ -2,8 +2,8 @@
 
 use super::helpers::DiskUuids;
 use super::mtools;
-use anyhow::Result;
 use crate::process::Cmd;
+use anyhow::Result;
 use std::fs;
 use std::path::Path;
 
@@ -12,6 +12,7 @@ use std::path::Path;
 /// The caller provides boot entry content, loader config, kernel/initramfs paths,
 /// and the systemd-boot EFI binary path. This function creates a FAT32 image
 /// with the standard EFI directory structure.
+#[allow(clippy::too_many_arguments)]
 pub fn create_efi_partition(
     image_path: &Path,
     efi_size_mb: u64,

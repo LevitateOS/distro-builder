@@ -1,7 +1,7 @@
 //! UUID generation and host tool verification helpers for disk image building.
 
-use anyhow::{bail, Context, Result};
 use crate::process::Cmd;
+use anyhow::{bail, Context, Result};
 use std::path::Path;
 use std::process::Command;
 

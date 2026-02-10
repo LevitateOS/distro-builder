@@ -11,8 +11,8 @@ pub mod helpers;
 pub mod mtools;
 pub mod partitions;
 
-pub use helpers::{generate_disk_uuids, DiskUuids};
 pub use distro_contract::disk::DiskImageConfig;
+pub use helpers::{generate_disk_uuids, DiskUuids};
 
 use crate::process::Cmd;
 use anyhow::{Context, Result};

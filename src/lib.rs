@@ -82,6 +82,7 @@ pub use artifact::iso_utils::{
     create_efi_boot_image, create_efi_dirs_in_fat, create_fat16_image, generate_iso_checksum,
     mcopy_to_fat, run_xorriso, setup_iso_structure,
 };
+pub use artifact::live_overlay::{create_openrc_live_overlay, InittabVariant, LiveOverlayConfig};
 pub use artifact::rootfs::{build_erofs_default, create_erofs};
 
 // Re-export process utilities

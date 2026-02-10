@@ -22,4 +22,5 @@ pub mod filesystem;
 pub mod initramfs;
 pub mod iso;
 pub mod iso_utils;
+pub mod live_overlay;
 pub mod rootfs;

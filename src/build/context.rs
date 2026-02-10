@@ -46,6 +46,15 @@ pub trait DistroConfig: crate::build::kernel::KernelInstallConfig {
     fn init_system(&self) -> InitSystem;
 }
 
+/// Package manager types supported by distro-builder.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PackageManager {
+    /// RPM (used by LevitateOS / Rocky Linux)
+    Rpm,
+    /// APK (used by AcornOS, IuppiterOS / Alpine Linux)
+    Apk,
+}
+
 /// Init system types supported by distro-builder.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum InitSystem {

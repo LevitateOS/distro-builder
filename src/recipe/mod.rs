@@ -234,11 +234,15 @@ pub fn run_recipe_json_with_defines(
     eprintln!("  Running recipe: {}", recipe_path.display());
     eprintln!("    Build dir: {}", build_dir.display());
 
+    let json_path = build_dir.join(".recipe-output.json");
+
     let mut cmd = Command::new(recipe_bin);
     cmd.arg("install")
         .arg(recipe_path)
         .arg("--build-dir")
-        .arg(build_dir);
+        .arg(build_dir)
+        .arg("--json-output")
+        .arg(&json_path);
 
     if let Some(rp) = recipes_path {
         cmd.arg("--recipes-path").arg(rp);
@@ -248,19 +252,22 @@ pub fn run_recipe_json_with_defines(
         cmd.arg("--define").arg(format!("{}={}", key, value));
     }
 
-    let output = cmd
+    let status = cmd
+        .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
-        .output()
+        .status()
         .with_context(|| format!("Failed to execute recipe: {}", recipe_bin.display()))?;
 
-    if !output.status.success() {
+    if !status.success() {
         bail!(
             "Recipe failed with exit code: {}",
-            output.status.code().unwrap_or(-1)
+            status.code().unwrap_or(-1)
         );
     }
 
-    let ctx: serde_json::Value = serde_json::from_slice(&output.stdout)
+    let json_bytes =
+        std::fs::read(&json_path).with_context(|| "Failed to read recipe JSON output")?;
+    let ctx: serde_json::Value = serde_json::from_slice(&json_bytes)
         .with_context(|| "Failed to parse recipe JSON output")?;
 
     Ok(ctx)

@@ -33,7 +33,9 @@ pub use distro_contract::kernel::{KernelBuildGuard, KernelGuard, KernelInstallCo
 /// and extracts to `download_dir/linux-{version}/`.
 ///
 /// Returns the path to the extracted kernel source directory.
-#[deprecated(note = "Use distro_builder::recipe::linux::linux() instead — kernel builds should go through the recipe system")]
+#[deprecated(
+    note = "Use distro_builder::recipe::linux::linux() instead — kernel builds should go through the recipe system"
+)]
 pub fn download_kernel_tarball(source: &KernelSource, download_dir: &Path) -> Result<PathBuf> {
     fs::create_dir_all(download_dir)?;
 
@@ -42,7 +44,10 @@ pub fn download_kernel_tarball(source: &KernelSource, download_dir: &Path) -> Re
 
     // If already extracted, return immediately
     if extract_dir.join("Makefile").exists() {
-        println!("  [SKIP] Kernel source already extracted at {}", extract_dir.display());
+        println!(
+            "  [SKIP] Kernel source already extracted at {}",
+            extract_dir.display()
+        );
         return Ok(extract_dir);
     }
 
@@ -62,10 +67,16 @@ pub fn download_kernel_tarball(source: &KernelSource, download_dir: &Path) -> Re
             .run_interactive()?;
 
         if !tarball_path.exists() {
-            bail!("Download appeared to succeed but tarball not found at {}", tarball_path.display());
+            bail!(
+                "Download appeared to succeed but tarball not found at {}",
+                tarball_path.display()
+            );
         }
     } else {
-        println!("  [SKIP] Tarball already cached at {}", tarball_path.display());
+        println!(
+            "  [SKIP] Tarball already cached at {}",
+            tarball_path.display()
+        );
     }
 
     // Verify SHA256 — always required, no placeholder bypass
@@ -83,7 +94,9 @@ pub fn download_kernel_tarball(source: &KernelSource, download_dir: &Path) -> Re
              Actual:   {}\n\n\
              The corrupted tarball has been removed. Re-run to download again.\n\
              If this persists, update the hash in distro-spec/src/shared/kernel.rs",
-            source.version, source.sha256, actual_hash
+            source.version,
+            source.sha256,
+            actual_hash
         );
     }
     println!("  SHA256 OK: {}", &actual_hash[..16]);
@@ -105,7 +118,11 @@ pub fn download_kernel_tarball(source: &KernelSource, download_dir: &Path) -> Re
         );
     }
 
-    println!("  Kernel {} source ready at {}", source.version, extract_dir.display());
+    println!(
+        "  Kernel {} source ready at {}",
+        source.version,
+        extract_dir.display()
+    );
     Ok(extract_dir)
 }
 
@@ -113,7 +130,10 @@ pub fn download_kernel_tarball(source: &KernelSource, download_dir: &Path) -> Re
 ///
 /// Checks if the source is already extracted in `download_dir`, downloads if not.
 /// This is the primary entry point for getting kernel source from a tarball.
-#[deprecated(note = "Use distro_builder::recipe::linux::linux() instead — kernel builds should go through the recipe system")]
+#[deprecated(
+    note = "Use distro_builder::recipe::linux::linux() instead — kernel builds should go through the recipe system"
+)]
+#[allow(deprecated)]
 pub fn acquire_kernel_source(source: &KernelSource, download_dir: &Path) -> Result<PathBuf> {
     let extract_dir = download_dir.join(source.source_dir_name());
 
@@ -135,7 +155,10 @@ pub fn acquire_kernel_source(source: &KernelSource, download_dir: &Path) -> Resu
 ///
 /// # Returns
 /// The kernel version string (e.g., "6.12.0-levitate")
-#[deprecated(note = "Use distro_builder::recipe::linux::linux() instead — kernel builds should go through the recipe system")]
+#[deprecated(
+    note = "Use distro_builder::recipe::linux::linux() instead — kernel builds should go through the recipe system"
+)]
+#[allow(deprecated)]
 pub fn build_kernel(kernel_source: &Path, output_dir: &Path, kconfig: &str) -> Result<String> {
     println!("Building kernel from {}...", kernel_source.display());
 
@@ -243,7 +266,9 @@ pub fn build_kernel(kernel_source: &Path, output_dir: &Path, kconfig: &str) -> R
 ///
 /// Merges custom kconfig options into an existing .config file,
 /// replacing any existing values for the same keys.
-#[deprecated(note = "Use distro_builder::recipe::linux::linux() instead — kernel builds should go through the recipe system")]
+#[deprecated(
+    note = "Use distro_builder::recipe::linux::linux() instead — kernel builds should go through the recipe system"
+)]
 pub fn apply_kernel_config(config_path: &Path, kconfig: &str) -> Result<()> {
     // FAIL FAST: If config file exists but is unreadable, that's a real error
     // Don't silently treat corrupted/unreadable config as empty
@@ -330,7 +355,10 @@ pub fn get_kernel_version(build_dir: &Path) -> Result<String> {
 ///
 /// # Returns
 /// The kernel version string
-#[deprecated(note = "Use distro_builder::recipe::linux::linux() instead — kernel builds should go through the recipe system")]
+#[deprecated(
+    note = "Use distro_builder::recipe::linux::linux() instead — kernel builds should go through the recipe system"
+)]
+#[allow(deprecated)]
 pub fn build_kernel_from_kconfig(
     kernel_source: &Path,
     output_dir: &Path,
@@ -371,7 +399,9 @@ pub fn build_kernel_from_kconfig(
 ///
 /// # Returns
 /// The kernel version string
-#[deprecated(note = "Use distro_builder::recipe::linux::linux() instead — kernel builds should go through the recipe system")]
+#[deprecated(
+    note = "Use distro_builder::recipe::linux::linux() instead — kernel builds should go through the recipe system"
+)]
 pub fn install_kernel(
     kernel_source: &Path,
     build_output: &Path,

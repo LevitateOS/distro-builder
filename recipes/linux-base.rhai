@@ -13,6 +13,8 @@
 //
 // Requires --define: KERNEL_VERSION, KERNEL_SHA256, KERNEL_LOCALVERSION
 
+let build_deps = ["linux-deps"];
+
 let major = KERNEL_VERSION.split(".")[0];
 let ctx = #{
     description: "Linux kernel (" + KERNEL_VERSION + ")",

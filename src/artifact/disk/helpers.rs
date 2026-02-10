@@ -5,25 +5,15 @@ use anyhow::{bail, Context, Result};
 use std::path::Path;
 use std::process::Command;
 
-/// Generated UUIDs for the disk image.
-pub struct DiskUuids {
-    /// Filesystem UUID for root partition (ext4)
-    pub root_fs_uuid: String,
-    /// Filesystem UUID for EFI partition (vfat serial)
-    pub efi_fs_uuid: String,
-    /// GPT partition UUID for root partition (used in boot entry)
-    pub root_part_uuid: String,
-}
+pub use distro_contract::disk::DiskUuids;
 
-impl DiskUuids {
-    /// Generate new random UUIDs.
-    pub fn generate() -> Result<Self> {
-        Ok(Self {
-            root_fs_uuid: generate_uuid()?,
-            efi_fs_uuid: generate_vfat_serial()?,
-            root_part_uuid: generate_uuid()?,
-        })
-    }
+/// Generate new random UUIDs for a disk image.
+pub fn generate_disk_uuids() -> Result<DiskUuids> {
+    Ok(DiskUuids {
+        root_fs_uuid: generate_uuid()?,
+        efi_fs_uuid: generate_vfat_serial()?,
+        root_part_uuid: generate_uuid()?,
+    })
 }
 
 /// Base host tools required for disk image building (without qemu-img).

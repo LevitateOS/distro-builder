@@ -67,7 +67,7 @@ pub mod qemu;
 pub mod recipe;
 
 pub use build::context::{BuildContext, DistroConfig, InitSystem, PackageManager};
-pub use build::kernel::KernelInstallConfig;
+pub use build::kernel::{KernelBuildGuard, KernelGuard, KernelInstallConfig};
 pub use build::licenses::LicenseTracker;
 pub use component::{Installable, Op, Phase};
 pub use executor::{binaries, directories, files, openrc, users};
@@ -75,7 +75,7 @@ pub use executor::{binaries, directories, files, openrc, users};
 // Re-export commonly used artifact utilities
 pub use artifact::cpio::build_cpio;
 pub use artifact::disk::{
-    build_disk_image, build_disk_image_with_uuids, DiskImageConfig, DiskUuids,
+    build_disk_image, build_disk_image_with_uuids, generate_disk_uuids, DiskImageConfig, DiskUuids,
 };
 pub use artifact::filesystem::{atomic_move, copy_dir_recursive, create_initramfs_dirs};
 pub use artifact::iso_utils::{

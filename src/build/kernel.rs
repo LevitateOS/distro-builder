@@ -19,20 +19,111 @@
 use anyhow::{bail, Context, Result};
 use sha2::{Digest, Sha256};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::process::Cmd;
+use distro_spec::shared::KernelSource;
 
-/// Configuration for kernel installation.
+// Re-export contracts from distro-contract
+pub use distro_contract::kernel::{KernelBuildGuard, KernelGuard, KernelInstallConfig};
+
+/// Download and extract a kernel tarball from cdn.kernel.org.
 ///
-/// Implemented by distro-specific configs to customize
-/// where and how the kernel is installed.
-pub trait KernelInstallConfig {
-    /// Path where modules are installed (e.g., "/usr/lib/modules" or "/lib/modules").
-    fn module_install_path(&self) -> &str;
+/// Downloads to `download_dir/linux-{version}.tar.xz`, verifies SHA256,
+/// and extracts to `download_dir/linux-{version}/`.
+///
+/// Returns the path to the extracted kernel source directory.
+#[deprecated(note = "Use distro_builder::recipe::linux::linux() instead — kernel builds should go through the recipe system")]
+pub fn download_kernel_tarball(source: &KernelSource, download_dir: &Path) -> Result<PathBuf> {
+    fs::create_dir_all(download_dir)?;
 
-    /// Kernel filename in /boot (e.g., "vmlinuz").
-    fn kernel_filename(&self) -> &str;
+    let tarball_path = download_dir.join(source.tarball_filename());
+    let extract_dir = download_dir.join(source.source_dir_name());
+
+    // If already extracted, return immediately
+    if extract_dir.join("Makefile").exists() {
+        println!("  [SKIP] Kernel source already extracted at {}", extract_dir.display());
+        return Ok(extract_dir);
+    }
+
+    // Download tarball if not cached
+    if !tarball_path.exists() {
+        let url = source.tarball_url();
+        println!("  Downloading kernel {} ({} bytes)...", source.version, url);
+        // -f: fail on HTTP errors, -S: show errors, -L: follow redirects
+        // --retry 3: retry on transient failures
+        // -C -: resume partial downloads
+        // --progress-bar: show progress
+        Cmd::new("curl")
+            .args(["-fSL", "--retry", "3", "-C", "-", "--progress-bar", "-o"])
+            .arg(tarball_path.to_str().unwrap())
+            .arg(&url)
+            .error_msg("Failed to download kernel tarball from cdn.kernel.org")
+            .run_interactive()?;
+
+        if !tarball_path.exists() {
+            bail!("Download appeared to succeed but tarball not found at {}", tarball_path.display());
+        }
+    } else {
+        println!("  [SKIP] Tarball already cached at {}", tarball_path.display());
+    }
+
+    // Verify SHA256 — always required, no placeholder bypass
+    println!("  Verifying SHA256...");
+    let tarball_bytes = fs::read(&tarball_path)
+        .with_context(|| format!("Failed to read tarball at {}", tarball_path.display()))?;
+    let mut hasher = Sha256::new();
+    hasher.update(&tarball_bytes);
+    let actual_hash = format!("{:x}", hasher.finalize());
+    if actual_hash != source.sha256 {
+        let _ = fs::remove_file(&tarball_path);
+        bail!(
+            "SHA256 mismatch for linux-{}.tar.xz!\n\
+             Expected: {}\n\
+             Actual:   {}\n\n\
+             The corrupted tarball has been removed. Re-run to download again.\n\
+             If this persists, update the hash in distro-spec/src/shared/kernel.rs",
+            source.version, source.sha256, actual_hash
+        );
+    }
+    println!("  SHA256 OK: {}", &actual_hash[..16]);
+
+    // Extract tarball
+    println!("  Extracting kernel source (~1.4 GB uncompressed)...");
+    Cmd::new("tar")
+        .args(["xf"])
+        .arg(tarball_path.to_str().unwrap())
+        .args(["-C", download_dir.to_str().unwrap()])
+        .error_msg("Failed to extract kernel tarball")
+        .run()?;
+
+    if !extract_dir.join("Makefile").exists() {
+        bail!(
+            "Kernel extraction failed: expected Makefile at {}\n\
+             The tarball may have a different directory structure than expected.",
+            extract_dir.display()
+        );
+    }
+
+    println!("  Kernel {} source ready at {}", source.version, extract_dir.display());
+    Ok(extract_dir)
+}
+
+/// Acquire kernel source, using cache if available.
+///
+/// Checks if the source is already extracted in `download_dir`, downloads if not.
+/// This is the primary entry point for getting kernel source from a tarball.
+#[deprecated(note = "Use distro_builder::recipe::linux::linux() instead — kernel builds should go through the recipe system")]
+pub fn acquire_kernel_source(source: &KernelSource, download_dir: &Path) -> Result<PathBuf> {
+    let extract_dir = download_dir.join(source.source_dir_name());
+
+    if extract_dir.join("Makefile").exists() {
+        println!("Kernel source {} already available.", source.version);
+        return Ok(extract_dir);
+    }
+
+    println!("Acquiring kernel source {}...", source.version);
+    download_kernel_tarball(source, download_dir)
 }
 
 /// Build the kernel from source.
@@ -44,12 +135,13 @@ pub trait KernelInstallConfig {
 ///
 /// # Returns
 /// The kernel version string (e.g., "6.12.0-levitate")
+#[deprecated(note = "Use distro_builder::recipe::linux::linux() instead — kernel builds should go through the recipe system")]
 pub fn build_kernel(kernel_source: &Path, output_dir: &Path, kconfig: &str) -> Result<String> {
     println!("Building kernel from {}...", kernel_source.display());
 
     if !kernel_source.exists() {
         bail!(
-            "Kernel source not found at {}\nRun: git submodule update --init linux",
+            "Kernel source not found at {}\nUse acquire_kernel_source() to download from cdn.kernel.org",
             kernel_source.display()
         );
     }
@@ -151,6 +243,7 @@ pub fn build_kernel(kernel_source: &Path, output_dir: &Path, kconfig: &str) -> R
 ///
 /// Merges custom kconfig options into an existing .config file,
 /// replacing any existing values for the same keys.
+#[deprecated(note = "Use distro_builder::recipe::linux::linux() instead — kernel builds should go through the recipe system")]
 pub fn apply_kernel_config(config_path: &Path, kconfig: &str) -> Result<()> {
     // FAIL FAST: If config file exists but is unreadable, that's a real error
     // Don't silently treat corrupted/unreadable config as empty
@@ -223,6 +316,51 @@ pub fn get_kernel_version(build_dir: &Path) -> Result<String> {
     bail!("Could not determine kernel version")
 }
 
+/// Build kernel from a project's kconfig file.
+///
+/// This is the standard entry point for distro builders. It:
+/// 1. Cleans up any stale kernel-build symlink (from previous theft mode)
+/// 2. Reads the kconfig file from `base_dir/kconfig`
+/// 3. Delegates to `build_kernel()`
+///
+/// # Arguments
+/// * `kernel_source` - Path to kernel source tree
+/// * `output_dir` - Directory for build artifacts
+/// * `base_dir` - Project root (must contain a `kconfig` file)
+///
+/// # Returns
+/// The kernel version string
+#[deprecated(note = "Use distro_builder::recipe::linux::linux() instead — kernel builds should go through the recipe system")]
+pub fn build_kernel_from_kconfig(
+    kernel_source: &Path,
+    output_dir: &Path,
+    base_dir: &Path,
+) -> Result<String> {
+    // Clean up any existing kernel-build symlink (from previous theft)
+    let our_kernel_build = output_dir.join("kernel-build");
+    if our_kernel_build.is_symlink() {
+        fs::remove_file(&our_kernel_build).with_context(|| {
+            format!(
+                "Failed to remove stolen kernel symlink at {}",
+                our_kernel_build.display()
+            )
+        })?;
+        println!("  Removed stale kernel-build symlink (was stolen from leviso)");
+    }
+
+    let kconfig_path = base_dir.join("kconfig");
+    if !kconfig_path.exists() {
+        bail!(
+            "Kernel config not found at {}\nExpected kconfig file in project root.",
+            kconfig_path.display()
+        );
+    }
+    let kconfig = fs::read_to_string(&kconfig_path)
+        .with_context(|| format!("Failed to read {}", kconfig_path.display()))?;
+
+    build_kernel(kernel_source, output_dir, &kconfig)
+}
+
 /// Install kernel and modules to staging directory.
 ///
 /// # Arguments
@@ -233,6 +371,7 @@ pub fn get_kernel_version(build_dir: &Path) -> Result<String> {
 ///
 /// # Returns
 /// The kernel version string
+#[deprecated(note = "Use distro_builder::recipe::linux::linux() instead — kernel builds should go through the recipe system")]
 pub fn install_kernel(
     kernel_source: &Path,
     build_output: &Path,

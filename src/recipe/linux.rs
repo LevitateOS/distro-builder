@@ -1,8 +1,8 @@
 //! Shared Linux kernel recipe wrapper.
 
-use super::{find_recipe, run_recipe_json};
-use crate::process::ensure_exists;
+use super::{find_recipe, run_recipe_json_with_defines};
 use anyhow::Result;
+use distro_spec::shared::KernelSource;
 use std::path::{Path, PathBuf};
 
 /// Paths produced by the linux.rhai recipe after execution.
@@ -27,28 +27,48 @@ impl LinuxPaths {
 ///
 /// # Arguments
 /// * `base_dir` - distro crate root (e.g., `/path/to/AcornOS`)
-pub fn linux(base_dir: &Path) -> Result<LinuxPaths> {
-    let distro_name = super::distro_name(base_dir);
+/// * `kernel_source` - Kernel spec from distro-spec (version, sha256, localversion)
+pub fn linux(base_dir: &Path, kernel_source: &KernelSource) -> Result<LinuxPaths> {
     let monorepo_dir = base_dir
         .parent()
         .map(|p| p.to_path_buf())
         .unwrap_or_else(|| base_dir.to_path_buf());
 
     let downloads_dir = base_dir.join("downloads");
-    let recipe_path = base_dir.join("deps/linux.rhai");
 
-    ensure_exists(&recipe_path, "Linux recipe").map_err(|_| {
-        anyhow::anyhow!(
-            "Linux recipe not found at: {}\n\
-             Expected linux.rhai in {}/deps/",
-            recipe_path.display(),
-            distro_name
-        )
-    })?;
+    // Look for distro-specific recipe first, then shared recipe in distro-builder
+    let distro_recipe = base_dir.join("deps/linux.rhai");
+    let shared_recipe = monorepo_dir.join("distro-builder/recipes/linux.rhai");
+    let recipe_path = if distro_recipe.exists() {
+        distro_recipe
+    } else if shared_recipe.exists() {
+        shared_recipe
+    } else {
+        anyhow::bail!(
+            "Linux recipe not found.\n\
+             Searched:\n  - {}\n  - {}",
+            distro_recipe.display(),
+            shared_recipe.display()
+        );
+    };
+
+    // Inject kernel spec from distro-spec SSOT
+    let defines: Vec<(&str, &str)> = vec![
+        ("KERNEL_VERSION", kernel_source.version),
+        ("KERNEL_SHA256", kernel_source.sha256),
+        ("KERNEL_LOCALVERSION", kernel_source.localversion),
+    ];
 
     // Find and run recipe, parse JSON output
+    let recipes_dir = monorepo_dir.join("distro-builder/recipes");
     let recipe_bin = find_recipe(&monorepo_dir)?;
-    let ctx = run_recipe_json(&recipe_bin.path, &recipe_path, &downloads_dir)?;
+    let ctx = run_recipe_json_with_defines(
+        &recipe_bin.path,
+        &recipe_path,
+        &downloads_dir,
+        &defines,
+        Some(&recipes_dir),
+    )?;
 
     // Extract paths from ctx (recipe sets these)
     let output_dir = base_dir.join("output");
@@ -57,13 +77,8 @@ pub fn linux(base_dir: &Path) -> Result<LinuxPaths> {
         .as_str()
         .map(PathBuf::from)
         .unwrap_or_else(|| {
-            // Fallback: check submodule first, then downloads
-            let submodule = monorepo_dir.join("linux");
-            if submodule.join("Makefile").exists() {
-                submodule
-            } else {
-                downloads_dir.join("linux")
-            }
+            // Fallback: use SSOT version from distro-spec
+            downloads_dir.join(kernel_source.source_dir_name())
         });
 
     let version = ctx["kernel_version"]
@@ -82,16 +97,17 @@ pub fn linux(base_dir: &Path) -> Result<LinuxPaths> {
 
 /// Check if Linux source is available (without running the full recipe).
 pub fn has_linux_source(base_dir: &Path) -> bool {
-    let monorepo_dir = base_dir.parent().unwrap_or(base_dir);
-
-    // Check submodule
-    if monorepo_dir.join("linux/Makefile").exists() {
-        return true;
-    }
-
-    // Check downloads
-    if base_dir.join("downloads/linux/Makefile").exists() {
-        return true;
+    // Check downloads for any tarball-extracted source (linux-*)
+    let downloads = base_dir.join("downloads");
+    if let Ok(entries) = std::fs::read_dir(&downloads) {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            if let Some(name_str) = name.to_str() {
+                if name_str.starts_with("linux-") && entry.path().join("Makefile").exists() {
+                    return true;
+                }
+            }
+        }
     }
 
     false

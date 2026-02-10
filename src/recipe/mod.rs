@@ -73,7 +73,17 @@ impl RecipeBinary {
 
     /// Run a recipe file with this binary.
     pub fn run(&self, recipe_path: &Path, build_dir: &Path) -> Result<()> {
-        run_recipe(&self.path, recipe_path, build_dir)
+        run_recipe(&self.path, recipe_path, build_dir, None)
+    }
+
+    /// Run a recipe file with this binary, passing a recipes search path.
+    pub fn run_with_recipes_path(
+        &self,
+        recipe_path: &Path,
+        build_dir: &Path,
+        recipes_path: Option<&Path>,
+    ) -> Result<()> {
+        run_recipe(&self.path, recipe_path, build_dir, recipes_path)
     }
 }
 
@@ -210,14 +220,35 @@ pub fn run_recipe_json(
     recipe_path: &Path,
     build_dir: &Path,
 ) -> Result<serde_json::Value> {
+    run_recipe_json_with_defines(recipe_bin, recipe_path, build_dir, &[], None)
+}
+
+/// Run a recipe with user-defined scope constants injected via --define.
+pub fn run_recipe_json_with_defines(
+    recipe_bin: &Path,
+    recipe_path: &Path,
+    build_dir: &Path,
+    defines: &[(&str, &str)],
+    recipes_path: Option<&Path>,
+) -> Result<serde_json::Value> {
     eprintln!("  Running recipe: {}", recipe_path.display());
     eprintln!("    Build dir: {}", build_dir.display());
 
-    let output = Command::new(recipe_bin)
-        .arg("install")
+    let mut cmd = Command::new(recipe_bin);
+    cmd.arg("install")
         .arg(recipe_path)
         .arg("--build-dir")
-        .arg(build_dir)
+        .arg(build_dir);
+
+    if let Some(rp) = recipes_path {
+        cmd.arg("--recipes-path").arg(rp);
+    }
+
+    for (key, value) in defines {
+        cmd.arg("--define").arg(format!("{}={}", key, value));
+    }
+
+    let output = cmd
         .stderr(Stdio::inherit())
         .output()
         .with_context(|| format!("Failed to execute recipe: {}", recipe_bin.display()))?;
@@ -236,8 +267,13 @@ pub fn run_recipe_json(
 }
 
 /// Run a recipe using the recipe binary (legacy, no JSON parsing).
-pub fn run_recipe(recipe_bin: &Path, recipe_path: &Path, build_dir: &Path) -> Result<()> {
-    run_recipe_json(recipe_bin, recipe_path, build_dir)?;
+pub fn run_recipe(
+    recipe_bin: &Path,
+    recipe_path: &Path,
+    build_dir: &Path,
+    recipes_path: Option<&Path>,
+) -> Result<()> {
+    run_recipe_json_with_defines(recipe_bin, recipe_path, build_dir, &[], recipes_path)?;
     Ok(())
 }
 

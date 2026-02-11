@@ -2,7 +2,7 @@
 //!
 //! Creates applet symlinks for busybox.
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use std::fs;
 use std::process::Command;
 
@@ -84,20 +84,22 @@ fn get_busybox_applets(
     common_applets: &[&str],
 ) -> Result<Vec<String>> {
     // Try running busybox --list
-    let output = Command::new(busybox_path)
-        .arg("--list")
-        .output()
-        .context("failed to run busybox --list")?;
-
-    if output.status.success() {
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        return Ok(stdout
-            .lines()
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect());
+    match Command::new(busybox_path).arg("--list").output() {
+        Ok(output) if output.status.success() => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            Ok(stdout
+                .lines()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect())
+        }
+        Ok(_) => {
+            // Command ran but failed - use fallback
+            Ok(common_applets.iter().map(|s| s.to_string()).collect())
+        }
+        Err(_) => {
+            // Command failed to execute (e.g., musl binary on glibc system) - use fallback
+            Ok(common_applets.iter().map(|s| s.to_string()).collect())
+        }
     }
-
-    // Fallback: use hardcoded list of common applets
-    Ok(common_applets.iter().map(|s| s.to_string()).collect())
 }

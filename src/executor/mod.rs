@@ -27,7 +27,19 @@ pub mod files;
 pub mod openrc;
 pub mod users;
 
+use crate::build::context::BuildContext;
 use std::path::Path;
+
+/// Execute a generic operation - BuildContext adapter version.
+///
+/// This is a wrapper for use with types that implement the BuildContext trait.
+/// It delegates to execute_generic_op.
+pub fn execute_generic_op_ctx<C>(ctx: &C, op: &super::Op) -> anyhow::Result<()>
+where
+    C: BuildContext,
+{
+    execute_generic_op(ctx.source(), ctx.staging(), op)
+}
 
 /// Execute a generic operation that doesn't require distro-specific handling.
 ///

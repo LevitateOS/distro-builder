@@ -65,6 +65,7 @@ pub mod preflight;
 pub mod process;
 pub mod qemu;
 pub mod recipe;
+pub mod timing;
 
 pub use build::context::{BuildContext, DistroConfig, InitSystem, PackageManager};
 pub use build::kernel::{KernelBuildGuard, KernelGuard, KernelInstallConfig};

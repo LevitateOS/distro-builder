@@ -11,16 +11,16 @@
 
 let major = KERNEL_VERSION.split(".")[0];
 let ctx = #{
-    description: "Linux kernel (" + KERNEL_VERSION + ")",
-    name: "linux",
-    tarball_url: "https://cdn.kernel.org/pub/linux/kernel/v" + major + ".x/linux-" + KERNEL_VERSION + ".tar.xz",
-    tarball_filename: "linux-" + KERNEL_VERSION + ".tar.xz",
-    source_dir_name: "linux-" + KERNEL_VERSION,
-    kernel_version: KERNEL_VERSION,
-    source_path: "",
-    leviso_kernel_path: "",
     build_dir: "",
-    stolen: false,
+    description: "Linux kernel (6.19)",
+    kernel_version: "6.19",
+    leviso_kernel_path: "/home/vince/LevitateOS/leviso/output/kernel-build",
+    name: "linux",
+    source_dir_name: "linux-6.19",
+    source_path: "/home/vince/LevitateOS/AcornOS/downloads/linux-6.19",
+    stolen: true,
+    tarball_filename: "linux-6.19.tar.xz",
+    tarball_url: "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.19.tar.xz",
 };
 
 // === ACQUIRE (override: adds theft detection) ===

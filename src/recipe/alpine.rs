@@ -1,6 +1,6 @@
 //! Alpine Linux dependency via recipe.
 
-use super::{find_recipe, run_recipe_json};
+use super::find_recipe;
 use crate::process::ensure_exists;
 use anyhow::{bail, Result};
 use std::path::{Path, PathBuf};
@@ -37,6 +37,7 @@ pub fn alpine(base_dir: &Path) -> Result<AlpinePaths> {
 
     let downloads_dir = base_dir.join("downloads");
     let recipe_path = base_dir.join("deps/alpine.rhai");
+    let recipes_path = base_dir.join("deps");
 
     ensure_exists(&recipe_path, "Alpine recipe").map_err(|_| {
         anyhow::anyhow!(
@@ -48,8 +49,15 @@ pub fn alpine(base_dir: &Path) -> Result<AlpinePaths> {
     })?;
 
     // Find and run recipe, parse JSON output
+    // Pass recipes_path so build_deps can find dependency recipes (e.g., 7z-deps.rhai)
     let recipe_bin = find_recipe(&monorepo_dir)?;
-    let ctx = run_recipe_json(&recipe_bin.path, &recipe_path, &downloads_dir)?;
+    let ctx = super::run_recipe_json_with_defines(
+        &recipe_bin.path,
+        &recipe_path,
+        &downloads_dir,
+        &[],
+        Some(&recipes_path),
+    )?;
 
     // Extract paths from ctx (recipe sets these)
     let iso = ctx["iso_path"]

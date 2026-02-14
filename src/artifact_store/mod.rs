@@ -25,6 +25,12 @@ use walkdir::WalkDir;
 /// Default store directory name at repo root.
 pub const DEFAULT_STORE_DIR: &str = ".artifacts";
 
+/// Centralized (non-content-addressed) output directory root within the store.
+///
+/// This directory is intended to replace per-distro `output/` trees (e.g.
+/// `leviso/output/`) when working in the superrepo.
+pub const DEFAULT_OUTPUT_SUBDIR: &str = "out";
+
 /// Artifact encoding format stored as a blob.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -737,6 +743,27 @@ impl ArtifactStore {
             path: lock_path,
         })
     }
+}
+
+/// Centralized output directory for a distro crate directory.
+///
+/// In the superrepo, artifacts are written under:
+/// `<repo>/.artifacts/out/<distro_dir_name>/`
+///
+/// Example:
+/// - `.../LevitateOS/leviso` -> `.../LevitateOS/.artifacts/out/leviso`
+pub fn central_output_dir_for_distro(base_dir: &Path) -> PathBuf {
+    // In the monorepo, distro crates live at `<repo>/<DistroDir>`.
+    // Use the parent as the repo root (standalone support can be added later).
+    let repo_root = base_dir.parent().unwrap_or(base_dir);
+    let distro_name = base_dir
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("distro");
+    repo_root
+        .join(DEFAULT_STORE_DIR)
+        .join(DEFAULT_OUTPUT_SUBDIR)
+        .join(distro_name)
 }
 
 /// Read an input key file (typically `output/.<artifact>-inputs.hash`) as a trimmed string.

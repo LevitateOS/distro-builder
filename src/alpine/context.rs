@@ -37,7 +37,7 @@ impl BuildContext {
     pub fn new(base_dir: &Path, staging: &Path, build_cmd: &str) -> Result<Self> {
         let downloads = base_dir.join("downloads");
         let source = downloads.join("rootfs");
-        let output = base_dir.join("output");
+        let output = crate::artifact_store::central_output_dir_for_distro(base_dir);
 
         if !source.exists() || !source.join("bin").exists() {
             anyhow::bail!(
@@ -61,7 +61,8 @@ impl BuildContext {
     /// This is a convenience method that creates the staging directory
     /// at `output/rootfs`.
     pub fn from_base_dir(base_dir: &Path, build_cmd: &str) -> Result<Self> {
-        let staging = base_dir.join("output").join("rootfs");
+        let output = crate::artifact_store::central_output_dir_for_distro(base_dir);
+        let staging = output.join("rootfs");
         Self::new(base_dir, &staging, build_cmd)
     }
 

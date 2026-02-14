@@ -71,7 +71,7 @@ pub fn linux(base_dir: &Path, kernel_source: &KernelSource) -> Result<LinuxPaths
     )?;
 
     // Extract paths from ctx (recipe sets these)
-    let output_dir = base_dir.join("output");
+    let output_dir = crate::artifact_store::central_output_dir_for_distro(base_dir);
 
     let source = ctx["source_path"]
         .as_str()

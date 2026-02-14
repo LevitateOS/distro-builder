@@ -296,7 +296,8 @@ pub fn install_tools(base_dir: &Path) -> Result<()> {
         .unwrap_or_else(|| base_dir.to_path_buf());
 
     let downloads_dir = base_dir.join("downloads");
-    let staging_bin = base_dir.join("output/staging/usr/bin");
+    let staging_bin =
+        crate::artifact_store::central_output_dir_for_distro(base_dir).join("staging/usr/bin");
 
     // Find recipe binary once
     let recipe_bin = find_recipe(&monorepo_dir)?;

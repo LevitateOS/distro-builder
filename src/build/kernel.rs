@@ -536,9 +536,9 @@ pub fn install_kernel(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
 
     #[test]
+    #[allow(deprecated)]
     fn test_apply_kernel_config_new_options() {
         let temp_dir = tempfile::tempdir().unwrap();
         let config_path = temp_dir.path().join(".config");
@@ -559,6 +559,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn test_apply_kernel_config_comments_ignored() {
         let temp_dir = tempfile::tempdir().unwrap();
         let config_path = temp_dir.path().join(".config");

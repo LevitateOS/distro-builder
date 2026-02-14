@@ -57,6 +57,7 @@
 
 pub mod alpine;
 pub mod artifact;
+pub mod artifact_store;
 pub mod build;
 pub mod cache;
 pub mod component;

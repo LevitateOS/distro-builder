@@ -13,11 +13,15 @@ anyhow = "1.0"
 distro-contract = { path = "../distro-contract" }
 dirs = "5.0"
 distro-spec = { path = "../distro-spec" }
+fs2 = "0.4"
 leviso-elf = { path = "../leviso-elf" }
+serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.10"
+tar = "0.4"
 walkdir = "2"
 which = "5.0"
+zstd = "0.13"
 
 [dev-dependencies]
 tempfile = "3"

@@ -8,6 +8,9 @@ Cargo.lock
 *.swp
 *.swo
 
+# Recipe lockfiles
+*.rhai.lock
+
 # OS
 .DS_Store
 Thumbs.db

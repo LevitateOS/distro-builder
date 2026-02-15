@@ -1,191 +1,91 @@
 //! extends: linux-base.rhai
 //
-// Linux kernel - Alpine-based distros (AcornOS, IuppiterOS)
+// Linux kernel - single SSOT recipe for all distros
 //
-// Extends linux-base.rhai with:
-// - Kernel theft from leviso (DEV ONLY — steals pre-built kernel instead of compiling)
-// - Theft-aware is_acquired/acquire/is_built/build/install phases
+// This recipe intentionally contains the *shared* logic so all distros stay in parity.
+// Differences are injected via --define (from distro-spec):
+// - KERNEL_VERSION, KERNEL_SHA256, KERNEL_LOCALVERSION
+// - MODULE_INSTALL_PATH: "/lib/modules" (Alpine) or "/usr/lib/modules" (UsrMerge)
 //
-// When leviso has already built the kernel, we steal it via symlink.
-// Source tarball is always downloaded (needed for make modules_install even in theft mode).
+// Distro-specific knobs live in distro-spec + each distro's `kconfig`.
 
-let major = KERNEL_VERSION.split(".")[0];
-let ctx = #{
-    build_dir: "",
-    description: "Linux kernel (6.19)",
-    kernel_version: "6.19",
-    leviso_kernel_path: "/home/vince/LevitateOS/leviso/output/kernel-build",
-    name: "linux",
-    source_dir_name: "linux-6.19",
-    source_path: "/home/vince/LevitateOS/AcornOS/downloads/linux-6.19",
-    stolen: true,
-    tarball_filename: "linux-6.19.tar.xz",
-    tarball_url: "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.19.tar.xz",
-};
+/// Apply kconfig: start from defconfig, apply CONFIG_* lines, enforce localversion, then olddefconfig.
+///
+/// This supports both:
+/// - a single <distro>/kconfig file
+/// - optional fragments in <distro>/kconfig.d/*.config (applied after kconfig)
+fn _apply_kconfig(src, build_dir, kconfig) {
+    let config_file = join_path(build_dir, ".config");
+    let hash_file = join_path(build_dir, ".config.kconfig-hash");
 
-// === ACQUIRE (override: adds theft detection) ===
+    // Hash kconfig + fragments so we can avoid re-seeding defconfig on every run.
+    let kconfig_dir = dirname(kconfig);
+    let frag_dir = join_path(kconfig_dir, "kconfig.d");
+    let fragments = if is_dir(frag_dir) { glob_list(join_path(frag_dir, "*.config")) } else { [] };
 
-fn is_acquired(ctx) {
-    let distro_dir = dirname(BUILD_DIR);
-    let monorepo = dirname(distro_dir);
+    let hash_cmd = " (sha256sum " + kconfig + " 2>/dev/null; " +
+        "for f in " + join_path(frag_dir, "*.config") + "; do [ -f \"$f\" ] && sha256sum \"$f\"; done) " +
+        " | sha256sum | cut -d' ' -f1 ";
+    let kconfig_hash = trim(shell_output(hash_cmd));
+    let cached_hash = trim(read_file_or_empty(hash_file));
 
-    // Check for tarball-extracted source (needed for modules_install even in theft mode)
-    let tarball_source = join_path(BUILD_DIR, ctx.source_dir_name);
-    if is_file(join_path(tarball_source, "Makefile")) {
-        ctx.source_path = tarball_source;
+    if cached_hash != kconfig_hash || !is_file(config_file) {
+        log("Generating kernel config...");
+        shell("make -C " + src + " O=" + build_dir + " x86_64_defconfig");
+
+        log("Applying kconfig options...");
+        let apply_one = |cfg| {
+            // Apply CONFIG_* lines only; ignore comments/blank lines.
+            let cmd = "grep -E '^CONFIG_' " + cfg + " | while read line; do " +
+                src + "/scripts/config --file " + config_file + " --set-val $(echo $line | sed 's/=/ /'); " +
+                "done";
+            shell(cmd);
+        };
+
+        apply_one(kconfig);
+        for f in fragments {
+            apply_one(f);
+        }
+
+        // Enforce localversion from distro-spec (single SSOT).
+        // Kconfig may also set CONFIG_LOCALVERSION, but this wins.
+        shell(src + "/scripts/config --file " + config_file + " --set-str CONFIG_LOCALVERSION " + KERNEL_LOCALVERSION);
+
+        log("Resolving config dependencies...");
+        shell("make -C " + src + " O=" + build_dir + " olddefconfig");
+        write_file(hash_file, kconfig_hash);
     } else {
-        throw "linux source not acquired";
+        log("Config unchanged, running olddefconfig...");
+        shell("make -C " + src + " O=" + build_dir + " olddefconfig");
     }
-
-    // Check for leviso's pre-built kernel (theft mode — DEV ONLY)
-    let leviso_kernel = join_path(monorepo, "leviso/output/kernel-build");
-    let leviso_bzimage = join_path(leviso_kernel, "arch/x86/boot/bzImage");
-    if is_file(leviso_bzimage) {
-        ctx.leviso_kernel_path = leviso_kernel;
-        ctx.stolen = true;
-    }
-
-    ctx
 }
 
-fn acquire(ctx) {
-    mkdir(BUILD_DIR);
+/// Install modules to staging, then normalize module dir layout.
+///
+/// The kernel build system always installs under <staging>/lib/modules when using
+/// INSTALL_MOD_PATH. LevitateOS is UsrMerge so we relocate to /usr/lib/modules.
+fn _install_modules(staging, source_path, build_dir) {
+    shell("make -C " + source_path + " O=" + build_dir + " INSTALL_MOD_PATH=" + staging + " modules_install");
 
-    let distro_dir = dirname(BUILD_DIR);
-    let monorepo = dirname(distro_dir);
+    if MODULE_INSTALL_PATH == "/usr/lib/modules" {
+        let lib_modules = join_path(staging, "lib/modules");
+        let usr_lib_modules = join_path(staging, "usr/lib/modules");
 
-    // Primary: download tarball from cdn.kernel.org
-    // (needed even in theft mode for make modules_install)
-    let tarball_path = join_path(BUILD_DIR, ctx.tarball_filename);
-    let tarball_source = join_path(BUILD_DIR, ctx.source_dir_name);
-
-    if !is_file(join_path(tarball_source, "Makefile")) {
-        if !is_file(tarball_path) {
-            log("Downloading kernel " + ctx.kernel_version + " from cdn.kernel.org...");
-            shell("curl -fSL -o " + tarball_path + " " + ctx.tarball_url);
+        if is_dir(lib_modules) {
+            mkdir(usr_lib_modules);
+            log("  UsrMerge: moving modules to usr/lib/modules...");
+            shell("mv " + lib_modules + "/* " + usr_lib_modules + "/ 2>/dev/null || true");
+            shell("rm -rf " + join_path(staging, "lib"));
         }
-
-        log("Verifying SHA256...");
-        verify_sha256(tarball_path, KERNEL_SHA256);
-
-        log("Extracting kernel source...");
-        shell("tar xf " + tarball_path + " -C " + BUILD_DIR);
     }
-
-    if is_file(join_path(tarball_source, "Makefile")) {
-        ctx.source_path = tarball_source;
-    }
-
-    // Check for leviso's pre-built kernel (theft mode — DEV ONLY)
-    let leviso_kernel = join_path(monorepo, "leviso/output/kernel-build");
-    let leviso_bzimage = join_path(leviso_kernel, "arch/x86/boot/bzImage");
-    if is_file(leviso_bzimage) {
-        log("DEV ONLY: Found pre-built kernel from LevitateOS — will steal it!");
-        ctx.leviso_kernel_path = leviso_kernel;
-        ctx.stolen = true;
-        return ctx;
-    }
-
-    if ctx.source_path != "" {
-        log("Kernel source ready at " + tarball_source);
-        return ctx;
-    }
-
-    throw "Failed to acquire linux source from cdn.kernel.org";
 }
 
-// === BUILD (override: adds theft shortcut) ===
-
-fn is_built(ctx) {
-    if ctx.stolen {
-        return ctx;
+/// Remove build/source symlinks after install.
+fn _cleanup_modules(staging, version) {
+    let base = if MODULE_INSTALL_PATH == "/usr/lib/modules" { "usr/lib/modules/" } else { "lib/modules/" };
+    let modules_dir = join_path(staging, base + version);
+    if is_dir(modules_dir) {
+        shell("rm -f " + join_path(modules_dir, "build") + " " + join_path(modules_dir, "source"));
     }
-
-    let distro_dir = dirname(BUILD_DIR);
-    let build_dir = join_path(distro_dir, "output/kernel-build");
-    let bzimage = join_path(build_dir, "arch/x86/boot/bzImage");
-
-    if !is_file(bzimage) {
-        throw "kernel not built";
-    }
-
-    ctx.build_dir = build_dir;
-    ctx
 }
 
-fn build(ctx) {
-    // If stealing from leviso, just symlink
-    if ctx.stolen {
-        log("STEALING KERNEL FROM LEVITATEOS");
-
-        let distro_dir = dirname(BUILD_DIR);
-        let our_build = join_path(distro_dir, "output/kernel-build");
-
-        if exists(our_build) {
-            rm(our_build);
-        }
-
-        mkdir(join_path(distro_dir, "output"));
-        shell("ln -s " + ctx.leviso_kernel_path + " " + our_build);
-        log("Created symlink: output/kernel-build -> " + ctx.leviso_kernel_path);
-
-        ctx.build_dir = our_build;
-        return ctx;
-    }
-
-    // Build kernel from source (delegates to base _apply_kconfig)
-    let distro_dir = dirname(BUILD_DIR);
-    let kconfig = join_path(distro_dir, "kconfig");
-    let build_dir = join_path(distro_dir, "output/kernel-build");
-
-    if !is_file(kconfig) {
-        throw "kconfig not found at " + kconfig;
-    }
-
-    mkdir(build_dir);
-
-    log("Building Linux kernel...");
-    log("  Source: " + ctx.source_path);
-    log("  Config: " + kconfig);
-    log("  Output: " + build_dir);
-
-    _apply_kconfig(ctx.source_path, build_dir, kconfig);
-
-    let jobs = trim(shell_output("nproc"));
-    shell("make -C " + ctx.source_path + " O=" + build_dir + " -j" + jobs);
-
-    ctx.build_dir = build_dir;
-    log("Kernel build complete");
-    ctx
-}
-
-// === INSTALL (override: theft-aware build_dir) ===
-
-fn install(ctx) {
-    let distro_dir = dirname(BUILD_DIR);
-    let staging = join_path(distro_dir, "output/staging");
-    let build_dir = if ctx.stolen { ctx.leviso_kernel_path } else { ctx.build_dir };
-
-    let source_path = ctx.source_path;
-    if source_path == "" {
-        throw "No kernel source path available — cannot install modules";
-    }
-
-    log("Installing kernel to staging...");
-
-    mkdir(join_path(staging, "boot"));
-    mkdir(join_path(staging, "lib/modules"));
-
-    let bzimage = join_path(build_dir, "arch/x86/boot/bzImage");
-    let vmlinuz = join_path(staging, "boot/vmlinuz");
-    shell("cp " + bzimage + " " + vmlinuz);
-    log("  Installed vmlinuz");
-
-    log("  Installing modules...");
-    _install_modules(staging, source_path, build_dir);
-    log("  Modules installed");
-
-    ctx
-}
-
-// is_installed, cleanup, remove — inherited from linux-base.rhai

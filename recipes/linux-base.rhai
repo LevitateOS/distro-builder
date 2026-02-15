@@ -31,6 +31,28 @@ let ctx = #{
 
 /// Apply kconfig to build directory. Default: cp + olddefconfig.
 fn _apply_kconfig(src, build_dir, kconfig) {
+    // Optional: merge config fragments from <distro>/kconfig.d/*.config.
+    // This keeps backwards compatibility with the single-file `kconfig` while
+    // enabling reusable base configs + small per-distro overlays.
+    let kconfig_dir = dirname(kconfig);
+    let frag_dir = join_path(kconfig_dir, "kconfig.d");
+    let fragments = if is_dir(frag_dir) { glob_list(join_path(frag_dir, "*.config")) } else { [] };
+
+    if fragments.len() > 0 {
+        let merge = join_path(src, "scripts/kconfig/merge_config.sh");
+        if !is_file(merge) {
+            throw "merge_config.sh not found at " + merge;
+        }
+
+        // merge_config.sh runs `make ... alldefconfig` and writes <build_dir>/.config.
+        let cmd = "cd " + src + " && " + merge + " -O " + build_dir + " " + kconfig;
+        for f in fragments {
+            cmd += " " + f;
+        }
+        shell(cmd);
+        return;
+    }
+
     shell("cp " + kconfig + " " + join_path(build_dir, ".config"));
     shell("make -C " + src + " O=" + build_dir + " olddefconfig");
 }

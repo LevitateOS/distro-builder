@@ -1,15 +1,12 @@
 // Rocky Linux recipe build dependencies
 //
-// Provides: aria2c, 7zz (as 7z), unsquashfs
+// Provides: 7zz (as 7z), unsquashfs
 // All downloaded/built from source by recipe — no system package manager.
 //
-// - aria2c: built from source (GitHub release tarball)
 // - 7zz: static binary from 7-zip.org
 // - unsquashfs: built from source with xz/zlib built from source
 
 let ctx = #{
-    aria2_dir: "aria2-1.37.0",
-    aria2_url: "https://github.com/aria2/aria2/releases/download/release-1.37.0/aria2-1.37.0.tar.xz",
     description: "Rocky Linux ISO build dependencies",
     name: "rocky-deps",
     sevenz_url: "https://7-zip.org/a/7z2501-linux-x64.tar.xz",
@@ -21,14 +18,12 @@ let ctx = #{
 
 fn is_installed(ctx) {
     let bin = join_path(TOOLS_PREFIX, "bin");
-    if !is_file(join_path(bin, "aria2c")) { throw "aria2c not installed"; }
     if !is_file(join_path(bin, "7zz")) { throw "7zz not installed"; }
     if !is_file(join_path(bin, "unsquashfs")) { throw "unsquashfs not installed"; }
     ctx
 }
 
 fn is_acquired(ctx) {
-    if !is_file(join_path(BUILD_DIR, "aria2.tar.xz")) { throw "aria2 not downloaded"; }
     if !is_file(join_path(BUILD_DIR, "7z.tar.xz")) { throw "7z not downloaded"; }
     if !is_file(join_path(BUILD_DIR, "squashfs-tools.tar.gz")) { throw "squashfs-tools not downloaded"; }
     if !is_file(join_path(BUILD_DIR, "xz.tar.xz")) { throw "xz not downloaded"; }
@@ -40,7 +35,6 @@ fn acquire(ctx) {
     mkdir(BUILD_DIR);
 
     let tarballs = [
-        [ctx.aria2_url, "aria2.tar.xz"],
         [ctx.sevenz_url, "7z.tar.xz"],
         [ctx.sqfs_url, "squashfs-tools.tar.gz"],
         [ctx.xz_url, "xz.tar.xz"],
@@ -67,19 +61,6 @@ fn install(ctx) {
     mkdir(inc_dir);
 
     let jobs = trim(shell_output("nproc"));
-
-    // --- aria2c: build from source ---
-    if !is_file(join_path(bin_dir, "aria2c")) {
-        log("Building aria2c from source...");
-        let src_dir = join_path(BUILD_DIR, ctx.aria2_dir);
-        if !is_dir(src_dir) {
-            shell("tar xf " + join_path(BUILD_DIR, "aria2.tar.xz") + " -C " + BUILD_DIR);
-        }
-        shell_in(src_dir, "./configure --prefix=" + TOOLS_PREFIX + " --without-gnutls --with-openssl --enable-static --disable-shared");
-        shell_in(src_dir, "make -j" + jobs);
-        shell("cp " + join_path(src_dir, "src/aria2c") + " " + join_path(bin_dir, "aria2c"));
-        shell("chmod +x " + join_path(bin_dir, "aria2c"));
-    }
 
     // --- 7zz: extract static binary ---
     if !is_file(join_path(bin_dir, "7zz")) {

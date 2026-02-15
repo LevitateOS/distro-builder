@@ -28,7 +28,12 @@ impl LinuxPaths {
 /// # Arguments
 /// * `base_dir` - distro crate root (e.g., `/path/to/AcornOS`)
 /// * `kernel_source` - Kernel spec from distro-spec (version, sha256, localversion)
-pub fn linux(base_dir: &Path, kernel_source: &KernelSource) -> Result<LinuxPaths> {
+/// * `module_install_path` - module install path from distro-spec (e.g. /lib/modules or /usr/lib/modules)
+pub fn linux(
+    base_dir: &Path,
+    kernel_source: &KernelSource,
+    module_install_path: &str,
+) -> Result<LinuxPaths> {
     let monorepo_dir = base_dir
         .parent()
         .map(|p| p.to_path_buf())
@@ -36,27 +41,23 @@ pub fn linux(base_dir: &Path, kernel_source: &KernelSource) -> Result<LinuxPaths
 
     let downloads_dir = base_dir.join("downloads");
 
-    // Look for distro-specific recipe first, then shared recipe in distro-builder
-    let distro_recipe = base_dir.join("deps/linux.rhai");
+    // Single SSOT kernel recipe for all distros (parity). Distro-specific overrides
+    // (e.g. <distro>/deps/linux.rhai) are intentionally ignored.
     let shared_recipe = monorepo_dir.join("distro-builder/recipes/linux.rhai");
-    let recipe_path = if distro_recipe.exists() {
-        distro_recipe
-    } else if shared_recipe.exists() {
-        shared_recipe
-    } else {
+    if !shared_recipe.exists() {
         anyhow::bail!(
-            "Linux recipe not found.\n\
-             Searched:\n  - {}\n  - {}",
-            distro_recipe.display(),
+            "Linux recipe not found at expected shared path:\n  - {}",
             shared_recipe.display()
         );
-    };
+    }
+    let recipe_path = shared_recipe;
 
     // Inject kernel spec from distro-spec SSOT
     let defines: Vec<(&str, &str)> = vec![
         ("KERNEL_VERSION", kernel_source.version),
         ("KERNEL_SHA256", kernel_source.sha256),
         ("KERNEL_LOCALVERSION", kernel_source.localversion),
+        ("MODULE_INSTALL_PATH", module_install_path),
     ];
 
     // Find and run recipe, parse JSON output

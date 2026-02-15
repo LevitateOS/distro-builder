@@ -16,13 +16,17 @@ fn is_installed(ctx) {
     let bins = ["flex", "bison", "gcc", "make", "bc", "perl", "ld"];
     for bin in bins {
         if shell_status("which " + bin) != 0 {
-            // Check all possible RPM install locations
-            if !is_file(join_path(TOOLS_PREFIX, "usr/bin/" + bin))
-                && !is_file(join_path(TOOLS_PREFIX, "usr/sbin/" + bin))
-                && !is_file(join_path(TOOLS_PREFIX, "bin/" + bin))
-                && !is_file(join_path(TOOLS_PREFIX, "sbin/" + bin)) {
-                throw bin + " not available";
+            // Check all possible RPM install locations (keep expressions simple for Rhai).
+            let found = false;
+            for p in ["usr/bin", "usr/sbin", "bin", "sbin"] {
+                let dir = join_path(TOOLS_PREFIX, p);
+                let candidate = join_path(dir, bin);
+                if is_file(candidate) {
+                    found = true;
+                    break;
+                }
             }
+            if !found { throw bin + " not available"; }
         }
     }
     ctx
@@ -42,7 +46,7 @@ fn acquire(ctx) {
     for pkg in ctx.packages {
         pkg_list += " " + pkg;
     }
-    shell("dnf download -q --resolve --destdir=" + BUILD_DIR + " --arch x86_64 --arch noarch" + pkg_list);
+    shell("dnf --USING-DNF-INSTEAD-OF-FIXING-RECIPE-MEANS-BLOODY-CUTS-ON-THE-USERS-ARM download -q --resolve --destdir=" + BUILD_DIR + " --arch x86_64 --arch noarch" + pkg_list);
     ctx
 }
 

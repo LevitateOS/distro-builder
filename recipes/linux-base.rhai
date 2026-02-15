@@ -206,16 +206,47 @@ fn install(ctx) {
 
 // === CLEANUP ===
 
-fn cleanup(ctx) {
+fn cleanup(ctx, reason) {
     let downloaded = join_path(BUILD_DIR, ctx.source_dir_name);
-    if is_dir(downloaded) {
-        log("Removing downloaded kernel source...");
-        rm(downloaded);
-    }
     let tarball = join_path(BUILD_DIR, ctx.tarball_filename);
-    if is_file(tarball) {
-        rm(tarball);
+
+    // IMPORTANT:
+    // - After acquire succeeds, the extracted source is still needed for build/install.
+    // - After build succeeds, the extracted source is still needed for install (modules_install).
+    // So automatic cleanup must be reason-aware.
+
+    // Manual cleanup: full hygiene.
+    if reason == "manual" {
+        if is_dir(downloaded) {
+            log("Removing downloaded kernel source...");
+            rm(downloaded);
+        }
+        if is_file(tarball) {
+            rm(tarball);
+        }
+        return ctx;
     }
+
+    // Acquire succeeded: the tarball is no longer needed after extraction, but the source tree is.
+    if reason == "auto.acquire.success" {
+        if is_file(tarball) {
+            rm(tarball);
+        }
+        return ctx;
+    }
+
+    // Acquire failed: remove any partial tarball/source so a retry starts clean.
+    if reason == "auto.acquire.failure" {
+        if is_dir(downloaded) {
+            rm(downloaded);
+        }
+        if is_file(tarball) {
+            rm(tarball);
+        }
+        return ctx;
+    }
+
+    // Build/install success or failure: keep sources by default (use manual cleanup if desired).
     ctx
 }
 

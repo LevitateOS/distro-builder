@@ -64,6 +64,11 @@ fn is_installed(ctx) {
     ctx
 }
 
+// === CLEANUP ===
+//
+// Hygiene hook. This recipe intentionally keeps BUILD_DIR caches by default.
+fn cleanup(ctx, reason) { ctx }
+
 fn is_acquired(ctx) {
     if !is_file(join_path(BUILD_DIR, "m4.tar.xz")) { throw "m4 not downloaded"; }
     if !is_file(join_path(BUILD_DIR, "autoconf.tar.xz")) { throw "autoconf not downloaded"; }

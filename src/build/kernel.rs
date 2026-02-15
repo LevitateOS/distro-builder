@@ -25,7 +25,7 @@ use crate::process::Cmd;
 use distro_spec::shared::KernelSource;
 
 // Re-export contracts from distro-contract
-pub use distro_contract::kernel::{KernelBuildGuard, KernelGuard, KernelInstallConfig};
+pub use distro_contract::kernel::KernelInstallConfig;
 
 /// Download and extract a kernel tarball from cdn.kernel.org.
 ///
@@ -344,7 +344,7 @@ pub fn get_kernel_version(build_dir: &Path) -> Result<String> {
 /// Build kernel from a project's kconfig file.
 ///
 /// This is the standard entry point for distro builders. It:
-/// 1. Cleans up any stale kernel-build symlink (from previous theft mode)
+/// 1. Cleans up any stale kernel-build symlink (from previous runs)
 /// 2. Reads the kconfig file from `base_dir/kconfig`
 /// 3. Delegates to `build_kernel()`
 ///
@@ -364,16 +364,16 @@ pub fn build_kernel_from_kconfig(
     output_dir: &Path,
     base_dir: &Path,
 ) -> Result<String> {
-    // Clean up any existing kernel-build symlink (from previous theft)
+    // Clean up any existing kernel-build symlink.
     let our_kernel_build = output_dir.join("kernel-build");
     if our_kernel_build.is_symlink() {
         fs::remove_file(&our_kernel_build).with_context(|| {
             format!(
-                "Failed to remove stolen kernel symlink at {}",
+                "Failed to remove kernel-build symlink at {}",
                 our_kernel_build.display()
             )
         })?;
-        println!("  Removed stale kernel-build symlink (was stolen from leviso)");
+        println!("  Removed stale kernel-build symlink");
     }
 
     let kconfig_path = base_dir.join("kconfig");

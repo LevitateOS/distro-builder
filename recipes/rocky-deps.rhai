@@ -23,6 +23,9 @@ fn is_installed(ctx) {
     ctx
 }
 
+// === CLEANUP ===
+fn cleanup(ctx, reason) { ctx }
+
 fn is_acquired(ctx) {
     if !is_file(join_path(BUILD_DIR, "7z.tar.xz")) { throw "7z not downloaded"; }
     if !is_file(join_path(BUILD_DIR, "squashfs-tools.tar.gz")) { throw "squashfs-tools not downloaded"; }

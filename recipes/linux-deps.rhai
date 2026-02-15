@@ -32,6 +32,9 @@ fn is_installed(ctx) {
     ctx
 }
 
+// === CLEANUP ===
+fn cleanup(ctx, reason) { ctx }
+
 fn is_acquired(ctx) {
     let rpms = glob_list(join_path(BUILD_DIR, "*.rpm"));
     if rpms.len() == 0 {

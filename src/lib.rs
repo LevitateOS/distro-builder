@@ -69,7 +69,7 @@ pub mod recipe;
 pub mod timing;
 
 pub use build::context::{BuildContext, DistroConfig, InitSystem, PackageManager};
-pub use build::kernel::{KernelBuildGuard, KernelGuard, KernelInstallConfig};
+pub use build::kernel::KernelInstallConfig;
 pub use build::licenses::LicenseTracker;
 pub use component::{Installable, Op, Phase};
 pub use executor::{binaries, directories, files, openrc, users};

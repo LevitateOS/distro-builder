@@ -39,6 +39,9 @@ fn is_installed(ctx) {
     ctx
 }
 
+// === CLEANUP ===
+fn cleanup(ctx, reason) { ctx }
+
 fn is_acquired(ctx) {
     for rpm in ctx.rpms {
         if !is_file(join_path(BUILD_DIR, rpm[1])) {

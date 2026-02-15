@@ -57,6 +57,7 @@ pub fn linux(
         ("KERNEL_VERSION", kernel_source.version),
         ("KERNEL_SHA256", kernel_source.sha256),
         ("KERNEL_LOCALVERSION", kernel_source.localversion),
+        ("KERNEL_FORCE_REBUILD", "0"),
         ("MODULE_INSTALL_PATH", module_install_path),
     ];
 

@@ -5,7 +5,7 @@ use anyhow::{bail, Context, Result};
 use std::path::Path;
 use std::process::Command;
 
-pub use distro_contract::disk::DiskUuids;
+pub use crate::contracts::disk::DiskUuids;
 
 /// Generate new random UUIDs for a disk image.
 pub fn generate_disk_uuids() -> Result<DiskUuids> {

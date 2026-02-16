@@ -11,7 +11,7 @@ use crate::process::Cmd;
 
 /// Copy kernel modules to the final staging directory.
 ///
-/// Modules are already installed to output/staging/lib/modules/ by the kernel build.
+/// Modules are already installed to output/staging/usr/lib/modules/ by the kernel build.
 /// This function copies them to the EROFS staging root and runs depmod.
 ///
 /// # Arguments
@@ -25,8 +25,8 @@ pub fn copy_modules(
 ) -> Result<()> {
     println!("Setting up kernel modules...");
 
-    // Modules are installed to output/staging/lib/modules/ during kernel build
-    let modules_base = ctx.output.join("staging/lib/modules");
+    // Modules are installed to output/staging/usr/lib/modules/ during kernel build.
+    let modules_base = ctx.output.join("staging/usr/lib/modules");
 
     if !modules_base.exists() {
         bail!(

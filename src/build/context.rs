@@ -1,12 +1,12 @@
 //! Build context and distro configuration.
 //!
-//! Traits and enums are defined in `distro-contract` and re-exported here.
+//! Traits and enums are defined in `distro-builder::contracts` and re-exported here.
 //! `SimpleBuildContext` is an implementation that lives in distro-builder.
 
 use std::path::PathBuf;
 
-// Re-export contracts from distro-contract
-pub use distro_contract::context::{BuildContext, DistroConfig, InitSystem, PackageManager};
+// Re-export contracts from distro-builder contracts module
+pub use crate::contracts::context::{BuildContext, DistroConfig, InitSystem, PackageManager};
 
 /// Simple implementation of BuildContext for basic use cases.
 ///

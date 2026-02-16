@@ -61,6 +61,7 @@ pub mod artifact_store;
 pub mod build;
 pub mod cache;
 pub mod component;
+pub mod contracts;
 pub mod executor;
 pub mod preflight;
 pub mod process;
@@ -68,10 +69,10 @@ pub mod qemu;
 pub mod recipe;
 pub mod timing;
 
-pub use build::context::{BuildContext, DistroConfig, InitSystem, PackageManager};
-pub use build::kernel::KernelInstallConfig;
 pub use build::licenses::LicenseTracker;
-pub use component::{Installable, Op, Phase};
+pub use contracts::component::{Installable, Op, Phase};
+pub use contracts::context::{BuildContext, DistroConfig, InitSystem, PackageManager};
+pub use contracts::kernel::KernelInstallConfig;
 pub use executor::{binaries, directories, files, openrc, users};
 
 // Re-export commonly used artifact utilities

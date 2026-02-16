@@ -24,8 +24,8 @@ use std::path::{Path, PathBuf};
 use crate::process::Cmd;
 use distro_spec::shared::KernelSource;
 
-// Re-export contracts from distro-contract
-pub use distro_contract::kernel::KernelInstallConfig;
+// Re-export contracts from distro-builder contracts module
+pub use crate::contracts::kernel::KernelInstallConfig;
 
 /// Download and extract a kernel tarball from cdn.kernel.org.
 ///

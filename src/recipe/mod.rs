@@ -4,10 +4,11 @@
 //! to manage build dependencies.
 //!
 //! Resolution order:
-//! 1. System PATH (`which recipe`)
-//! 2. Monorepo submodule (`../tools/recipe`)
-//! 3. `RECIPE_BIN` env var (path to binary)
-//! 4. `RECIPE_SRC` env var (path to source, will build)
+//! 1. `RECIPE_BIN` env var (path to binary)
+//! 2. `RECIPE_SRC` env var (path to source, will build)
+//! 3. Workspace binary under `target/{debug,release}/recipe`
+//! 4. Monorepo submodule (`../tools/recipe`, built from source if needed)
+//! 5. System PATH (`which recipe`)
 
 pub mod alpine;
 pub mod linux;
@@ -89,18 +90,9 @@ impl RecipeBinary {
 
 /// Find the recipe binary using the resolution order.
 pub fn find_recipe(monorepo_dir: &Path) -> Result<RecipeBinary> {
-    // 1. Check system PATH
-    if let Ok(path) = which::which("recipe") {
-        return Ok(RecipeBinary { path });
-    }
-
-    // 2. Check monorepo submodule
     let submodule = monorepo_dir.join("tools/recipe");
-    if submodule.join("Cargo.toml").exists() {
-        return build_from_source(&submodule, monorepo_dir, RecipeSource::Monorepo);
-    }
 
-    // 3. Check RECIPE_BIN env var
+    // 1. Check RECIPE_BIN env var
     if let Ok(bin_path) = env::var("RECIPE_BIN") {
         let path = PathBuf::from(&bin_path);
         if path.exists() {
@@ -117,7 +109,7 @@ pub fn find_recipe(monorepo_dir: &Path) -> Result<RecipeBinary> {
         bail!("RECIPE_BIN points to non-existent path: {}", bin_path);
     }
 
-    // 4. Check RECIPE_SRC env var
+    // 2. Check RECIPE_SRC env var
     if let Ok(src_path) = env::var("RECIPE_SRC") {
         let src = PathBuf::from(&src_path);
         if src.join("Cargo.toml").exists() {
@@ -131,17 +123,56 @@ pub fn find_recipe(monorepo_dir: &Path) -> Result<RecipeBinary> {
         );
     }
 
+    // 3. Prefer workspace recipe binaries over global PATH installs.
+    // This avoids stale global binaries missing helpers required by this repo.
+    let prefer_release = recipe_build_release();
+    let preferred_profile = if prefer_release { "release" } else { "debug" };
+    let fallback_profile = if prefer_release { "debug" } else { "release" };
+
+    let preferred_binary = RecipeBinary {
+        path: monorepo_dir
+            .join("target")
+            .join(preferred_profile)
+            .join("recipe"),
+    };
+    if preferred_binary.is_valid() {
+        return Ok(preferred_binary);
+    }
+
+    let fallback_binary = RecipeBinary {
+        path: monorepo_dir
+            .join("target")
+            .join(fallback_profile)
+            .join("recipe"),
+    };
+    if fallback_binary.is_valid() {
+        return Ok(fallback_binary);
+    }
+
+    // 4. Check monorepo submodule and build if needed.
+    if submodule.join("Cargo.toml").exists() {
+        return build_from_source(&submodule, monorepo_dir, RecipeSource::Monorepo);
+    }
+
+    // 5. Check system PATH as final fallback.
+    if let Ok(path) = which::which("recipe") {
+        return Ok(RecipeBinary { path });
+    }
+
     bail!(
         "Could not find recipe binary.\n\n\
          Resolution order tried:\n\
-         1. System PATH - not found\n\
-         2. Monorepo at {} - not found\n\
-         3. RECIPE_BIN env var - not set\n\
-         4. RECIPE_SRC env var - not set\n\n\
+         1. RECIPE_BIN env var - not set\n\
+         2. RECIPE_SRC env var - not set\n\
+         3. Workspace binary under {} - not found\n\
+         4. Monorepo at {} - not found\n\
+         5. System PATH - not found\n\n\
          Solutions:\n\
-         - Install recipe to PATH\n\
          - Set RECIPE_BIN=/path/to/recipe\n\
-         - Set RECIPE_SRC=/path/to/recipe/source",
+         - Set RECIPE_SRC=/path/to/recipe/source\n\
+         - Ensure tools/recipe is checked out in this monorepo\n\
+         - Install recipe to PATH",
+        monorepo_dir.join("target").display(),
         submodule.display()
     )
 }
@@ -152,9 +183,7 @@ fn build_from_source(
     monorepo_dir: &Path,
     source: RecipeSource,
 ) -> Result<RecipeBinary> {
-    let release_build = env::var("RECIPE_BUILD_RELEASE")
-        .map(|v| v == "1" || v.to_lowercase() == "true")
-        .unwrap_or(false);
+    let release_build = recipe_build_release();
 
     let source_desc = match source {
         RecipeSource::Monorepo => "monorepo",
@@ -212,6 +241,12 @@ fn build_from_source(
     println!("    Built: {}", binary.display());
 
     Ok(RecipeBinary { path: binary })
+}
+
+fn recipe_build_release() -> bool {
+    env::var("RECIPE_BUILD_RELEASE")
+        .map(|v| v == "1" || v.to_lowercase() == "true")
+        .unwrap_or(false)
 }
 
 /// Run a recipe using the recipe binary, returning the ctx as JSON.

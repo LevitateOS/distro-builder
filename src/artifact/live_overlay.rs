@@ -1,12 +1,8 @@
-//! Shared live overlay builder for OpenRC-based distros.
+//! Shared live overlay builders.
 //!
-//! Creates the overlay filesystem used during live ISO boot containing:
-//! - Autologin for serial console testing
-//! - Empty root password for live session
-//! - Inittab (VTYs + serial or serial-only)
-//! - Volatile log storage
-//! - Suspend/sleep prevention
-//! - efivarfs mount script
+//! This module provides:
+//! - OpenRC live overlay generation (AcornOS, IuppiterOS style)
+//! - Systemd live overlay generation (LevitateOS, RalphOS style)
 
 use anyhow::{Context, Result};
 use std::fs;
@@ -33,6 +29,15 @@ pub struct LiveOverlayConfig<'a> {
     pub inittab: InittabVariant,
     /// Optional path to profile/live-overlay directory to copy first.
     pub profile_overlay: Option<&'a Path>,
+}
+
+/// Configuration for creating a systemd live overlay.
+#[derive(Debug)]
+pub struct SystemdLiveOverlayConfig<'a> {
+    /// OS display name (e.g., "LevitateOS", "RalphOS").
+    pub os_name: &'a str,
+    /// Optional override for `/etc/issue`.
+    pub issue_message: Option<&'a str>,
 }
 
 /// Create an OpenRC live overlay at `output_dir/live-overlay`.
@@ -282,6 +287,65 @@ esac
     )?;
 
     println!("  Live overlay created at {}", live_overlay.display());
+    Ok(live_overlay)
+}
+
+/// Create a systemd live overlay at `output_dir/live-overlay`.
+///
+/// The overlay includes:
+/// - tty1 autologin drop-in
+/// - serial-getty template autologin drop-in
+/// - empty root password for live session (`/etc/shadow`)
+/// - `/etc/issue` banner
+pub fn create_systemd_live_overlay(
+    output_dir: &Path,
+    config: &SystemdLiveOverlayConfig,
+) -> Result<PathBuf> {
+    println!("Creating systemd live overlay...");
+
+    let live_overlay = output_dir.join("live-overlay");
+    if live_overlay.exists() {
+        fs::remove_dir_all(&live_overlay)?;
+    }
+
+    fs::create_dir_all(live_overlay.join("etc/systemd/system/getty@tty1.service.d"))?;
+    fs::create_dir_all(live_overlay.join("etc/systemd/system/serial-getty@.service.d"))?;
+
+    let tty1_autologin =
+        "[Service]\nExecStart=\nExecStart=-/sbin/agetty --autologin root --noclear %I $TERM\n";
+    fs::write(
+        live_overlay.join("etc/systemd/system/getty@tty1.service.d/autologin.conf"),
+        tty1_autologin,
+    )?;
+
+    let serial_autologin = "[Service]\nExecStart=\nExecStart=-/sbin/agetty --autologin root -L --keep-baud 115200,57600,38400,9600 %I vt100\n";
+    fs::write(
+        live_overlay.join("etc/systemd/system/serial-getty@.service.d/zz-autologin.conf"),
+        serial_autologin,
+    )?;
+
+    let default_issue = format!(
+        "\n{} Live - \\l\n\nLogin as 'root' (no password)\n\n",
+        config.os_name
+    );
+    fs::write(
+        live_overlay.join("etc/issue"),
+        config.issue_message.unwrap_or(&default_issue),
+    )?;
+
+    let shadow_content = "root::0:0:99999:7:::\n\
+                          bin:!:0:0:99999:7:::\n\
+                          daemon:!:0:0:99999:7:::\n\
+                          nobody:!:0:0:99999:7:::\n";
+    fs::write(live_overlay.join("etc/shadow"), shadow_content)?;
+    let mut perms = fs::metadata(live_overlay.join("etc/shadow"))?.permissions();
+    perms.set_mode(0o600);
+    fs::set_permissions(live_overlay.join("etc/shadow"), perms)?;
+
+    println!(
+        "  Systemd live overlay created at {}",
+        live_overlay.display()
+    );
     Ok(live_overlay)
 }
 

@@ -9,6 +9,12 @@
 //
 // Distro-specific knobs live in distro-spec + each distro's `kconfig`.
 
+// AUTOFIX_PROMPT: This recipe is the SSOT for all kernel builds. Keep distros in parity.
+// Only edit files under `distro-builder/recipes/` to fix the failure.
+// Do NOT weaken lifecycle checks or correctness validation (kernel.release, artifacts-out enforcement, modules layout).
+// Do NOT add `|| true` or otherwise ignore failures; fix the real issue.
+// Keep changes minimal and local.
+
 /// LevitateOS invariant: all kernel artifacts MUST land under `.artifacts/out/<DistroDir>/...`.
 ///
 /// The recipe writes to `<distro>/output/...` and relies on `<distro>/output` being a symlink:
@@ -43,12 +49,74 @@ fn _ensure_output_is_artifacts_out(distro_dir) {
     shell("ln -s '../.artifacts/out/" + distro_name + "' '" + output + "'");
 }
 
+/// Environment prefix for kernel make invocations.
+///
+/// Resolve BISON_PKGDATADIR from the active `bison` on PATH so this works
+/// with either host tools or `linux-deps` extracted tools.
+fn _kernel_make_env_prefix() {
+    let env = "";
+    let bison = "";
+    if shell_status("command -v bison >/dev/null 2>&1") == 0 {
+        bison = trim(shell_output("command -v bison"));
+    }
+    if bison != "" {
+        let bison_pkgdatadir = join_path(dirname(dirname(bison)), "share/bison");
+        if is_dir(bison_pkgdatadir) {
+            env += "BISON_PKGDATADIR='" + bison_pkgdatadir + "' ";
+        }
+    }
+
+    // Prefer m4 next to bison. Some packaged bison binaries use a hardcoded
+    // fallback m4 path that may not exist on the host.
+    let m4 = "";
+    if bison != "" {
+        let sibling_m4 = join_path(dirname(bison), "m4");
+        if is_file(sibling_m4) {
+            m4 = sibling_m4;
+        }
+    }
+    if m4 == "" && shell_status("command -v m4 >/dev/null 2>&1") == 0 {
+        m4 = trim(shell_output("command -v m4"));
+    }
+    if m4 != "" {
+        env += "M4='" + m4 + "' ";
+    }
+
+    // Host tools (objtool, scripts/*) need libelf headers/libs.
+    if bison != "" {
+        let tools_usr = dirname(dirname(bison));
+        let include_dir = join_path(tools_usr, "include");
+        if is_dir(include_dir) {
+            env += "C_INCLUDE_PATH='" + include_dir + "' ";
+        }
+
+        let lib_search_path = "";
+        let lib64_dir = join_path(tools_usr, "lib64");
+        if is_dir(lib64_dir) {
+            lib_search_path = lib64_dir;
+        }
+        let lib_dir = join_path(tools_usr, "lib");
+        if is_dir(lib_dir) {
+            if lib_search_path != "" {
+                lib_search_path += ":";
+            }
+            lib_search_path += lib_dir;
+        }
+        if lib_search_path != "" {
+            env += "LIBRARY_PATH='" + lib_search_path + "' ";
+            env += "LD_LIBRARY_PATH='" + lib_search_path + "' ";
+        }
+    }
+
+    env
+}
+
 /// Apply kconfig: start from defconfig, apply CONFIG_* lines, enforce localversion, then olddefconfig.
 ///
 /// This supports both:
 /// - a single <distro>/kconfig file
 /// - optional fragments in <distro>/kconfig.d/*.config (applied after kconfig)
-fn _apply_kconfig(src, build_dir, kconfig) {
+fn _apply_kconfig(src, build_dir, kconfig, kernel_localversion) {
     let config_file = join_path(build_dir, ".config");
     let hash_file = join_path(build_dir, ".config.kconfig-hash");
 
@@ -65,32 +133,38 @@ fn _apply_kconfig(src, build_dir, kconfig) {
 
     if cached_hash != kconfig_hash || !is_file(config_file) {
         log("Generating kernel config...");
-        shell("make -C " + src + " O=" + build_dir + " x86_64_defconfig");
+        shell(_kernel_make_env_prefix() + "make -C " + src + " O=" + build_dir + " x86_64_defconfig");
 
         log("Applying kconfig options...");
         let apply_one = |cfg| {
             // Apply CONFIG_* lines only; ignore comments/blank lines.
-            let cmd = "grep -E '^CONFIG_' " + cfg + " | while read line; do " +
-                src + "/scripts/config --file " + config_file + " --set-val $(echo $line | sed 's/=/ /'); " +
-                "done";
+            let cmd = "grep -E '^CONFIG_' " + cfg;
+            cmd += " | while read line; do ";
+            cmd += src + "/scripts/config --file " + config_file + " --set-val $(echo $line | sed 's/=/ /'); ";
+            cmd += "done";
             shell(cmd);
         };
 
-        apply_one(kconfig);
+        apply_one.call(kconfig);
         for f in fragments {
-            apply_one(f);
+            apply_one.call(f);
         }
 
         // Enforce localversion from distro-spec (single SSOT).
         // Kconfig may also set CONFIG_LOCALVERSION, but this wins.
-        shell(src + "/scripts/config --file " + config_file + " --set-str CONFIG_LOCALVERSION " + KERNEL_LOCALVERSION);
+        //
+        // NOTE: recipe defines are injected as scope constants by the executor. In Rhai,
+        // scope constants are visible to the top-level phase functions, but not to helper
+        // functions called by those phase functions. So pass the define value in from
+        // `build(ctx)` rather than referencing it here.
+        shell(src + "/scripts/config --file " + config_file + " --set-str CONFIG_LOCALVERSION " + kernel_localversion);
 
         log("Resolving config dependencies...");
-        shell("make -C " + src + " O=" + build_dir + " olddefconfig");
+        shell(_kernel_make_env_prefix() + "make -C " + src + " O=" + build_dir + " olddefconfig");
         write_file(hash_file, kconfig_hash);
     } else {
         log("Config unchanged, running olddefconfig...");
-        shell("make -C " + src + " O=" + build_dir + " olddefconfig");
+        shell(_kernel_make_env_prefix() + "make -C " + src + " O=" + build_dir + " olddefconfig");
     }
 }
 
@@ -98,10 +172,10 @@ fn _apply_kconfig(src, build_dir, kconfig) {
 ///
 /// The kernel build system always installs under <staging>/lib/modules when using
 /// INSTALL_MOD_PATH. LevitateOS is UsrMerge so we relocate to /usr/lib/modules.
-fn _install_modules(staging, source_path, build_dir) {
-    shell("make -C " + source_path + " O=" + build_dir + " INSTALL_MOD_PATH=" + staging + " modules_install");
+fn _install_modules(staging, source_path, build_dir, module_install_path) {
+    shell(_kernel_make_env_prefix() + "make -C " + source_path + " O=" + build_dir + " INSTALL_MOD_PATH=" + staging + " modules_install");
 
-    if MODULE_INSTALL_PATH == "/usr/lib/modules" {
+    if module_install_path == "/usr/lib/modules" {
         let lib_modules = join_path(staging, "lib/modules");
         let usr_lib_modules = join_path(staging, "usr/lib/modules");
 
@@ -115,8 +189,8 @@ fn _install_modules(staging, source_path, build_dir) {
 }
 
 /// Remove build/source symlinks after install.
-fn _cleanup_modules(staging, version) {
-    let base = if MODULE_INSTALL_PATH == "/usr/lib/modules" { "usr/lib/modules/" } else { "lib/modules/" };
+fn _cleanup_modules(staging, version, module_install_path) {
+    let base = if module_install_path == "/usr/lib/modules" { "usr/lib/modules/" } else { "lib/modules/" };
     let modules_dir = join_path(staging, base + version);
     if is_dir(modules_dir) {
         shell("rm -f " + join_path(modules_dir, "build") + " " + join_path(modules_dir, "source"));
@@ -124,18 +198,18 @@ fn _cleanup_modules(staging, version) {
 }
 
 /// Read kernel.release from a completed build dir.
-fn _kernel_release_or_throw(build_dir) {
+fn _kernel_release_or_throw(build_dir, expected_version, expected_localversion) {
     let rel_file = join_path(build_dir, "include/config/kernel.release");
     if !is_file(rel_file) {
         throw "Missing kernel.release at " + rel_file;
     }
     let rel = trim(read_file(rel_file));
 
-    if KERNEL_VERSION != "" && !rel.starts_with(KERNEL_VERSION) {
-        throw "Wrong kernel version: kernel.release '" + rel + "' does not start with '" + KERNEL_VERSION + "'";
+    if expected_version != "" && !rel.starts_with(expected_version) {
+        throw "Wrong kernel version: kernel.release '" + rel + "' does not start with '" + expected_version + "'";
     }
-    if !rel.ends_with(KERNEL_LOCALVERSION) {
-        throw "Wrong kernel localversion: kernel.release '" + rel + "' does not end with '" + KERNEL_LOCALVERSION + "'";
+    if !rel.ends_with(expected_localversion) {
+        throw "Wrong kernel localversion: kernel.release '" + rel + "' does not end with '" + expected_localversion + "'";
     }
 
     rel
@@ -159,7 +233,7 @@ fn is_built(ctx) {
     }
 
     // Ensure the build we found matches the distro-spec SSOT.
-    let rel = _kernel_release_or_throw(build_dir);
+    let rel = _kernel_release_or_throw(build_dir, KERNEL_VERSION, KERNEL_LOCALVERSION);
     ctx.kernel_version = rel;
     ctx.build_dir = build_dir;
     ctx
@@ -188,10 +262,10 @@ fn build(ctx) {
     log("  Output: " + build_dir);
 
     try {
-        _apply_kconfig(ctx.source_path, build_dir_tmp, kconfig);
+        _apply_kconfig(ctx.source_path, build_dir_tmp, kconfig, KERNEL_LOCALVERSION);
 
         let jobs = trim(shell_output("nproc"));
-        shell("make -C " + ctx.source_path + " O=" + build_dir_tmp + " -j" + jobs);
+        shell(_kernel_make_env_prefix() + "make -C " + ctx.source_path + " O=" + build_dir_tmp + " -j" + jobs);
     } catch (e) {
         // Best-effort cleanup of temp outputs.
         shell("rm -rf '" + build_dir_tmp + "'");
@@ -214,7 +288,7 @@ fn is_installed(ctx) {
     let staging = join_path(distro_dir, "output/staging");
     let vmlinuz = join_path(staging, "boot/vmlinuz");
     let build_dir = join_path(distro_dir, "output/kernel-build");
-    let rel = _kernel_release_or_throw(build_dir);
+    let rel = _kernel_release_or_throw(build_dir, KERNEL_VERSION, KERNEL_LOCALVERSION);
 
     if KERNEL_FORCE_REBUILD == "1" {
         throw "force rebuild requested";
@@ -270,14 +344,17 @@ fn install(ctx) {
 
         // Install modules via hookable helper
         log("  Installing modules...");
-        _install_modules(staging_tmp, source_path, build_dir);
+        _install_modules(staging_tmp, source_path, build_dir, MODULE_INSTALL_PATH);
 
         // Get kernel version for cleanup
         let release_file = join_path(build_dir, "include/config/kernel.release");
-        let version = if is_file(release_file) { trim(read_file(release_file)) } else { ctx.kernel_version };
+        let version = ctx.kernel_version;
+        if is_file(release_file) {
+            version = trim(read_file(release_file));
+        }
 
         // Post-install cleanup via hookable helper
-        _cleanup_modules(staging_tmp, version);
+        _cleanup_modules(staging_tmp, version, MODULE_INSTALL_PATH);
         log("  Modules installed");
     } catch (e) {
         // Best-effort cleanup of temp outputs.

@@ -17,15 +17,26 @@ let build_deps = ["linux-deps"];
 
 let major = KERNEL_VERSION.split(".")[0];
 let ctx = #{
-    description: "Linux kernel (" + KERNEL_VERSION + ")",
+    build_dir: "/data/vince/LevitateOS/RalphOS/output/kernel-build",
+    description: "Linux kernel (6.12.71)",
+    kernel_version: "6.12.71",
     name: "linux",
-    tarball_url: "https://cdn.kernel.org/pub/linux/kernel/v" + major + ".x/linux-" + KERNEL_VERSION + ".tar.xz",
-    tarball_filename: "linux-" + KERNEL_VERSION + ".tar.xz",
-    source_dir_name: "linux-" + KERNEL_VERSION,
-    kernel_version: KERNEL_VERSION,
-    source_path: "",
-    build_dir: "",
+    source_dir_name: "linux-6.12.71",
+    source_path: "/data/vince/LevitateOS/RalphOS/downloads/linux-6.12.71",
+    tarball_filename: "linux-6.12.71.tar.xz",
+    tarball_url: "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.12.71.tar.xz",
 };
+
+// This recipe is parameterized via `--define` and shared across multiple distros.
+// The executor persists `ctx` into the recipe file, so always re-derive define-dependent
+// fields on load and clear run-specific paths to avoid cross-distro contamination.
+ctx.description = "Linux kernel (" + KERNEL_VERSION + ")";
+ctx.tarball_url = "https://cdn.kernel.org/pub/linux/kernel/v" + major + ".x/linux-" + KERNEL_VERSION + ".tar.xz";
+ctx.tarball_filename = "linux-" + KERNEL_VERSION + ".tar.xz";
+ctx.source_dir_name = "linux-" + KERNEL_VERSION;
+ctx.kernel_version = KERNEL_VERSION;
+ctx.source_path = "";
+ctx.build_dir = "";
 
 // === HOOKABLE HELPERS ===
 

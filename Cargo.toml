@@ -17,6 +17,7 @@ fs2 = "0.4"
 leviso-elf = { path = "../leviso-elf" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+toml = "0.8"
 sha2 = "0.10"
 tar = "0.4"
 walkdir = "2"

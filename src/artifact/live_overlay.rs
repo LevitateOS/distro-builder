@@ -6,6 +6,7 @@
 
 use anyhow::{Context, Result};
 use std::fs;
+use std::os::unix::fs::symlink;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
@@ -82,6 +83,8 @@ pub fn create_openrc_live_overlay(
 # agetty has already set up stdin/stdout/stderr on the tty
 
 echo "[autologin] Starting login shell..."
+echo "___SHELL_READY___"
+echo "___PROMPT___"
 
 # Run sh as login shell (sources /etc/profile and /etc/profile.d/*)
 # In Alpine, /bin/sh is busybox ash
@@ -309,7 +312,11 @@ pub fn create_systemd_live_overlay(
     }
 
     fs::create_dir_all(live_overlay.join("etc/systemd/system/getty@tty1.service.d"))?;
+    fs::create_dir_all(live_overlay.join("etc/systemd/system/getty@.service.d"))?;
     fs::create_dir_all(live_overlay.join("etc/systemd/system/serial-getty@.service.d"))?;
+    fs::create_dir_all(live_overlay.join("etc/systemd/system/basic.target.wants"))?;
+    fs::create_dir_all(live_overlay.join("etc/profile.d"))?;
+    fs::create_dir_all(live_overlay.join("usr/local/bin"))?;
 
     let tty1_autologin =
         "[Service]\nExecStart=\nExecStart=-/sbin/agetty --autologin root --noclear %I $TERM\n";
@@ -318,10 +325,52 @@ pub fn create_systemd_live_overlay(
         tty1_autologin,
     )?;
 
-    let serial_autologin = "[Service]\nExecStart=\nExecStart=-/sbin/agetty --autologin root -L --keep-baud 115200,57600,38400,9600 %I vt100\n";
+    let serial_autologin_script = r#"#!/bin/sh
+echo "___SHELL_READY___"
+echo "___PROMPT___"
+exec /bin/bash -il
+"#;
+    write_executable(
+        &live_overlay.join("usr/local/bin/serial-autologin"),
+        serial_autologin_script,
+    )?;
+
+    let serial_autologin = "[Service]\nExecStart=\nExecStart=-/sbin/agetty -n -l /usr/local/bin/serial-autologin 115200,57600,38400,9600 %I vt100\n";
     fs::write(
         live_overlay.join("etc/systemd/system/serial-getty@.service.d/zz-autologin.conf"),
         serial_autologin,
+    )?;
+    fs::write(
+        live_overlay.join("etc/systemd/system/getty@.service.d/zz-autologin.conf"),
+        serial_autologin,
+    )?;
+    symlink(
+        "/usr/lib/systemd/system/serial-getty@.service",
+        live_overlay.join("etc/systemd/system/basic.target.wants/serial-getty@ttyS0.service"),
+    )?;
+    // Stage 01 live boot must be non-interactive and not blocked by first-boot setup.
+    symlink(
+        "/dev/null",
+        live_overlay.join("etc/systemd/system/systemd-firstboot.service"),
+    )?;
+    // Keep Stage 01 minimal: do not fail boot if audit userspace is absent.
+    symlink(
+        "/dev/null",
+        live_overlay.join("etc/systemd/system/auditd.service"),
+    )?;
+    // Avoid Stage 01 failure on missing keymap assets in minimal live rootfs.
+    symlink(
+        "/dev/null",
+        live_overlay.join("etc/systemd/system/systemd-vconsole-setup.service"),
+    )?;
+    // Stage 01 does not require a full D-Bus system bus.
+    symlink(
+        "/dev/null",
+        live_overlay.join("etc/systemd/system/dbus-broker.service"),
+    )?;
+    symlink(
+        "/dev/null",
+        live_overlay.join("etc/systemd/system/dbus.service"),
     )?;
 
     let default_issue = format!(
@@ -333,7 +382,35 @@ pub fn create_systemd_live_overlay(
         config.issue_message.unwrap_or(&default_issue),
     )?;
 
-    let shadow_content = "root::0:0:99999:7:::\n\
+    // Serial-console harness markers for staged boot tests.
+    // Emitted only for interactive shells on ttyS0.
+    let test_profile = r#"# Stage harness markers (serial console only)
+case "$-" in
+    *i*) ;;
+    *) return 0 ;;
+esac
+
+if [ "$(tty 2>/dev/null)" = "/dev/ttyS0" ]; then
+    echo "___SHELL_READY___"
+    echo "___PROMPT___"
+    PROMPT_COMMAND='echo "___PROMPT___"'
+    export PROMPT_COMMAND
+fi
+"#;
+    fs::write(
+        live_overlay.join("etc/profile.d/00-live-test.sh"),
+        test_profile,
+    )?;
+
+    // Prevent ConditionFirstBoot= from triggering interactive first-boot wizard.
+    fs::write(
+        live_overlay.join("etc/machine-id"),
+        "0123456789abcdef0123456789abcdef\n",
+    )?;
+
+    // Keep root password empty for live autologin, but avoid "password change
+    // required" at first login by using a non-zero lastchg day.
+    let shadow_content = "root::20000:0:99999:7:::\n\
                           bin:!:0:0:99999:7:::\n\
                           daemon:!:0:0:99999:7:::\n\
                           nobody:!:0:0:99999:7:::\n";

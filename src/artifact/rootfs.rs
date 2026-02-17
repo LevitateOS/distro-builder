@@ -83,6 +83,8 @@ pub fn create_erofs(
         bail!("Source path is not a directory: {}", source_dir.display());
     }
 
+    ensure_owner_readable_files(source_dir)?;
+
     // Check tool availability
     if !process::exists("mkfs.erofs") {
         bail!(
@@ -126,6 +128,57 @@ pub fn create_erofs(
     // Print size
     let metadata = fs::metadata(output)?;
     println!("EROFS created: {} MB", metadata.len() / 1024 / 1024);
+
+    Ok(())
+}
+
+fn ensure_owner_readable_files(source_dir: &Path) -> Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        use walkdir::WalkDir;
+
+        let mut adjusted = 0usize;
+        for entry in WalkDir::new(source_dir).follow_links(false) {
+            let entry = entry.with_context(|| {
+                format!(
+                    "walking source directory for EROFS: {}",
+                    source_dir.display()
+                )
+            })?;
+            if !entry.file_type().is_file() {
+                continue;
+            }
+
+            let metadata = fs::symlink_metadata(entry.path()).with_context(|| {
+                format!("reading file metadata for '{}'", entry.path().display())
+            })?;
+            let mode = metadata.permissions().mode();
+            if mode & 0o400 != 0 {
+                continue;
+            }
+
+            let mut perms = metadata.permissions();
+            perms.set_mode(mode | 0o400);
+            match fs::set_permissions(entry.path(), perms) {
+                Ok(()) => adjusted += 1,
+                Err(err) => {
+                    eprintln!(
+                        "warning: unable to set owner-read bit for '{}': {}",
+                        entry.path().display(),
+                        err
+                    );
+                }
+            }
+        }
+
+        if adjusted > 0 {
+            println!(
+                "Adjusted owner-read permission on {} source file(s) for EROFS packing",
+                adjusted
+            );
+        }
+    }
 
     Ok(())
 }

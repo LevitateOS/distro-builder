@@ -34,7 +34,8 @@ pub enum S00BuildKernelEnsureOutcome {
 /// This does not build or rebuild anything.
 pub fn check_kernel_installed_via_recipe(
     repo_root: &Path,
-    output_dir: &Path,
+    distro_id: &str,
+    _kernel_output_dir: &Path,
     spec: &S00BuildKernelSpec,
 ) -> Result<()> {
     let recipe_script = repo_root.join(&spec.recipe_kernel_script);
@@ -47,7 +48,7 @@ pub fn check_kernel_installed_via_recipe(
             )
         })?
         .to_path_buf();
-    let build_dir = build_dir_for_output_dir(repo_root, output_dir)?;
+    let build_dir = build_dir_for_distro(repo_root, distro_id)?;
 
     let recipe_bin =
         crate::recipe::find_recipe(repo_root).context("Resolving recipe binary for 00Build")?;
@@ -73,10 +74,11 @@ pub fn check_kernel_installed_via_recipe(
 /// - re-runs `recipe isinstalled` to confirm.
 pub fn ensure_kernel_installed_via_recipe(
     repo_root: &Path,
-    output_dir: &Path,
+    distro_id: &str,
+    kernel_output_dir: &Path,
     spec: &S00BuildKernelSpec,
 ) -> Result<S00BuildKernelEnsureOutcome> {
-    if check_kernel_installed_via_recipe(repo_root, output_dir, spec).is_ok() {
+    if check_kernel_installed_via_recipe(repo_root, distro_id, kernel_output_dir, spec).is_ok() {
         return Ok(S00BuildKernelEnsureOutcome::AlreadyInstalled);
     }
 
@@ -90,7 +92,7 @@ pub fn ensure_kernel_installed_via_recipe(
             )
         })?
         .to_path_buf();
-    let build_dir = build_dir_for_output_dir(repo_root, output_dir)?;
+    let build_dir = build_dir_for_distro(repo_root, distro_id)?;
 
     let recipe_bin =
         crate::recipe::find_recipe(repo_root).context("Resolving recipe binary for 00Build")?;
@@ -105,33 +107,20 @@ pub fn ensure_kernel_installed_via_recipe(
     )
     .context("00Build kernel install failed")?;
 
-    check_kernel_installed_via_recipe(repo_root, output_dir, spec)
+    check_kernel_installed_via_recipe(repo_root, distro_id, kernel_output_dir, spec)
         .context("00Build kernel check failed after install")?;
     Ok(S00BuildKernelEnsureOutcome::InstalledNow)
 }
 
-fn build_dir_for_output_dir(repo_root: &Path, output_dir: &Path) -> Result<PathBuf> {
-    let output_leaf = output_dir
-        .file_name()
-        .and_then(|s| s.to_str())
-        .ok_or_else(|| {
-            anyhow::anyhow!(
-                "Could not derive distro dir from '{}'",
-                output_dir.display()
-            )
-        })?;
-    if output_leaf.is_empty() {
-        bail!("Empty distro dir derived from '{}'", output_dir.display());
-    }
-
-    let legacy_crate_dir = match output_leaf {
+fn build_dir_for_distro(repo_root: &Path, distro_id: &str) -> Result<PathBuf> {
+    let legacy_crate_dir = match distro_id {
         "levitate" | "leviso" => "leviso",
         "acorn" | "AcornOS" => "AcornOS",
         "iuppiter" | "IuppiterOS" => "IuppiterOS",
         "ralph" | "RalphOS" => "RalphOS",
         other => {
             bail!(
-                "Unsupported distro output dir '{}' for kernel recipe build dir resolution",
+                "Unsupported distro '{}' for kernel recipe build dir resolution",
                 other
             )
         }
@@ -154,7 +143,8 @@ fn kernel_defines(spec: &S00BuildKernelSpec) -> Vec<(&str, &str)> {
 pub fn run_00build_evidence_script(
     repo_root: &Path,
     variant_dir: &Path,
-    output_dir: &Path,
+    kernel_output_dir: &Path,
+    stage_output_dir: &Path,
     spec: &S00BuildEvidenceSpec,
 ) -> Result<()> {
     let script = variant_dir.join(&spec.script_path);
@@ -162,9 +152,9 @@ pub fn run_00build_evidence_script(
         bail!("00Build evidence script not found: {}", script.display());
     }
 
-    let kernel_release_path = output_dir.join(&spec.kernel_release_path);
-    let kernel_image_path = output_dir.join(&spec.kernel_image_path);
-    let iso_path = output_dir.join(&spec.iso_filename);
+    let kernel_release_path = kernel_output_dir.join(&spec.kernel_release_path);
+    let kernel_image_path = kernel_output_dir.join(&spec.kernel_image_path);
+    let iso_path = stage_output_dir.join(&spec.iso_filename);
 
     let output = Command::new("sh")
         .arg(&script)

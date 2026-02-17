@@ -24,7 +24,18 @@
 fn _ensure_output_is_artifacts_out(distro_dir) {
     let output = join_path(distro_dir, "output");
     let distro_name = trim(shell_output("basename '" + distro_dir + "'"));
-    let expected_rel = "../.artifacts/out/" + distro_name;
+    let output_dir_name = if distro_name == "leviso" {
+        "levitate"
+    } else if distro_name == "AcornOS" {
+        "acorn"
+    } else if distro_name == "IuppiterOS" {
+        "iuppiter"
+    } else if distro_name == "RalphOS" {
+        "ralph"
+    } else {
+        distro_name
+    };
+    let expected_rel = "../.artifacts/out/" + output_dir_name;
     // On fresh clones `.artifacts/out` may not exist yet. `readlink -f` fails when
     // the target path doesn't exist, so ensure the directory exists first.
     shell("cd '" + distro_dir + "' && mkdir -p '" + expected_rel + "'");
@@ -33,7 +44,7 @@ fn _ensure_output_is_artifacts_out(distro_dir) {
     if exists(output) {
         let is_link = trim(shell_output("[ -L '" + output + "' ] && echo yes || echo no"));
         if is_link != "yes" {
-            throw "Refusing to install kernel outside `.artifacts/out`: `" + output + "` exists but is not a symlink. Expected: `<distro>/output -> ../.artifacts/out/" + distro_name + "`";
+            throw "Refusing to install kernel outside `.artifacts/out`: `" + output + "` exists but is not a symlink. Expected: `<distro>/output -> ../.artifacts/out/" + output_dir_name + "`";
         }
 
         let actual = trim(shell_output("readlink -f '" + output + "'"));
@@ -46,7 +57,7 @@ fn _ensure_output_is_artifacts_out(distro_dir) {
 
     // Create the symlink (safe: `output` does not exist).
     shell("mkdir -p '" + expected + "'");
-    shell("ln -s '../.artifacts/out/" + distro_name + "' '" + output + "'");
+    shell("ln -s '../.artifacts/out/" + output_dir_name + "' '" + output + "'");
 }
 
 /// Environment prefix for kernel make invocations.

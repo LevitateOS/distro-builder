@@ -11,6 +11,7 @@ categories = ["development-tools::build-utils"]
 [dependencies]
 anyhow = "1.0"
 dirs = "5.0"
+distro-contract = { path = "../distro-contract" }
 distro-spec = { path = "../distro-spec" }
 fs2 = "0.4"
 leviso-elf = { path = "../leviso-elf" }

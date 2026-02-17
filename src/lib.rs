@@ -67,6 +67,7 @@ pub mod preflight;
 pub mod process;
 pub mod qemu;
 pub mod recipe;
+pub mod stages;
 pub mod timing;
 
 pub use build::licenses::LicenseTracker;
@@ -89,6 +90,7 @@ pub use artifact::live_overlay::{
     create_openrc_live_overlay, create_systemd_live_overlay, InittabVariant, LiveOverlayConfig,
     SystemdLiveOverlayConfig,
 };
+pub use artifact::overlayfs::{build_overlayfs_default, create_overlayfs_erofs};
 pub use artifact::rootfs::{build_erofs_default, create_erofs};
 
 // Re-export process utilities

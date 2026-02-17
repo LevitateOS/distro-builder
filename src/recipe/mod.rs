@@ -266,13 +266,34 @@ pub fn run_recipe_json_with_defines(
     defines: &[(&str, &str)],
     recipes_path: Option<&Path>,
 ) -> Result<serde_json::Value> {
+    run_recipe_phase_json_with_defines(
+        recipe_bin,
+        "install",
+        recipe_path,
+        build_dir,
+        defines,
+        recipes_path,
+    )
+}
+
+/// Run a specific recipe lifecycle command (`install`, `isinstalled`, etc),
+/// returning the ctx as JSON.
+pub fn run_recipe_phase_json_with_defines(
+    recipe_bin: &Path,
+    phase: &str,
+    recipe_path: &Path,
+    build_dir: &Path,
+    defines: &[(&str, &str)],
+    recipes_path: Option<&Path>,
+) -> Result<serde_json::Value> {
     eprintln!("  Running recipe: {}", recipe_path.display());
+    eprintln!("    Phase: {}", phase);
     eprintln!("    Build dir: {}", build_dir.display());
 
     let json_path = build_dir.join(".recipe-output.json");
 
     let mut cmd = Command::new(recipe_bin);
-    cmd.arg("install")
+    cmd.arg(phase)
         .arg(recipe_path)
         .arg("--build-dir")
         .arg(build_dir)

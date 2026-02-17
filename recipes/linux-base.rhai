@@ -15,21 +15,21 @@
 
 let build_deps = ["linux-deps"];
 
-let major = KERNEL_VERSION.split(".")[0];
 let ctx = #{
-    build_dir: "/data/vince/LevitateOS/RalphOS/output/kernel-build",
-    description: "Linux kernel (6.12.71)",
-    kernel_version: "6.12.71",
+    build_dir: "",
+    description: "",
+    kernel_version: "",
     name: "linux",
-    source_dir_name: "linux-6.12.71",
-    source_path: "/data/vince/LevitateOS/RalphOS/downloads/linux-6.12.71",
-    tarball_filename: "linux-6.12.71.tar.xz",
-    tarball_url: "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.12.71.tar.xz",
+    source_dir_name: "",
+    source_path: "",
+    tarball_filename: "",
+    tarball_url: "",
 };
 
 // This recipe is parameterized via `--define` and shared across multiple distros.
 // The executor persists `ctx` into the recipe file, so always re-derive define-dependent
 // fields on load and clear run-specific paths to avoid cross-distro contamination.
+let major = KERNEL_VERSION.split(".")[0];
 ctx.description = "Linux kernel (" + KERNEL_VERSION + ")";
 ctx.tarball_url = "https://cdn.kernel.org/pub/linux/kernel/v" + major + ".x/linux-" + KERNEL_VERSION + ".tar.xz";
 ctx.tarball_filename = "linux-" + KERNEL_VERSION + ".tar.xz";

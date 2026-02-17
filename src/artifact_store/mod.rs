@@ -751,7 +751,7 @@ impl ArtifactStore {
 /// `<repo>/.artifacts/out/<distro_dir_name>/`
 ///
 /// Example:
-/// - `.../LevitateOS/leviso` -> `.../LevitateOS/.artifacts/out/leviso`
+/// - `.../LevitateOS/leviso` -> `.../LevitateOS/.artifacts/out/levitate`
 pub fn central_output_dir_for_distro(base_dir: &Path) -> PathBuf {
     // In the monorepo, distro crates live at `<repo>/<DistroDir>`.
     // Use the parent as the repo root (standalone support can be added later).
@@ -760,10 +760,17 @@ pub fn central_output_dir_for_distro(base_dir: &Path) -> PathBuf {
         .file_name()
         .and_then(|s| s.to_str())
         .unwrap_or("distro");
+    let output_name = match distro_name {
+        "leviso" => "levitate",
+        "AcornOS" => "acorn",
+        "IuppiterOS" => "iuppiter",
+        "RalphOS" => "ralph",
+        other => other,
+    };
     repo_root
         .join(DEFAULT_STORE_DIR)
         .join(DEFAULT_OUTPUT_SUBDIR)
-        .join(distro_name)
+        .join(output_name)
 }
 
 /// Read an input key file (typically `output/.<artifact>-inputs.hash`) as a trimmed string.

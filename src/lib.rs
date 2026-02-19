@@ -84,7 +84,7 @@ pub use artifact::disk::{
 pub use artifact::filesystem::{atomic_move, copy_dir_recursive, create_initramfs_dirs};
 pub use artifact::iso_utils::{
     create_efi_boot_image, create_efi_dirs_in_fat, create_fat16_image, generate_iso_checksum,
-    mcopy_to_fat, run_xorriso, setup_iso_structure,
+    mcopy_to_fat, run_xorriso, setup_iso_structure, AppendedPartition,
 };
 pub use artifact::live_overlay::{
     create_openrc_live_overlay, create_systemd_live_overlay, InittabVariant, LiveOverlayConfig,

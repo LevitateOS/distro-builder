@@ -123,6 +123,15 @@ impl QemuBuilder {
                     "id=cdrom0,if=none,format=raw,readonly=on,file={}",
                     cdrom.display()
                 ),
+                "-device",
+                "ahci,id=ahci1",
+                "-device",
+                "ide-hd,drive=cdparts0,bus=ahci1.0",
+                "-drive",
+                &format!(
+                    "id=cdparts0,if=none,format=raw,readonly=on,file={}",
+                    cdrom.display()
+                ),
             ]);
         }
 
@@ -279,6 +288,15 @@ pub fn test_iso_boot(
         "-drive",
         &format!(
             "id=cdrom0,if=none,format=raw,readonly=on,file={}",
+            iso_path.display()
+        ),
+        "-device",
+        "ahci,id=ahci1",
+        "-device",
+        "ide-hd,drive=cdparts0,bus=ahci1.0",
+        "-drive",
+        &format!(
+            "id=cdparts0,if=none,format=raw,readonly=on,file={}",
             iso_path.display()
         ),
     ]);

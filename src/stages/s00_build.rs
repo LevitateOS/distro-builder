@@ -6,6 +6,7 @@ use std::process::Command;
 #[derive(Debug, Clone)]
 pub struct S00BuildKernelSpec {
     pub recipe_kernel_script: String,
+    pub kernel_kconfig_path: String,
     pub kernel_version: String,
     pub kernel_sha256: String,
     pub kernel_localversion: String,
@@ -26,7 +27,6 @@ pub struct S00BuildEvidenceSpec {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum S00BuildKernelEnsureOutcome {
     AlreadyInstalled,
-    InstalledNow,
 }
 
 /// Check 00Build kernel install state using Recipe `isinstalled`.
@@ -34,8 +34,9 @@ pub enum S00BuildKernelEnsureOutcome {
 /// This does not build or rebuild anything.
 pub fn check_kernel_installed_via_recipe(
     repo_root: &Path,
+    variant_dir: &Path,
     distro_id: &str,
-    _kernel_output_dir: &Path,
+    kernel_output_dir: &Path,
     spec: &S00BuildKernelSpec,
 ) -> Result<()> {
     let recipe_script = repo_root.join(&spec.recipe_kernel_script);
@@ -49,10 +50,15 @@ pub fn check_kernel_installed_via_recipe(
         })?
         .to_path_buf();
     let build_dir = build_dir_for_distro(repo_root, distro_id)?;
+    let kernel_kconfig_path = variant_dir
+        .join(&spec.kernel_kconfig_path)
+        .to_string_lossy()
+        .to_string();
 
     let recipe_bin =
         crate::recipe::find_recipe(repo_root).context("Resolving recipe binary for 00Build")?;
-    let defines = kernel_defines(spec);
+    let kernel_artifact_root = kernel_output_dir.to_string_lossy().to_string();
+    let defines = kernel_defines(spec, &kernel_kconfig_path, &kernel_artifact_root);
     crate::recipe::run_recipe_phase_json_with_defines(
         &recipe_bin.path,
         "isinstalled",
@@ -69,71 +75,63 @@ pub fn check_kernel_installed_via_recipe(
 /// Ensure 00Build kernel install state through shared Recipe orchestration.
 ///
 /// Behavior:
-/// - first runs `recipe isinstalled` (no build);
-/// - if missing, runs `recipe install` with `KERNEL_FORCE_REBUILD=0`;
-/// - re-runs `recipe isinstalled` to confirm.
+/// - runs `recipe isinstalled` (no build).
+/// - if missing, fails fast with remediation. Kernel rebuilds are forbidden in ISO stage builds.
 pub fn ensure_kernel_installed_via_recipe(
     repo_root: &Path,
+    variant_dir: &Path,
     distro_id: &str,
     kernel_output_dir: &Path,
     spec: &S00BuildKernelSpec,
 ) -> Result<S00BuildKernelEnsureOutcome> {
-    if check_kernel_installed_via_recipe(repo_root, distro_id, kernel_output_dir, spec).is_ok() {
-        return Ok(S00BuildKernelEnsureOutcome::AlreadyInstalled);
+    match check_kernel_installed_via_recipe(repo_root, variant_dir, distro_id, kernel_output_dir, spec) {
+        Ok(()) => Ok(S00BuildKernelEnsureOutcome::AlreadyInstalled),
+        Err(e) => bail!(
+            "00Build kernel is not preinstalled for '{}': {}\n\
+             Kernel rebuilds are forbidden during stage ISO builds.\n\
+             Remediation: run 'cargo xtask kernels build {}' (or '--rebuild' if provenance is stale), then retry the ISO build.",
+            distro_id,
+            e,
+            distro_id
+        ),
     }
-
-    let recipe_script = repo_root.join(&spec.recipe_kernel_script);
-    let recipes_path = recipe_script
-        .parent()
-        .ok_or_else(|| {
-            anyhow::anyhow!(
-                "recipe_kernel_script has no parent directory: {}",
-                recipe_script.display()
-            )
-        })?
-        .to_path_buf();
-    let build_dir = build_dir_for_distro(repo_root, distro_id)?;
-
-    let recipe_bin =
-        crate::recipe::find_recipe(repo_root).context("Resolving recipe binary for 00Build")?;
-    let defines = kernel_defines(spec);
-    crate::recipe::run_recipe_phase_json_with_defines(
-        &recipe_bin.path,
-        "install",
-        &recipe_script,
-        &build_dir,
-        &defines,
-        Some(&recipes_path),
-    )
-    .context("00Build kernel install failed")?;
-
-    check_kernel_installed_via_recipe(repo_root, distro_id, kernel_output_dir, spec)
-        .context("00Build kernel check failed after install")?;
-    Ok(S00BuildKernelEnsureOutcome::InstalledNow)
 }
 
 fn build_dir_for_distro(repo_root: &Path, distro_id: &str) -> Result<PathBuf> {
-    let legacy_crate_dir = match distro_id {
-        "levitate" | "leviso" => "leviso",
-        "acorn" | "AcornOS" => "AcornOS",
-        "iuppiter" | "IuppiterOS" => "IuppiterOS",
-        "ralph" | "RalphOS" => "RalphOS",
-        other => {
-            bail!(
-                "Unsupported distro '{}' for kernel recipe build dir resolution",
-                other
-            )
-        }
+    let normalized = match distro_id {
+        "levitate" | "leviso" => "levitate",
+        "acorn" | "AcornOS" => "acorn",
+        "iuppiter" | "IuppiterOS" => "iuppiter",
+        "ralph" | "RalphOS" => "ralph",
+        other => bail!(
+            "Unsupported distro '{}' for kernel recipe build dir resolution",
+            other
+        ),
     };
-
-    Ok(repo_root.join(legacy_crate_dir).join("downloads"))
+    let build_dir = repo_root
+        .join(".artifacts/work")
+        .join(normalized)
+        .join("downloads");
+    std::fs::create_dir_all(&build_dir).with_context(|| {
+        format!(
+            "creating kernel recipe work directory '{}'",
+            build_dir.display()
+        )
+    })?;
+    Ok(build_dir)
 }
 
-fn kernel_defines(spec: &S00BuildKernelSpec) -> Vec<(&str, &str)> {
+fn kernel_defines<'a>(
+    spec: &'a S00BuildKernelSpec,
+    kernel_kconfig_path: &'a str,
+    kernel_artifact_root: &'a str,
+) -> Vec<(&'a str, &'a str)> {
     vec![
         ("KERNEL_VERSION", spec.kernel_version.as_str()),
         ("KERNEL_SHA256", spec.kernel_sha256.as_str()),
         ("KERNEL_LOCALVERSION", spec.kernel_localversion.as_str()),
+        ("KERNEL_KCONFIG_PATH", kernel_kconfig_path),
+        ("KERNEL_ARTIFACT_ROOT", kernel_artifact_root),
         ("KERNEL_FORCE_REBUILD", "0"),
         ("MODULE_INSTALL_PATH", spec.module_install_path.as_str()),
     ]

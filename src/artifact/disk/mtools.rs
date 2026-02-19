@@ -1,19 +1,49 @@
 //! mtools file operations for FAT32 image manipulation.
 
 use crate::process::Cmd;
-use anyhow::Result;
+use anyhow::{bail, Result};
 use std::fs;
 use std::path::Path;
 
 /// Create a directory in a FAT image using mmd.
 pub fn mtools_mkdir(image: &Path, dir: &str) -> Result<()> {
-    // Note: mmd returns error if directory exists, which is fine
-    let _ = Cmd::new("mmd")
+    let target = format!("::{}", dir);
+    let result = Cmd::new("mmd")
         .args(["-i"])
         .arg_path(image)
-        .arg(format!("::{}", dir))
+        .arg(&target)
+        .allow_fail()
         .run();
-    Ok(())
+
+    match result {
+        Ok(output) => {
+            if output.success() {
+                return Ok(());
+            }
+
+            let output_text = format!(
+                "{} {}",
+                output.stdout_trimmed().to_ascii_lowercase(),
+                output.stderr_trimmed().to_ascii_lowercase()
+            );
+
+            if output_text.contains("already exists") {
+                return Ok(());
+            }
+
+            bail!(
+                "mmd failed to create directory '{}': {}{}",
+                dir,
+                output.exit_description(),
+                if output_text.trim().is_empty() {
+                    String::new()
+                } else {
+                    format!("; {}", output_text)
+                }
+            );
+        }
+        Err(err) => Err(err),
+    }
 }
 
 /// Copy a file into a FAT image using mcopy.

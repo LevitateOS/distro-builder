@@ -12,6 +12,7 @@
 
 pub mod alpine;
 pub mod linux;
+pub mod rocky_stage01;
 
 use crate::process::ensure_exists;
 use anyhow::{bail, Context, Result};

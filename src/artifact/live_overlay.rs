@@ -30,6 +30,8 @@ pub struct LiveOverlayConfig<'a> {
     pub inittab: InittabVariant,
     /// Optional path to profile/live-overlay directory to copy first.
     pub profile_overlay: Option<&'a Path>,
+    /// Optional override for `/etc/issue`.
+    pub issue_message: Option<&'a str>,
 }
 
 /// Configuration for creating a systemd live overlay.
@@ -39,6 +41,15 @@ pub struct SystemdLiveOverlayConfig<'a> {
     pub os_name: &'a str,
     /// Optional override for `/etc/issue`.
     pub issue_message: Option<&'a str>,
+    /// Systemd unit names to mask by linking to `/dev/null`.
+    pub masked_units: &'a [&'a str],
+    /// Whether to write serial-console stage test marker profile script.
+    pub write_serial_test_profile: bool,
+    /// Optional machine-id content to write at `/etc/machine-id`.
+    pub machine_id: Option<&'a str>,
+    /// When true, install a strict UTF-8 locale profile for live shells.
+    /// Stage producers must ensure UTF-8 locale payload exists in rootfs.
+    pub enforce_utf8_locale_profile: bool,
 }
 
 /// Create an OpenRC live overlay at `output_dir/live-overlay`.
@@ -85,6 +96,11 @@ pub fn create_openrc_live_overlay(
 echo "[autologin] Starting login shell..."
 echo "___SHELL_READY___"
 echo "___PROMPT___"
+echo "[autologin] Starting login shell..." >/dev/console 2>/dev/null || true
+echo "___SHELL_READY___" >/dev/console 2>/dev/null || true
+echo "___PROMPT___" >/dev/console 2>/dev/null || true
+echo "___SHELL_READY___" >/dev/kmsg 2>/dev/null || true
+echo "___PROMPT___" >/dev/kmsg 2>/dev/null || true
 
 # Run sh as login shell (sources /etc/profile and /etc/profile.d/*)
 # In Alpine, /bin/sh is busybox ash
@@ -96,13 +112,15 @@ exec /bin/sh -l
     )?;
 
     // /etc/issue
+    let default_issue = format!(
+        "\n{} Live - \\l\n\nLogin as 'root' (no password)\n\n",
+        config.os_name
+    );
     fs::write(
         live_overlay.join("etc/issue"),
-        format!(
-            "\n{} Live - \\l\n\nLogin as 'root' (no password)\n\n",
-            config.os_name
-        ),
+        config.issue_message.unwrap_or(&default_issue),
     )?;
+    fs::write(live_overlay.join(".live-payload-role"), "overlay\n")?;
 
     // Empty root password for live session
     let shadow_content = "root::0:0:99999:7:::\n\
@@ -121,7 +139,6 @@ exec /bin/sh -l
 
 ::sysinit:/sbin/openrc sysinit
 ::sysinit:/sbin/openrc boot
-::wait:/sbin/openrc default
 
 # Virtual terminals
 tty1::respawn:/sbin/getty 38400 tty1
@@ -133,7 +150,10 @@ tty6::respawn:/sbin/getty 38400 tty6
 
 # Serial console with autologin for test harness
 # Uses wrapper script that spawns ash as login shell (sources /etc/profile.d/*)
-ttyS0::respawn:/sbin/getty -n -l /usr/local/bin/serial-autologin 115200 ttyS0 vt100
+ttyS0::respawn:/sbin/getty -L -n -l /usr/local/bin/serial-autologin 115200 ttyS0 vt100
+
+# Continue remaining services after serial shell is available
+::wait:/sbin/openrc default
 
 # Ctrl+Alt+Del
 ::ctrlaltdel:/sbin/reboot
@@ -148,11 +168,13 @@ ttyS0::respawn:/sbin/getty -n -l /usr/local/bin/serial-autologin 115200 ttyS0 vt
 
 ::sysinit:/sbin/openrc sysinit
 ::sysinit:/sbin/openrc boot
-::wait:/sbin/openrc default
 
 # Serial console PRIMARY with autologin (ttyS0) - appliance has no display
 # Uses wrapper script that spawns ash as login shell (sources /etc/profile.d/*)
-ttyS0::respawn:/sbin/getty -n -l /usr/local/bin/serial-autologin 115200 ttyS0 vt100
+ttyS0::respawn:/sbin/getty -L -n -l /usr/local/bin/serial-autologin 115200 ttyS0 vt100
+
+# Continue remaining services after serial shell is available
+::wait:/sbin/openrc default
 
 # Ctrl+Alt+Del
 ::ctrlaltdel:/sbin/reboot
@@ -315,8 +337,11 @@ pub fn create_systemd_live_overlay(
     fs::create_dir_all(live_overlay.join("etc/systemd/system/getty@.service.d"))?;
     fs::create_dir_all(live_overlay.join("etc/systemd/system/serial-getty@.service.d"))?;
     fs::create_dir_all(live_overlay.join("etc/systemd/system/basic.target.wants"))?;
+    fs::create_dir_all(live_overlay.join("etc/systemd/system/multi-user.target.wants"))?;
     fs::create_dir_all(live_overlay.join("etc/profile.d"))?;
+    fs::create_dir_all(live_overlay.join("etc/tmpfiles.d"))?;
     fs::create_dir_all(live_overlay.join("usr/local/bin"))?;
+    fs::create_dir_all(live_overlay.join("usr/local/sbin"))?;
 
     let tty1_autologin =
         "[Service]\nExecStart=\nExecStart=-/sbin/agetty --autologin root --noclear %I $TERM\n";
@@ -328,6 +353,11 @@ pub fn create_systemd_live_overlay(
     let serial_autologin_script = r#"#!/bin/sh
 echo "___SHELL_READY___"
 echo "___PROMPT___"
+# Stage live override: canonical UTF-8 locale for interactive shells.
+export LANG=C.UTF-8
+unset LC_ALL LC_CTYPE LC_NUMERIC LC_TIME LC_COLLATE LC_MESSAGES \
+      LC_MONETARY LC_PAPER LC_NAME LC_ADDRESS LC_TELEPHONE LC_MEASUREMENT \
+      LC_IDENTIFICATION
 exec /bin/bash -il
 "#;
     write_executable(
@@ -348,29 +378,69 @@ exec /bin/bash -il
         "/usr/lib/systemd/system/serial-getty@.service",
         live_overlay.join("etc/systemd/system/basic.target.wants/serial-getty@ttyS0.service"),
     )?;
-    // Stage 01 live boot must be non-interactive and not blocked by first-boot setup.
-    symlink(
-        "/dev/null",
-        live_overlay.join("etc/systemd/system/systemd-firstboot.service"),
+    for unit in config.masked_units {
+        symlink(
+            "/dev/null",
+            live_overlay.join(format!("etc/systemd/system/{unit}")),
+        )?;
+    }
+
+    let shutdown_cleanup_script = r#"#!/bin/sh
+# Live ISO shutdown cleanup:
+# release loop-backed live mounts before systemd reaches umount.target.
+set +e
+
+for mp in /live-overlay /rootfs /run/live-media; do
+    if mountpoint -q "$mp"; then
+        umount "$mp" >/dev/null 2>&1 || umount -l "$mp" >/dev/null 2>&1
+    fi
+done
+
+if [ -d /run/live-media ]; then
+    rmdir /run/live-media 2>/dev/null || true
+fi
+
+for loopdev in /dev/loop1 /dev/loop0; do
+    if [ -b "$loopdev" ]; then
+        losetup -d "$loopdev" >/dev/null 2>&1 || true
+    fi
+done
+
+if mountpoint -q /media/cdrom; then
+    umount /media/cdrom >/dev/null 2>&1 || umount -l /media/cdrom >/dev/null 2>&1
+fi
+
+exit 0
+"#;
+    write_executable(
+        &live_overlay.join("usr/local/sbin/live-shutdown-cleanup"),
+        shutdown_cleanup_script,
     )?;
-    // Keep Stage 01 minimal: do not fail boot if audit userspace is absent.
-    symlink(
-        "/dev/null",
-        live_overlay.join("etc/systemd/system/auditd.service"),
+
+    let shutdown_cleanup_unit = r#"[Unit]
+Description=Live ISO shutdown cleanup
+DefaultDependencies=no
+After=multi-user.target
+Before=run-live-media.mount umount.target shutdown.target
+Conflicts=shutdown.target umount.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/true
+ExecStop=/usr/local/sbin/live-shutdown-cleanup
+
+[Install]
+WantedBy=multi-user.target
+"#;
+    fs::write(
+        live_overlay.join("etc/systemd/system/live-shutdown-cleanup.service"),
+        shutdown_cleanup_unit,
     )?;
-    // Avoid Stage 01 failure on missing keymap assets in minimal live rootfs.
     symlink(
-        "/dev/null",
-        live_overlay.join("etc/systemd/system/systemd-vconsole-setup.service"),
-    )?;
-    // Stage 01 does not require a full D-Bus system bus.
-    symlink(
-        "/dev/null",
-        live_overlay.join("etc/systemd/system/dbus-broker.service"),
-    )?;
-    symlink(
-        "/dev/null",
-        live_overlay.join("etc/systemd/system/dbus.service"),
+        "/etc/systemd/system/live-shutdown-cleanup.service",
+        live_overlay
+            .join("etc/systemd/system/multi-user.target.wants/live-shutdown-cleanup.service"),
     )?;
 
     let default_issue = format!(
@@ -382,9 +452,8 @@ exec /bin/bash -il
         config.issue_message.unwrap_or(&default_issue),
     )?;
 
-    // Serial-console harness markers for staged boot tests.
-    // Emitted only for interactive shells on ttyS0.
-    let test_profile = r#"# Stage harness markers (serial console only)
+    if config.write_serial_test_profile {
+        let test_profile = r#"# Stage harness markers (serial console only)
 case "$-" in
     *i*) ;;
     *) return 0 ;;
@@ -397,16 +466,34 @@ if [ "$(tty 2>/dev/null)" = "/dev/ttyS0" ]; then
     export PROMPT_COMMAND
 fi
 "#;
+        fs::write(
+            live_overlay.join("etc/profile.d/00-live-test.sh"),
+            test_profile,
+        )?;
+    }
+
+    if config.enforce_utf8_locale_profile {
+        // Adoptability-first policy: live shell locale is explicitly UTF-8.
+        // Producers are responsible for shipping locale data in the stage rootfs.
+        let locale_profile = r#"#!/bin/sh
+# Stage live override: canonical UTF-8 locale for interactive shells.
+export LANG=C.UTF-8
+unset LC_ALL LC_CTYPE LC_NUMERIC LC_TIME LC_COLLATE LC_MESSAGES \
+      LC_MONETARY LC_PAPER LC_NAME LC_ADDRESS LC_TELEPHONE LC_MEASUREMENT \
+      LC_IDENTIFICATION
+"#;
+        write_executable(&live_overlay.join("etc/profile.d/lang.sh"), locale_profile)?;
+    }
+
+    // Ensure runtime sshd directory exists on tmpfs-backed /run before sshd starts.
     fs::write(
-        live_overlay.join("etc/profile.d/00-live-test.sh"),
-        test_profile,
+        live_overlay.join("etc/tmpfiles.d/sshd-local.conf"),
+        "d /run/sshd 0755 root root -\n",
     )?;
 
-    // Prevent ConditionFirstBoot= from triggering interactive first-boot wizard.
-    fs::write(
-        live_overlay.join("etc/machine-id"),
-        "0123456789abcdef0123456789abcdef\n",
-    )?;
+    if let Some(machine_id) = config.machine_id {
+        fs::write(live_overlay.join("etc/machine-id"), machine_id)?;
+    }
 
     // Keep root password empty for live autologin, but avoid "password change
     // required" at first login by using a non-zero lastchg day.
@@ -418,6 +505,7 @@ fi
     let mut perms = fs::metadata(live_overlay.join("etc/shadow"))?.permissions();
     perms.set_mode(0o600);
     fs::set_permissions(live_overlay.join("etc/shadow"), perms)?;
+    fs::write(live_overlay.join(".live-payload-role"), "overlay\n")?;
 
     println!(
         "  Systemd live overlay created at {}",

@@ -245,8 +245,9 @@ pub fn run_xorriso(
     output: &Path,
     label: &str,
     efiboot_filename: &str,
+    appended_partitions: &[AppendedPartition<'_>],
 ) -> Result<()> {
-    Cmd::new("xorriso")
+    let mut cmd = Cmd::new("xorriso")
         .args(["-as", "mkisofs", "-o"])
         .arg_path(output)
         .args(["-V", label]) // Volume label for device detection
@@ -257,12 +258,29 @@ pub fn run_xorriso(
             efiboot_filename,
             "-no-emul-boot",
             "-isohybrid-gpt-basdat",
-        ])
-        .arg_path(iso_root)
+        ]);
+
+    for part in appended_partitions {
+        cmd = cmd
+            .args(["-append_partition", &part.index.to_string(), part.type_code])
+            .arg_path(part.path);
+    }
+    if !appended_partitions.is_empty() {
+        cmd = cmd.arg("-appended_part_as_gpt");
+    }
+
+    cmd.arg_path(iso_root)
         .error_msg("xorriso failed. Install xorriso.")
         .run()?;
 
     Ok(())
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct AppendedPartition<'a> {
+    pub index: u32,
+    pub type_code: &'a str,
+    pub path: &'a Path,
 }
 
 #[cfg(test)]

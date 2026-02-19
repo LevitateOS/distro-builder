@@ -127,9 +127,30 @@ pub fn create_erofs(
 
     // Print size
     let metadata = fs::metadata(output)?;
-    println!("EROFS created: {} MB", metadata.len() / 1024 / 1024);
+    let bytes = metadata.len();
+    println!("EROFS created: {}", format_size_human(bytes));
 
     Ok(())
+}
+
+fn format_size_human(bytes: u64) -> String {
+    const UNITS: &[&str] = &["B", "KB", "MB", "GB", "TB"];
+    if bytes < 1024 {
+        return format!("{bytes} B");
+    }
+
+    let mut value = bytes as f64;
+    let mut unit = 0usize;
+    while value >= 1024.0 && unit + 1 < UNITS.len() {
+        value /= 1024.0;
+        unit += 1;
+    }
+
+    if value >= 10.0 || (value.fract() - 0.0).abs() < f64::EPSILON {
+        format!("{value:.0} {}", UNITS[unit])
+    } else {
+        format!("{value:.1} {}", UNITS[unit])
+    }
 }
 
 fn ensure_owner_readable_files(source_dir: &Path) -> Result<()> {

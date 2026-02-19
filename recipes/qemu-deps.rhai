@@ -10,19 +10,9 @@
 let base_url = "http://rockylinux.mirror.intermax.nl/10.1/AppStream/x86_64/os/Packages";
 
 let ctx = #{
-    name: "qemu-deps",
     description: "QEMU and OVMF for boot testing",
-    rpms: [
-        [base_url + "/q/qemu-kvm-core-10.0.0-14.el10_1.x86_64.rpm", "qemu-kvm-core.rpm"],
-        [base_url + "/q/qemu-kvm-common-10.0.0-14.el10_1.x86_64.rpm", "qemu-kvm-common.rpm"],
-        [base_url + "/e/edk2-ovmf-20250523-2.el10.noarch.rpm", "edk2-ovmf.rpm"],
-        // Shared library deps not in Rocky base install
-        [base_url + "/c/capstone-5.0.1-6.el10.x86_64.rpm", "capstone.rpm"],
-        [base_url + "/p/pixman-0.43.4-2.el10.x86_64.rpm", "pixman.rpm"],
-        [base_url + "/l/libslirp-4.7.0-10.el10.x86_64.rpm", "libslirp.rpm"],
-        // iPXE network boot ROMs (efi-e1000.rom etc.)
-        [base_url + "/i/ipxe-roms-qemu-20240119-5.gitde8a0821.el10.noarch.rpm", "ipxe-roms-qemu.rpm"],
-    ],
+    name: "qemu-deps",
+    rpms: "[[\"http://rockylinux.mirror.intermax.nl/10.1/AppStream/x86_64/os/Packages/q/qemu-kvm-core-10.0.0-14.el10_1.x86_64.rpm\", \"qemu-kvm-core.rpm\"], [\"http://rockylinux.mirror.intermax.nl/10.1/AppStream/x86_64/os/Packages/q/qemu-kvm-common-10.0.0-14.el10_1.x86_64.rpm\", \"qemu-kvm-common.rpm\"], [\"http://rockylinux.mirror.intermax.nl/10.1/AppStream/x86_64/os/Packages/e/edk2-ovmf-20250523-2.el10.noarch.rpm\", \"edk2-ovmf.rpm\"], [\"http://rockylinux.mirror.intermax.nl/10.1/AppStream/x86_64/os/Packages/c/capstone-5.0.1-6.el10.x86_64.rpm\", \"capstone.rpm\"], [\"http://rockylinux.mirror.intermax.nl/10.1/AppStream/x86_64/os/Packages/p/pixman-0.43.4-2.el10.x86_64.rpm\", \"pixman.rpm\"], [\"http://rockylinux.mirror.intermax.nl/10.1/AppStream/x86_64/os/Packages/l/libslirp-4.7.0-10.el10.x86_64.rpm\", \"libslirp.rpm\"], [\"http://rockylinux.mirror.intermax.nl/10.1/AppStream/x86_64/os/Packages/i/ipxe-roms-qemu-20240119-5.gitde8a0821.el10.noarch.rpm\", \"ipxe-roms-qemu.rpm\"]]",
 };
 
 fn is_installed(ctx) {

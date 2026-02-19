@@ -6,6 +6,7 @@
 // Differences are injected via --define (from distro-spec):
 // - KERNEL_VERSION, KERNEL_SHA256, KERNEL_LOCALVERSION
 // - MODULE_INSTALL_PATH: "/lib/modules" (Alpine) or "/usr/lib/modules" (UsrMerge)
+// - KERNEL_ARTIFACT_ROOT: canonical kernel artifact root directory
 //
 // Distro-specific knobs live in distro-spec + each distro's `kconfig`.
 
@@ -15,49 +16,18 @@
 // Do NOT add `|| true` or otherwise ignore failures; fix the real issue.
 // Keep changes minimal and local.
 
-/// LevitateOS invariant: all kernel artifacts MUST land under `.artifacts/out/<DistroDir>/...`.
+/// Resolve canonical kernel artifact root.
 ///
-/// The recipe writes to `<distro>/output/...` and relies on `<distro>/output` being a symlink:
-/// `<distro>/output -> ../.artifacts/out/<DistroDir>`.
+/// Required define:
+/// - KERNEL_ARTIFACT_ROOT
 ///
-/// This helper enforces that, and will create the symlink if `output/` is missing.
-fn _ensure_output_is_artifacts_out(distro_dir) {
-    let output = join_path(distro_dir, "output");
-    let distro_name = trim(shell_output("basename '" + distro_dir + "'"));
-    let output_dir_name = if distro_name == "leviso" {
-        "levitate"
-    } else if distro_name == "AcornOS" {
-        "acorn"
-    } else if distro_name == "IuppiterOS" {
-        "iuppiter"
-    } else if distro_name == "RalphOS" {
-        "ralph"
-    } else {
-        distro_name
-    };
-    let expected_rel = "../.artifacts/out/" + output_dir_name;
-    // On fresh clones `.artifacts/out` may not exist yet. `readlink -f` fails when
-    // the target path doesn't exist, so ensure the directory exists first.
-    shell("cd '" + distro_dir + "' && mkdir -p '" + expected_rel + "'");
-    let expected = trim(shell_output("cd '" + distro_dir + "' && readlink -f '" + expected_rel + "'"));
-
-    if exists(output) {
-        let is_link = trim(shell_output("[ -L '" + output + "' ] && echo yes || echo no"));
-        if is_link != "yes" {
-            throw "Refusing to install kernel outside `.artifacts/out`: `" + output + "` exists but is not a symlink. Expected: `<distro>/output -> ../.artifacts/out/" + output_dir_name + "`";
-        }
-
-        let actual = trim(shell_output("readlink -f '" + output + "'"));
-        if actual != expected {
-            throw "Refusing to install kernel outside `.artifacts/out`: `" + output + "` points to `" + actual + "`, expected `" + expected + "`";
-        }
-
-        return;
+/// This recipe no longer supports `<distro>/output` symlink indirection.
+fn _kernel_artifact_root_or_throw(kernel_artifact_root) {
+    if kernel_artifact_root == "" {
+        throw "KERNEL_ARTIFACT_ROOT is required";
     }
-
-    // Create the symlink (safe: `output` does not exist).
-    shell("mkdir -p '" + expected + "'");
-    shell("ln -s '../.artifacts/out/" + output_dir_name + "' '" + output + "'");
+    mkdir(kernel_artifact_root);
+    kernel_artifact_root
 }
 
 /// Environment prefix for kernel make invocations.
@@ -226,13 +196,11 @@ fn _kernel_release_or_throw(build_dir, expected_version, expected_localversion) 
     rel
 }
 
-// === OVERRIDES (enforce `.artifacts/out` + usrmerge-aware install detection) ===
+// === OVERRIDES (explicit kernel root + usrmerge-aware install detection) ===
 
 fn is_built(ctx) {
-    let distro_dir = dirname(BUILD_DIR);
-    _ensure_output_is_artifacts_out(distro_dir);
-
-    let build_dir = join_path(distro_dir, "output/kernel-build");
+    let kernel_root = _kernel_artifact_root_or_throw(KERNEL_ARTIFACT_ROOT);
+    let build_dir = join_path(kernel_root, "kernel-build");
     let bzimage = join_path(build_dir, "arch/x86/boot/bzImage");
 
     if KERNEL_FORCE_REBUILD == "1" {
@@ -251,13 +219,14 @@ fn is_built(ctx) {
 }
 
 fn build(ctx) {
-    let distro_dir = dirname(BUILD_DIR);
-    _ensure_output_is_artifacts_out(distro_dir);
-
-    let kconfig = join_path(distro_dir, "kconfig");
-    let output_dir = join_path(distro_dir, "output");
-    let build_dir = join_path(output_dir, "kernel-build");
-    let build_dir_tmp = join_path(output_dir, "kernel-build.tmp");
+    let kconfig = if KERNEL_KCONFIG_PATH == "" {
+        throw "KERNEL_KCONFIG_PATH is required";
+    } else {
+        KERNEL_KCONFIG_PATH
+    };
+    let kernel_root = _kernel_artifact_root_or_throw(KERNEL_ARTIFACT_ROOT);
+    let build_dir = join_path(kernel_root, "kernel-build");
+    let build_dir_tmp = join_path(kernel_root, "kernel-build.tmp");
 
     if !is_file(kconfig) {
         throw "kconfig not found at " + kconfig;
@@ -293,12 +262,10 @@ fn build(ctx) {
 }
 
 fn is_installed(ctx) {
-    let distro_dir = dirname(BUILD_DIR);
-    _ensure_output_is_artifacts_out(distro_dir);
-
-    let staging = join_path(distro_dir, "output/staging");
+    let kernel_root = _kernel_artifact_root_or_throw(KERNEL_ARTIFACT_ROOT);
+    let staging = join_path(kernel_root, "staging");
     let vmlinuz = join_path(staging, "boot/vmlinuz");
-    let build_dir = join_path(distro_dir, "output/kernel-build");
+    let build_dir = join_path(kernel_root, "kernel-build");
     let rel = _kernel_release_or_throw(build_dir, KERNEL_VERSION, KERNEL_LOCALVERSION);
 
     if KERNEL_FORCE_REBUILD == "1" {
@@ -322,12 +289,9 @@ fn is_installed(ctx) {
 }
 
 fn install(ctx) {
-    let distro_dir = dirname(BUILD_DIR);
-    _ensure_output_is_artifacts_out(distro_dir);
-
-    let output_dir = join_path(distro_dir, "output");
-    let staging = join_path(output_dir, "staging");
-    let staging_tmp = join_path(output_dir, "staging.tmp");
+    let kernel_root = _kernel_artifact_root_or_throw(KERNEL_ARTIFACT_ROOT);
+    let staging = join_path(kernel_root, "staging");
+    let staging_tmp = join_path(kernel_root, "staging.tmp");
     let build_dir = ctx.build_dir;
 
     let source_path = ctx.source_path;

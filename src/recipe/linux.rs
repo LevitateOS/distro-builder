@@ -40,6 +40,20 @@ pub fn linux(
         .unwrap_or_else(|| base_dir.to_path_buf());
 
     let downloads_dir = base_dir.join("downloads");
+    let kernel_artifact_root = monorepo_dir
+        .join(".artifacts/kernel")
+        .join(
+            match base_dir.file_name().and_then(|s| s.to_str()).unwrap_or("") {
+                "leviso" => "levitate",
+                "AcornOS" => "acorn",
+                "IuppiterOS" => "iuppiter",
+                "RalphOS" => "ralph",
+                other => other,
+            },
+        )
+        .join("current")
+        .to_string_lossy()
+        .to_string();
 
     // Single SSOT kernel recipe for all distros (parity). Distro-specific overrides
     // (e.g. <distro>/deps/linux.rhai) are intentionally ignored.
@@ -53,10 +67,13 @@ pub fn linux(
     let recipe_path = shared_recipe;
 
     // Inject kernel spec from distro-spec SSOT
+    let kconfig_path = base_dir.join("kconfig").to_string_lossy().to_string();
     let defines: Vec<(&str, &str)> = vec![
         ("KERNEL_VERSION", kernel_source.version),
         ("KERNEL_SHA256", kernel_source.sha256),
         ("KERNEL_LOCALVERSION", kernel_source.localversion),
+        ("KERNEL_KCONFIG_PATH", &kconfig_path),
+        ("KERNEL_ARTIFACT_ROOT", &kernel_artifact_root),
         ("KERNEL_FORCE_REBUILD", "0"),
         ("MODULE_INSTALL_PATH", module_install_path),
     ];

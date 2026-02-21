@@ -63,10 +63,12 @@ pub mod cache;
 pub mod component;
 pub mod contracts;
 pub mod executor;
+pub(crate) mod pipeline;
 pub mod preflight;
 pub mod process;
 pub mod qemu;
 pub mod recipe;
+pub mod stage_runs;
 pub mod stages;
 pub mod timing;
 

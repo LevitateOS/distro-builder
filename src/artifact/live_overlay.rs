@@ -95,12 +95,9 @@ pub fn create_openrc_live_overlay(
 
 echo "[autologin] Starting login shell..."
 echo "___SHELL_READY___"
-echo "___PROMPT___"
 echo "[autologin] Starting login shell..." >/dev/console 2>/dev/null || true
 echo "___SHELL_READY___" >/dev/console 2>/dev/null || true
-echo "___PROMPT___" >/dev/console 2>/dev/null || true
 echo "___SHELL_READY___" >/dev/kmsg 2>/dev/null || true
-echo "___PROMPT___" >/dev/kmsg 2>/dev/null || true
 
 # Run sh as login shell (sources /etc/profile and /etc/profile.d/*)
 # In Alpine, /bin/sh is busybox ash
@@ -336,8 +333,10 @@ pub fn create_systemd_live_overlay(
     fs::create_dir_all(live_overlay.join("etc/systemd/system/getty@tty1.service.d"))?;
     fs::create_dir_all(live_overlay.join("etc/systemd/system/getty@.service.d"))?;
     fs::create_dir_all(live_overlay.join("etc/systemd/system/serial-getty@.service.d"))?;
+    fs::create_dir_all(live_overlay.join("etc/systemd/system/getty.target.wants"))?;
     fs::create_dir_all(live_overlay.join("etc/systemd/system/basic.target.wants"))?;
     fs::create_dir_all(live_overlay.join("etc/systemd/system/multi-user.target.wants"))?;
+    fs::create_dir_all(live_overlay.join("etc/systemd/network"))?;
     fs::create_dir_all(live_overlay.join("etc/profile.d"))?;
     fs::create_dir_all(live_overlay.join("etc/tmpfiles.d"))?;
     fs::create_dir_all(live_overlay.join("usr/local/bin"))?;
@@ -352,9 +351,8 @@ pub fn create_systemd_live_overlay(
 
     let serial_autologin_script = r#"#!/bin/sh
 echo "___SHELL_READY___"
-echo "___PROMPT___"
-# Stage live override: canonical UTF-8 locale for interactive shells.
-export LANG=C.UTF-8
+    # Stage live override: use portable C locale (always available in minimal rootfs).
+    export LANG=C
 unset LC_ALL LC_CTYPE LC_NUMERIC LC_TIME LC_COLLATE LC_MESSAGES \
       LC_MONETARY LC_PAPER LC_NAME LC_ADDRESS LC_TELEPHONE LC_MEASUREMENT \
       LC_IDENTIFICATION
@@ -377,6 +375,59 @@ exec /bin/bash -il
     symlink(
         "/usr/lib/systemd/system/serial-getty@.service",
         live_overlay.join("etc/systemd/system/basic.target.wants/serial-getty@ttyS0.service"),
+    )?;
+    symlink(
+        "/usr/lib/systemd/system/serial-getty@.service",
+        live_overlay.join("etc/systemd/system/getty.target.wants/serial-getty@ttyS0.service"),
+    )?;
+    // Deterministic live NIC bring-up for slirp hostfwd SSH (QEMU usernet defaults).
+    // Resolve the first non-loopback NIC dynamically to avoid brittle interface names
+    // (e.g. ens3 vs ens4 depending on device ordering).
+    let live_net_setup_script = r#"#!/bin/sh
+set -eu
+
+NIC=""
+for dev in /sys/class/net/*; do
+    [ -e "$dev" ] || continue
+    name="$(basename "$dev")"
+    [ "$name" = "lo" ] && continue
+    NIC="$name"
+    break
+done
+
+[ -n "$NIC" ] || exit 1
+
+/usr/sbin/ip link set "$NIC" up
+/usr/sbin/ip addr add 10.0.2.15/24 dev "$NIC" 2>/dev/null || true
+/usr/sbin/ip route replace default via 10.0.2.2 dev "$NIC"
+"#;
+    write_executable(
+        &live_overlay.join("usr/local/sbin/live-net-setup"),
+        live_net_setup_script,
+    )?;
+
+    let live_net_setup_unit = r#"[Unit]
+Description=Levitate live network setup (slirp SSH)
+DefaultDependencies=no
+After=basic.target local-fs.target
+Before=network.target network-online.target sshd.service
+Wants=network.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/live-net-setup
+
+[Install]
+WantedBy=multi-user.target
+"#;
+    fs::write(
+        live_overlay.join("etc/systemd/system/live-net-setup.service"),
+        live_net_setup_unit,
+    )?;
+    symlink(
+        "/etc/systemd/system/live-net-setup.service",
+        live_overlay.join("etc/systemd/system/multi-user.target.wants/live-net-setup.service"),
     )?;
     for unit in config.masked_units {
         symlink(
@@ -461,9 +512,6 @@ esac
 
 if [ "$(tty 2>/dev/null)" = "/dev/ttyS0" ]; then
     echo "___SHELL_READY___"
-    echo "___PROMPT___"
-    PROMPT_COMMAND='echo "___PROMPT___"'
-    export PROMPT_COMMAND
 fi
 "#;
         fs::write(
@@ -473,11 +521,10 @@ fi
     }
 
     if config.enforce_utf8_locale_profile {
-        // Adoptability-first policy: live shell locale is explicitly UTF-8.
-        // Producers are responsible for shipping locale data in the stage rootfs.
+        // Stage live override: use portable C locale for minimal rootfs payloads.
         let locale_profile = r#"#!/bin/sh
-# Stage live override: canonical UTF-8 locale for interactive shells.
-export LANG=C.UTF-8
+# Stage live override: use portable C locale (always available).
+export LANG=C
 unset LC_ALL LC_CTYPE LC_NUMERIC LC_TIME LC_COLLATE LC_MESSAGES \
       LC_MONETARY LC_PAPER LC_NAME LC_ADDRESS LC_TELEPHONE LC_MEASUREMENT \
       LC_IDENTIFICATION

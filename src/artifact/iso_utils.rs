@@ -17,7 +17,7 @@ use distro_spec::shared::{
 ///
 /// Creates the standard directory layout for a bootable ISO:
 /// - boot/ - kernel, initramfs
-/// - live/ - squashfs, overlay
+/// - live/ - EROFS rootfs, EROFS overlay payload
 /// - EFI/BOOT/ - UEFI bootloader
 ///
 /// # Arguments

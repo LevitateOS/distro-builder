@@ -4,7 +4,7 @@
 //! - [`cpio`] - Compressed cpio archives for initramfs
 //! - [`filesystem`] - Directory copying, initramfs structure creation
 //! - [`iso_utils`] - ISO creation utilities (xorriso, checksums, EFI boot images)
-//! - [`rootfs`] - Compressed filesystem images (EROFS or squashfs)
+//! - [`rootfs`] - Compressed filesystem images (EROFS)
 //! - [`overlayfs`] - Live overlay payload images (EROFS)
 //! - [`initramfs`] - Initial RAM filesystem archives (trait definitions)
 //! - [`iso`] - Bootable ISO images (trait definitions)

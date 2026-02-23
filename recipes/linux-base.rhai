@@ -16,14 +16,14 @@
 let build_deps = ["linux-deps"];
 
 let ctx = #{
-    build_dir: "",
-    description: "",
-    kernel_version: "",
+    build_dir: "/data/vince/LevitateOS/.artifacts/kernel/levitate/current/kernel-build",
+    description: "Linux kernel (6.12.71)",
+    kernel_version: "6.12.71",
     name: "linux",
-    source_dir_name: "",
-    source_path: "",
-    tarball_filename: "",
-    tarball_url: "",
+    source_dir_name: "linux-6.12.71",
+    source_path: "/data/vince/LevitateOS/.artifacts/work/levitate/downloads/linux-6.12.71",
+    tarball_filename: "linux-6.12.71.tar.xz",
+    tarball_url: "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.12.71.tar.xz",
 };
 
 // This recipe is parameterized via `--define` and shared across multiple distros.

@@ -33,8 +33,8 @@
 //! # Note on Squashfs
 //!
 //! Squashfs support is intentionally NOT provided here. Both LevitateOS and
-//! AcornOS use EROFS for their rootfs. Squashfs is only used for reading
-//! upstream distribution media (Rocky's install.img, Alpine's modloop).
+//! AcornOS use EROFS for their rootfs. Legacy squashfs inputs may still exist
+//! in upstream ecosystems, but this builder does not emit squashfs artifacts.
 
 use anyhow::{bail, Context, Result};
 use std::fs;

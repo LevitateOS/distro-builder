@@ -9,12 +9,12 @@
 //! use distro_builder::preflight::{command_exists, check_required_tools};
 //!
 //! // Check a single command
-//! if !command_exists("mksquashfs") {
-//!     println!("squashfs-tools not installed");
+//! if !command_exists("mkfs.erofs") {
+//!     println!("erofs-utils not installed");
 //! }
 //!
 //! // Check multiple tools
-//! let tools = &[("mksquashfs", "squashfs-tools"), ("xorriso", "xorriso")];
+//! let tools = &[("mkfs.erofs", "erofs-utils"), ("xorriso", "xorriso")];
 //! if let Err(e) = check_required_tools(tools) {
 //!     eprintln!("{}", e);
 //! }
@@ -38,7 +38,7 @@ pub fn command_exists(cmd: &str) -> bool {
 ///
 /// Each tuple is (command_name, package_name).
 pub const REQUIRED_TOOLS: &[(&str, &str)] = &[
-    ("mksquashfs", "squashfs-tools"),
+    ("mkfs.erofs", "erofs-utils"),
     ("xorriso", "xorriso"),
     ("mkfs.fat", "dosfstools"),
     ("mmd", "mtools"),

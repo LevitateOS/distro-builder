@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use crate::pipeline::io::{
     create_unique_output_dir, extract_erofs_rootfs, resolve_parent_stage_rootfs_image,
 };
-use crate::pipeline::live_tools::add_required_tools;
+use crate::pipeline::live_tools::{add_required_tools, Stage02InstallExperience};
 use crate::pipeline::overlay::{
     create_live_overlay, ensure_required_service_wiring, ensure_systemd_locale_completeness,
     S01OverlayPolicy,
@@ -28,6 +28,7 @@ pub struct S02LiveToolsInputSpec {
     repo_root: PathBuf,
     pub distro_id: String,
     pub os_name: String,
+    install_experience: Stage02InstallExperience,
     pub rootfs_source_dir: PathBuf,
     overlay: S01OverlayPolicy,
 }
@@ -48,6 +49,7 @@ struct S02StageToml {
 #[serde(deny_unknown_fields)]
 struct S02LiveToolsInputsToml {
     os_name: String,
+    install_experience: Stage02InstallExperience,
 }
 
 pub fn load_s02_live_tools_input_spec(
@@ -73,6 +75,7 @@ pub fn load_s02_live_tools_input_spec(
         repo_root: repo_root.to_path_buf(),
         distro_id: distro_id.to_string(),
         os_name: parsed.stage_02.live_tools.os_name,
+        install_experience: parsed.stage_02.live_tools.install_experience,
         rootfs_source_dir: PathBuf::from("s02-rootfs-source"),
         overlay: s01_spec.overlay,
     })
@@ -104,8 +107,13 @@ pub fn prepare_s02_live_tools_inputs(
         )
     })?;
 
-    add_required_tools(&spec.repo_root, &rootfs_source_dir, &spec.distro_id)
-        .with_context(|| format!("adding Stage 02 required tools for '{}'", spec.distro_id))?;
+    add_required_tools(
+        &spec.repo_root,
+        &rootfs_source_dir,
+        &spec.distro_id,
+        spec.install_experience,
+    )
+    .with_context(|| format!("adding Stage 02 required tools for '{}'", spec.distro_id))?;
     install_stage_test_scripts(&spec.repo_root, &rootfs_source_dir).with_context(|| {
         format!(
             "installing stage test scripts into Stage 02 rootfs for '{}'",

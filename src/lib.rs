@@ -4,7 +4,7 @@
 //! and AcornOS builders. It extracts the distro-agnostic parts:
 //!
 //! - **Component system** - Declarative component definitions with traits and operations
-//! - **Artifact builders** - Squashfs, initramfs, and ISO creation wrappers
+//! - **Artifact builders** - EROFS rootfs, initramfs, and ISO creation wrappers
 //! - **Build utilities** - Filesystem operations and context management
 //! - **Preflight checks** - Host tool validation before builds
 //!
@@ -15,7 +15,7 @@
 //!     │
 //!     ├── Defines: Installable trait, generic Op variants
 //!     ├── Defines: BuildContext trait, DistroConfig trait
-//!     └── Provides: Filesystem utilities, squashfs/ISO wrappers
+//!     └── Provides: Filesystem utilities, EROFS/ISO wrappers
 //!
 //! leviso ─────────────────────┐
 //!     │                       │

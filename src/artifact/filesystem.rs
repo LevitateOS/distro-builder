@@ -1,6 +1,6 @@
 //! Filesystem utilities for artifact building.
 //!
-//! Common filesystem operations used during ISO, initramfs, and squashfs creation.
+//! Common filesystem operations used during ISO, initramfs, and EROFS artifact creation.
 
 use anyhow::{Context, Result};
 use std::fs;

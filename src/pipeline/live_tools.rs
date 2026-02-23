@@ -1,13 +1,31 @@
 use anyhow::{bail, Context, Result};
+use serde::Deserialize;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum Stage02InstallExperience {
+    Ux,
+    AutomatedSsh,
+}
+
+impl Stage02InstallExperience {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Ux => "ux",
+            Self::AutomatedSsh => "automated_ssh",
+        }
+    }
+}
+
 pub(crate) fn add_required_tools(
     repo_root: &Path,
     rootfs_source_dir: &Path,
     distro_id: &str,
+    install_experience: Stage02InstallExperience,
 ) -> Result<()> {
     let target = match distro_id {
         "levitate" | "ralph" => None,
@@ -16,9 +34,15 @@ pub(crate) fn add_required_tools(
     };
 
     if matches!(distro_id, "acorn" | "iuppiter") {
-        ensure_musl_packages(rootfs_source_dir, distro_id)
+        ensure_musl_packages(rootfs_source_dir, distro_id, install_experience)
             .with_context(|| format!("installing musl package additions for '{}'", distro_id))?;
     }
+    install_mode_payload(rootfs_source_dir, distro_id, install_experience).with_context(|| {
+        format!(
+            "writing Stage 02 install experience payload for '{}'",
+            distro_id
+        )
+    })?;
 
     let dest_dirs = [
         rootfs_source_dir.join("usr/bin"),
@@ -60,12 +84,19 @@ pub(crate) fn add_required_tools(
     Ok(())
 }
 
-fn ensure_musl_packages(rootfs_source_dir: &Path, distro_id: &str) -> Result<()> {
-    let packages: &[&str] = match distro_id {
-        "acorn" => &["curl", "pciutils", "smartmontools", "hdparm", "vim", "htop"],
-        "iuppiter" => &["smartmontools", "hdparm", "sg3_utils"],
-        _ => &[],
+fn ensure_musl_packages(
+    rootfs_source_dir: &Path,
+    distro_id: &str,
+    install_experience: Stage02InstallExperience,
+) -> Result<()> {
+    let mut packages: Vec<&str> = match distro_id {
+        "acorn" => vec!["curl", "pciutils", "smartmontools", "hdparm", "vim", "htop"],
+        "iuppiter" => vec!["smartmontools", "hdparm", "sg3_utils"],
+        _ => Vec::new(),
     };
+    if install_experience == Stage02InstallExperience::Ux {
+        packages.push("tmux");
+    }
 
     if packages.is_empty() {
         return Ok(());
@@ -155,4 +186,113 @@ fn build_workspace_binary(
         stdout.trim(),
         stderr.trim()
     )
+}
+
+fn install_mode_payload(
+    rootfs_source_dir: &Path,
+    distro_id: &str,
+    install_experience: Stage02InstallExperience,
+) -> Result<()> {
+    let marker_dir = rootfs_source_dir.join("usr/lib/levitate/stage-02");
+    fs::create_dir_all(&marker_dir).with_context(|| {
+        format!(
+            "creating Stage 02 install experience marker dir '{}'",
+            marker_dir.display()
+        )
+    })?;
+    let marker_path = marker_dir.join("install-experience");
+    fs::write(&marker_path, format!("{}\n", install_experience.as_str())).with_context(|| {
+        format!(
+            "writing Stage 02 install experience marker '{}'",
+            marker_path.display()
+        )
+    })?;
+
+    let entrypoint_path = rootfs_source_dir.join("usr/local/bin/stage-02-install-entrypoint");
+    let entrypoint_script = match install_experience {
+        Stage02InstallExperience::Ux => format!(
+            "#!/bin/sh\n\
+set -eu\n\
+\n\
+echo \"[{distro}] Stage 02 install experience: UX\"\n\
+echo \"Starting local interactive install helper if available...\"\n\
+\n\
+if command -v levitate-install-docs-split >/dev/null 2>&1; then\n\
+    exec levitate-install-docs-split\n\
+fi\n\
+if command -v levitate-install-docs >/dev/null 2>&1; then\n\
+    exec levitate-install-docs\n\
+fi\n\
+if command -v acorn-docs >/dev/null 2>&1; then\n\
+    exec acorn-docs\n\
+fi\n\
+\n\
+echo \"No local docs TUI binary found; dropping to shell.\"\n\
+exec \"${{SHELL:-/bin/sh}}\" -l\n",
+            distro = distro_id
+        ),
+        Stage02InstallExperience::AutomatedSsh => format!(
+            "#!/bin/sh\n\
+set -eu\n\
+\n\
+echo \"[{distro}] Stage 02 install experience: automated SSH\"\n\
+echo \"This ISO profile is intended for SSH-driven automation (qcow2/.img pipelines).\"\n\
+exec \"${{SHELL:-/bin/sh}}\" -l\n",
+            distro = distro_id
+        ),
+    };
+    write_executable(&entrypoint_path, &entrypoint_script).with_context(|| {
+        format!(
+            "installing Stage 02 entrypoint script '{}'",
+            entrypoint_path.display()
+        )
+    })?;
+
+    if install_experience == Stage02InstallExperience::Ux {
+        let ux_profile_path = rootfs_source_dir.join("etc/profile.d/30-stage-02-install-ux.sh");
+        let ux_profile = "#!/bin/sh\n\
+case \"$-\" in\n\
+    *i*) ;;\n\
+    *) return 0 ;;\n\
+esac\n\
+\n\
+[ -n \"${TMUX:-}\" ] && return 0\n\
+[ \"${STAGE02_UX_LAUNCHED:-0}\" = \"1\" ] && return 0\n\
+\n\
+TTY=\"$(tty 2>/dev/null || true)\"\n\
+[ \"$TTY\" = \"/dev/tty1\" ] || return 0\n\
+\n\
+export STAGE02_UX_LAUNCHED=1\n\
+exec /usr/local/bin/stage-02-install-entrypoint\n";
+        write_text(&ux_profile_path, ux_profile).with_context(|| {
+            format!(
+                "installing Stage 02 UX profile hook '{}'",
+                ux_profile_path.display()
+            )
+        })?;
+    }
+
+    Ok(())
+}
+
+fn write_executable(path: &Path, content: &str) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).with_context(|| format!("creating '{}'", parent.display()))?;
+    }
+    fs::write(path, content).with_context(|| format!("writing '{}'", path.display()))?;
+    let mut perms = fs::metadata(path)
+        .with_context(|| format!("reading metadata '{}'", path.display()))?
+        .permissions();
+    perms.set_mode(0o755);
+    fs::set_permissions(path, perms)
+        .with_context(|| format!("setting executable permissions on '{}'", path.display()))?;
+    Ok(())
+}
+
+fn write_text(path: &Path, content: &str) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).with_context(|| format!("creating '{}'", parent.display()))?;
+    }
+    fs::write(path, content).with_context(|| format!("writing '{}'", path.display()))?;
+    Ok(())
 }

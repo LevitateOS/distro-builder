@@ -79,7 +79,7 @@ pub const STANDARD_BUSYBOX_COMMANDS: &[&str] = &[
 ///
 /// let options = InitramfsOptions {
 ///     busybox_commands: STANDARD_BUSYBOX_COMMANDS,
-///     boot_modules: &["squashfs", "overlay", "loop"],
+///     boot_modules: &["erofs", "overlay", "loop"],
 ///     gzip_level: 9,
 /// };
 ///

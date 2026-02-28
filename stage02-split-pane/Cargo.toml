@@ -1,0 +1,15 @@
+[package]
+name = "stage02-split-pane"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "levitate-install-docs-split"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0"
+crossterm = "0.28"
+portable-pty = "0.8"
+ratatui = "0.29"
+vt100 = "0.15"

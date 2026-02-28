@@ -43,6 +43,14 @@ pub(crate) fn add_required_tools(
             distro_id
         )
     })?;
+    if install_experience == Stage02InstallExperience::Ux {
+        install_split_launcher(repo_root, rootfs_source_dir, target).with_context(|| {
+            format!(
+                "installing Stage 02 split launcher binary for '{}'",
+                distro_id
+            )
+        })?;
+    }
 
     let dest_dirs = [
         rootfs_source_dir.join("usr/bin"),
@@ -87,16 +95,13 @@ pub(crate) fn add_required_tools(
 fn ensure_musl_packages(
     rootfs_source_dir: &Path,
     distro_id: &str,
-    install_experience: Stage02InstallExperience,
+    _install_experience: Stage02InstallExperience,
 ) -> Result<()> {
-    let mut packages: Vec<&str> = match distro_id {
+    let packages: Vec<&str> = match distro_id {
         "acorn" => vec!["curl", "pciutils", "smartmontools", "hdparm", "vim", "htop"],
         "iuppiter" => vec!["smartmontools", "hdparm", "sg3_utils"],
         _ => Vec::new(),
     };
-    if install_experience == Stage02InstallExperience::Ux {
-        packages.push("tmux");
-    }
 
     if packages.is_empty() {
         return Ok(());
@@ -188,6 +193,92 @@ fn build_workspace_binary(
     )
 }
 
+fn build_workspace_binary_named(
+    repo_root: &Path,
+    package_name: &str,
+    binary_name: &str,
+    target: Option<&str>,
+) -> Result<PathBuf> {
+    let mut cmd = Command::new("cargo");
+    cmd.arg("build")
+        .arg("-q")
+        .arg("-p")
+        .arg(package_name)
+        .arg("--bin")
+        .arg(binary_name);
+    if let Some(target_triple) = target {
+        cmd.arg("--target").arg(target_triple);
+    }
+
+    let output = cmd.current_dir(repo_root).output().with_context(|| {
+        format!(
+            "running cargo build for package '{}' (bin '{}') at '{}'",
+            package_name,
+            binary_name,
+            repo_root.display()
+        )
+    })?;
+
+    if output.status.success() {
+        let built = match target {
+            Some(target_triple) => repo_root
+                .join("target")
+                .join(target_triple)
+                .join("debug")
+                .join(binary_name),
+            None => repo_root.join("target/debug").join(binary_name),
+        };
+        return Ok(built);
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    bail!(
+        "cargo build failed for package '{}' (bin '{}'): {}\n{}",
+        package_name,
+        binary_name,
+        stdout.trim(),
+        stderr.trim()
+    )
+}
+
+fn install_split_launcher(
+    repo_root: &Path,
+    rootfs_source_dir: &Path,
+    target: Option<&str>,
+) -> Result<()> {
+    let binary_name = "levitate-install-docs-split";
+    let built = build_workspace_binary_named(repo_root, "stage02-split-pane", binary_name, target)
+        .context("building Stage 02 split-pane launcher")?;
+    if !built.is_file() {
+        bail!(
+            "expected Stage 02 split launcher binary not found at '{}'",
+            built.display()
+        );
+    }
+
+    let dest = rootfs_source_dir.join("usr/local/bin").join(binary_name);
+    if let Some(parent) = dest.parent() {
+        fs::create_dir_all(parent).with_context(|| {
+            format!("creating split launcher destination '{}'", parent.display())
+        })?;
+    }
+    fs::copy(&built, &dest).with_context(|| {
+        format!(
+            "copying Stage 02 split launcher '{}' -> '{}'",
+            built.display(),
+            dest.display()
+        )
+    })?;
+    let mut perms = fs::metadata(&dest)
+        .with_context(|| format!("reading permissions for '{}'", dest.display()))?
+        .permissions();
+    perms.set_mode(0o755);
+    fs::set_permissions(&dest, perms)
+        .with_context(|| format!("setting executable permissions on '{}'", dest.display()))?;
+    Ok(())
+}
+
 fn install_mode_payload(
     rootfs_source_dir: &Path,
     distro_id: &str,
@@ -214,17 +305,49 @@ fn install_mode_payload(
             "#!/bin/sh\n\
 set -eu\n\
 \n\
+choose_install_helper() {{\n\
+    if [ -x /usr/local/bin/levitate-install-docs-split ]; then\n\
+        printf '%s\\n' \"/usr/local/bin/levitate-install-docs-split\"\n\
+        return 0\n\
+    fi\n\
+    if command -v levitate-install-docs-split >/dev/null 2>&1; then\n\
+        printf '%s\\n' \"levitate-install-docs-split\"\n\
+        return 0\n\
+    fi\n\
+    if command -v levitate-install-docs >/dev/null 2>&1; then\n\
+        printf '%s\\n' \"levitate-install-docs\"\n\
+        return 0\n\
+    fi\n\
+    if command -v acorn-docs >/dev/null 2>&1; then\n\
+        printf '%s\\n' \"acorn-docs\"\n\
+        return 0\n\
+    fi\n\
+    return 1\n\
+}}\n\
+\n\
+if [ \"${{1:-}}\" = \"--probe\" ]; then\n\
+    helper=\"$(choose_install_helper || true)\"\n\
+    if [ -n \"$helper\" ]; then\n\
+        printf 'stage02-entrypoint-helper=%s\\n' \"$helper\"\n\
+        exit 0\n\
+    fi\n\
+    printf 'stage02-entrypoint-helper=none\\n'\n\
+    exit 3\n\
+fi\n\
+\n\
 echo \"[{distro}] Stage 02 install experience: UX\"\n\
 echo \"Starting local interactive install helper if available...\"\n\
 \n\
-if command -v levitate-install-docs-split >/dev/null 2>&1; then\n\
-    exec levitate-install-docs-split\n\
-fi\n\
-if command -v levitate-install-docs >/dev/null 2>&1; then\n\
-    exec levitate-install-docs\n\
-fi\n\
-if command -v acorn-docs >/dev/null 2>&1; then\n\
-    exec acorn-docs\n\
+helper=\"$(choose_install_helper || true)\"\n\
+if [ -n \"$helper\" ]; then\n\
+    case \"$helper\" in\n\
+        */levitate-install-docs-split|levitate-install-docs-split)\n\
+            if [ \"${{STAGE02_ENTRYPOINT_SMOKE:-0}}\" = \"1\" ]; then\n\
+                exec \"$helper\" --smoke\n\
+            fi\n\
+            ;;\n\
+    esac\n\
+    exec \"$helper\"\n\
 fi\n\
 \n\
 echo \"No local docs TUI binary found; dropping to shell.\"\n\

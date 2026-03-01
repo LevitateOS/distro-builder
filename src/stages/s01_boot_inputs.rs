@@ -59,6 +59,12 @@ pub struct S01BootInputSpec {
     pub overlay: S01OverlayPolicy,
 }
 
+impl S01BootInputSpec {
+    pub fn required_services(&self) -> &[String] {
+        &self.required_services
+    }
+}
+
 pub fn load_s00_build_input_spec(
     distro_id: &str,
     os_name: &str,

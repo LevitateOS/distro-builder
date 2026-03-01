@@ -232,6 +232,14 @@ pub(crate) fn boot_baseline_producers(overlay_kind: &str) -> Vec<RootfsProducer>
             destination: PathBuf::from("usr/libexec"),
         },
         RootfsProducer::CopyTree {
+            source: PathBuf::from("usr/share/empty.sshd"),
+            destination: PathBuf::from("usr/share/empty.sshd"),
+        },
+        RootfsProducer::CopyTree {
+            source: PathBuf::from("usr/share/i18n/locales/musl"),
+            destination: PathBuf::from("usr/share/i18n/locales/musl"),
+        },
+        RootfsProducer::CopyTree {
             source: PathBuf::from("var/empty"),
             destination: PathBuf::from("var/empty"),
         },

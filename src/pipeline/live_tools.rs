@@ -24,6 +24,7 @@ impl Stage02InstallExperience {
 pub(crate) fn add_required_tools(
     repo_root: &Path,
     rootfs_source_dir: &Path,
+    tool_payload_dir: &Path,
     distro_id: &str,
     install_experience: Stage02InstallExperience,
 ) -> Result<()> {
@@ -37,14 +38,14 @@ pub(crate) fn add_required_tools(
         ensure_musl_packages(rootfs_source_dir, distro_id, install_experience)
             .with_context(|| format!("installing musl package additions for '{}'", distro_id))?;
     }
-    install_mode_payload(rootfs_source_dir, distro_id, install_experience).with_context(|| {
+    install_mode_payload(tool_payload_dir, distro_id, install_experience).with_context(|| {
         format!(
             "writing Stage 02 install experience payload for '{}'",
             distro_id
         )
     })?;
     if install_experience == Stage02InstallExperience::Ux {
-        install_split_launcher(repo_root, rootfs_source_dir, target).with_context(|| {
+        install_split_launcher(repo_root, tool_payload_dir, target).with_context(|| {
             format!(
                 "installing Stage 02 split launcher binary for '{}'",
                 distro_id
@@ -53,8 +54,8 @@ pub(crate) fn add_required_tools(
     }
 
     let dest_dirs = [
-        rootfs_source_dir.join("usr/bin"),
-        rootfs_source_dir.join("bin"),
+        tool_payload_dir.join("usr/bin"),
+        tool_payload_dir.join("bin"),
     ];
     for dest_dir in &dest_dirs {
         fs::create_dir_all(dest_dir)

@@ -1,11 +1,15 @@
 use std::cmp::Reverse;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use serde::Deserialize;
 
 const RUN_MANIFEST_FILENAME: &str = "run-manifest.json";
+const RUN_ID_SALT_BITS: u32 = 32;
+static RUN_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct RunMetadata {
@@ -78,8 +82,113 @@ pub fn prune_old_runs(stage_root_dir: &Path, keep: usize) -> Result<()> {
     Ok(())
 }
 
+pub fn allocate_run_dir(stage_root_dir: &Path) -> Result<(String, PathBuf)> {
+    fs::create_dir_all(stage_root_dir).with_context(|| {
+        format!(
+            "creating stage output root directory '{}'",
+            stage_root_dir.display()
+        )
+    })?;
+    for _ in 0..32 {
+        let run_id = generate_run_id()?;
+        let run_root = stage_root_dir.join(&run_id);
+        if run_root.exists() {
+            continue;
+        }
+        fs::create_dir_all(&run_root).with_context(|| {
+            format!(
+                "creating stage run output directory '{}'",
+                run_root.display()
+            )
+        })?;
+        return Ok((run_id, run_root));
+    }
+    bail!(
+        "failed allocating unique stage run directory under '{}'",
+        stage_root_dir.display()
+    )
+}
+
 fn run_sort_key(run: &RunMetadata) -> String {
     run.finished_at_utc
         .clone()
         .unwrap_or_else(|| run.created_at_utc.clone())
+}
+
+fn generate_run_id() -> Result<String> {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .context("system clock before UNIX_EPOCH while generating stage run id")?
+        .as_nanos();
+    let pid_component = (std::process::id() as u128) << (RUN_ID_SALT_BITS - 16);
+    let seq_component = (RUN_ID_COUNTER.fetch_add(1, Ordering::Relaxed) as u128) & 0xFFFF;
+    let entropy = (nanos << RUN_ID_SALT_BITS) | pid_component | seq_component;
+    let mut suffix = base62_encode_u128(entropy);
+    suffix = suffix.trim_start_matches('0').to_string();
+    if suffix.is_empty() {
+        suffix.push('0');
+    }
+    if suffix.len() > 20 {
+        bail!("sortable stage run id overflow while generating run identifier")
+    }
+    Ok(suffix)
+}
+
+fn base62_encode_u128(mut value: u128) -> String {
+    const ALPHABET: &[u8; 62] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+    if value == 0 {
+        return "0".to_string();
+    }
+    let mut bytes = Vec::new();
+    while value > 0 {
+        let idx = (value % 62) as usize;
+        bytes.push(ALPHABET[idx] as char);
+        value /= 62;
+    }
+    bytes.iter().rev().collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn allocate_run_dir_creates_unique_directories() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let (run_a, dir_a) = allocate_run_dir(tmp.path()).expect("allocate first run");
+        let (run_b, dir_b) = allocate_run_dir(tmp.path()).expect("allocate second run");
+        assert_ne!(run_a, run_b, "run ids should be unique");
+        assert!(dir_a.is_dir(), "first run directory should exist");
+        assert!(dir_b.is_dir(), "second run directory should exist");
+    }
+
+    #[test]
+    fn prune_old_runs_keeps_latest_five() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        for idx in 0..7u32 {
+            let run_id = format!("run-{idx}");
+            let run_dir = tmp.path().join(&run_id);
+            fs::create_dir_all(&run_dir).expect("create run directory");
+            let manifest = json!({
+                "run_id": run_id,
+                "status": "success",
+                "created_at_utc": format!("{idx:04}"),
+                "finished_at_utc": format!("{idx:04}"),
+            });
+            fs::write(
+                manifest_path(&run_dir),
+                serde_json::to_vec_pretty(&manifest).expect("serialize manifest"),
+            )
+            .expect("write manifest");
+        }
+
+        prune_old_runs(tmp.path(), 5).expect("prune old runs");
+
+        assert!(!tmp.path().join("run-0").exists());
+        assert!(!tmp.path().join("run-1").exists());
+        for idx in 2..7u32 {
+            assert!(tmp.path().join(format!("run-{idx}")).is_dir());
+        }
+    }
 }

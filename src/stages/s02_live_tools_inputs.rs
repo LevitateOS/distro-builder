@@ -1,5 +1,4 @@
 use anyhow::{Context, Result};
-use distro_contract::STAGE_01_REQUIRED_LIVE_SERVICES_BASE;
 use serde::Deserialize;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -31,6 +30,7 @@ pub struct S02LiveToolsInputSpec {
     install_experience: Stage02InstallExperience,
     pub rootfs_source_dir: PathBuf,
     overlay: S01OverlayPolicy,
+    required_services: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -70,6 +70,8 @@ pub fn load_s02_live_tools_input_spec(
                 distro_id
             )
         })?;
+    let required_services = s01_spec.required_services().to_vec();
+    let overlay = s01_spec.overlay.clone();
 
     Ok(S02LiveToolsInputSpec {
         repo_root: repo_root.to_path_buf(),
@@ -77,7 +79,8 @@ pub fn load_s02_live_tools_input_spec(
         os_name: parsed.stage_02.live_tools.os_name,
         install_experience: parsed.stage_02.live_tools.install_experience,
         rootfs_source_dir: PathBuf::from("s02-rootfs-source"),
-        overlay: s01_spec.overlay,
+        overlay,
+        required_services,
     })
 }
 
@@ -107,13 +110,6 @@ pub fn prepare_s02_live_tools_inputs(
         )
     })?;
 
-    add_required_tools(
-        &spec.repo_root,
-        &rootfs_source_dir,
-        &spec.distro_id,
-        spec.install_experience,
-    )
-    .with_context(|| format!("adding Stage 02 required tools for '{}'", spec.distro_id))?;
     install_stage_test_scripts(&spec.repo_root, &rootfs_source_dir).with_context(|| {
         format!(
             "installing stage test scripts into Stage 02 rootfs for '{}'",
@@ -138,11 +134,16 @@ pub fn prepare_s02_live_tools_inputs(
         &spec.overlay,
     )?;
 
-    let required_services = STAGE_01_REQUIRED_LIVE_SERVICES_BASE
-        .iter()
-        .map(|svc| (*svc).to_string())
-        .collect::<Vec<_>>();
-    ensure_required_service_wiring(&live_overlay_dir, &spec.overlay, &required_services)
+    add_required_tools(
+        &spec.repo_root,
+        &rootfs_source_dir,
+        &live_overlay_dir,
+        &spec.distro_id,
+        spec.install_experience,
+    )
+    .with_context(|| format!("adding Stage 02 required tools for '{}'", spec.distro_id))?;
+
+    ensure_required_service_wiring(&live_overlay_dir, &spec.overlay, &spec.required_services)
         .with_context(|| {
             format!(
                 "ensuring Stage 01 service wiring in 02LiveTools overlay for '{}'",

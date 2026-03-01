@@ -298,6 +298,7 @@ pub fn run_recipe_phase_json_with_defines(
         .arg(recipe_path)
         .arg("--build-dir")
         .arg(build_dir)
+        .arg("--no-persist-ctx")
         .arg("--json-output")
         .arg(&json_path);
 

@@ -203,6 +203,38 @@ pub(crate) fn ensure_required_service_wiring(
                     format!("linking '{}' -> '/etc/init.d/sshd'", service_link.display())
                 })?;
             }
+            (S01OverlayPolicy::OpenRc { .. }, "networking") => {
+                let runlevel_dir = live_overlay_dir.join("etc/runlevels/boot");
+                fs::create_dir_all(&runlevel_dir)
+                    .with_context(|| format!("creating '{}'", runlevel_dir.display()))?;
+                let service_link = runlevel_dir.join("networking");
+                if service_link.symlink_metadata().is_ok() {
+                    fs::remove_file(&service_link)
+                        .with_context(|| format!("removing '{}'", service_link.display()))?;
+                }
+                symlink("/etc/init.d/networking", &service_link).with_context(|| {
+                    format!(
+                        "linking '{}' -> '/etc/init.d/networking'",
+                        service_link.display()
+                    )
+                })?;
+            }
+            (S01OverlayPolicy::OpenRc { .. }, "dhcpcd") => {
+                let runlevel_dir = live_overlay_dir.join("etc/runlevels/default");
+                fs::create_dir_all(&runlevel_dir)
+                    .with_context(|| format!("creating '{}'", runlevel_dir.display()))?;
+                let service_link = runlevel_dir.join("dhcpcd");
+                if service_link.symlink_metadata().is_ok() {
+                    fs::remove_file(&service_link)
+                        .with_context(|| format!("removing '{}'", service_link.display()))?;
+                }
+                symlink("/etc/init.d/dhcpcd", &service_link).with_context(|| {
+                    format!(
+                        "linking '{}' -> '/etc/init.d/dhcpcd'",
+                        service_link.display()
+                    )
+                })?;
+            }
             (_, other) => {
                 bail!("unsupported Stage 01 required service '{}'", other);
             }

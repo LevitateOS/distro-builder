@@ -93,11 +93,23 @@ pub fn create_openrc_live_overlay(
 # Called by agetty -l as the login program
 # agetty has already set up stdin/stdout/stderr on the tty
 
+# Optional boot-injection environment (e.g. SSH_AUTHORIZED_KEY, STAGE02_SERIAL_UX)
+if [ -r /run/boot-injection/payload.env ]; then
+    # shellcheck disable=SC1091
+    . /run/boot-injection/payload.env || true
+fi
+
 echo "[autologin] Starting login shell..."
 echo "___SHELL_READY___"
 echo "[autologin] Starting login shell..." >/dev/console 2>/dev/null || true
 echo "___SHELL_READY___" >/dev/console 2>/dev/null || true
 echo "___SHELL_READY___" >/dev/kmsg 2>/dev/null || true
+
+if [ "${STAGE02_SERIAL_UX:-0}" = "1" ] && [ -x /usr/local/bin/stage-02-install-entrypoint ]; then
+    echo "[autologin] Launching Stage 02 install UX on serial console..."
+    export STAGE02_UX_LAUNCHED=1
+    exec /usr/local/bin/stage-02-install-entrypoint
+fi
 
 # Run sh as login shell (sources /etc/profile and /etc/profile.d/*)
 # In Alpine, /bin/sh is busybox ash
@@ -350,12 +362,26 @@ pub fn create_systemd_live_overlay(
     )?;
 
     let serial_autologin_script = r#"#!/bin/sh
-echo "___SHELL_READY___"
-    # Stage live override: use portable C locale (always available in minimal rootfs).
-    export LANG=C
+# Stage live override: use portable C locale (always available in minimal rootfs).
+export LANG=C
 unset LC_ALL LC_CTYPE LC_NUMERIC LC_TIME LC_COLLATE LC_MESSAGES \
       LC_MONETARY LC_PAPER LC_NAME LC_ADDRESS LC_TELEPHONE LC_MEASUREMENT \
       LC_IDENTIFICATION
+
+# Optional boot-injection environment (e.g. SSH_AUTHORIZED_KEY, STAGE02_SERIAL_UX)
+if [ -r /run/boot-injection/payload.env ]; then
+    # shellcheck disable=SC1091
+    . /run/boot-injection/payload.env || true
+fi
+
+echo "___SHELL_READY___"
+
+if [ "${STAGE02_SERIAL_UX:-0}" = "1" ] && [ -x /usr/local/bin/stage-02-install-entrypoint ]; then
+    echo "[autologin] Launching Stage 02 install UX on serial console..."
+    export STAGE02_UX_LAUNCHED=1
+    exec /usr/local/bin/stage-02-install-entrypoint
+fi
+
 exec /bin/bash -il
 "#;
     write_executable(
@@ -363,7 +389,7 @@ exec /bin/bash -il
         serial_autologin_script,
     )?;
 
-    let serial_autologin = "[Service]\nExecStart=\nExecStart=-/sbin/agetty -n -l /usr/local/bin/serial-autologin 115200,57600,38400,9600 %I vt100\n";
+    let serial_autologin = "[Service]\nExecStart=\nExecStart=-/sbin/agetty --autologin root --keep-baud 115200,57600,38400,9600 %I vt100\n";
     fs::write(
         live_overlay.join("etc/systemd/system/serial-getty@.service.d/zz-autologin.conf"),
         serial_autologin,
@@ -371,6 +397,10 @@ exec /bin/bash -il
     fs::write(
         live_overlay.join("etc/systemd/system/getty@.service.d/zz-autologin.conf"),
         serial_autologin,
+    )?;
+    symlink(
+        "/usr/lib/systemd/system/getty@.service",
+        live_overlay.join("etc/systemd/system/getty.target.wants/getty@tty1.service"),
     )?;
     symlink(
         "/usr/lib/systemd/system/serial-getty@.service",
@@ -386,20 +416,52 @@ exec /bin/bash -il
     let live_net_setup_script = r#"#!/bin/sh
 set -eu
 
-NIC=""
-for dev in /sys/class/net/*; do
-    [ -e "$dev" ] || continue
-    name="$(basename "$dev")"
-    [ "$name" = "lo" ] && continue
-    NIC="$name"
-    break
+IP_BIN="$(command -v ip 2>/dev/null || true)"
+if [ -z "$IP_BIN" ]; then
+    if [ -x /usr/sbin/ip ]; then
+        IP_BIN=/usr/sbin/ip
+    elif [ -x /usr/bin/ip ]; then
+        IP_BIN=/usr/bin/ip
+    else
+        exit 1
+    fi
+fi
+
+# Retry because virtio NIC names can race (e.g. eth0 -> ens5), and keep
+# applying until IPv4 + default route are stable.
+stable_ok=0
+i=0
+while [ "$i" -lt 45 ]; do
+    for dev in /sys/class/net/*; do
+        [ -e "$dev" ] || continue
+        name="$(basename "$dev")"
+        case "$name" in
+            lo|sit*|ip6tnl*|tun*|tap*|dummy*|bond*|veth*|docker*|virbr*|br*|wg*)
+                continue
+                ;;
+        esac
+        if "$IP_BIN" link set "$name" up 2>/dev/null; then
+            "$IP_BIN" addr replace 10.0.2.15/24 dev "$name" 2>/dev/null || true
+            "$IP_BIN" route replace default via 10.0.2.2 dev "$name" 2>/dev/null || true
+        fi
+    done
+
+    addr_if="$("$IP_BIN" -o -4 addr show 2>/dev/null | awk '$4 ~ /^10\\.0\\.2\\.15\\// {print $2; exit}')"
+    default_if="$("$IP_BIN" -o -4 route show default 2>/dev/null | awk '/^default via 10\\.0\\.2\\.2/ {for (i=1; i<=NF; i++) if ($i==\"dev\") {print $(i+1); exit}}')"
+    if [ -n "$addr_if" ] && [ "$addr_if" = "$default_if" ]; then
+        stable_ok=$((stable_ok + 1))
+        if [ "$stable_ok" -ge 3 ]; then
+            exit 0
+        fi
+    else
+        stable_ok=0
+    fi
+
+    i=$((i + 1))
+    sleep 1
 done
 
-[ -n "$NIC" ] || exit 1
-
-/usr/sbin/ip link set "$NIC" up
-/usr/sbin/ip addr add 10.0.2.15/24 dev "$NIC" 2>/dev/null || true
-/usr/sbin/ip route replace default via 10.0.2.2 dev "$NIC"
+exit 1
 "#;
     write_executable(
         &live_overlay.join("usr/local/sbin/live-net-setup"),

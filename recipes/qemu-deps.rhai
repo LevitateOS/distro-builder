@@ -7,12 +7,19 @@
 // Required shared libraries (glib, gnutls, pixman, etc.) are expected
 // to already be on the host system from the Rocky base install.
 
-let base_url = "http://rockylinux.mirror.intermax.nl/10.1/AppStream/x86_64/os/Packages";
+let rpms = [
+    ["http://rockylinux.mirror.intermax.nl/10.1/AppStream/x86_64/os/Packages/q/qemu-kvm-core-10.0.0-14.el10_1.x86_64.rpm", "qemu-kvm-core.rpm"],
+    ["http://rockylinux.mirror.intermax.nl/10.1/AppStream/x86_64/os/Packages/q/qemu-kvm-common-10.0.0-14.el10_1.x86_64.rpm", "qemu-kvm-common.rpm"],
+    ["http://rockylinux.mirror.intermax.nl/10.1/AppStream/x86_64/os/Packages/e/edk2-ovmf-20250523-2.el10.noarch.rpm", "edk2-ovmf.rpm"],
+    ["http://rockylinux.mirror.intermax.nl/10.1/AppStream/x86_64/os/Packages/c/capstone-5.0.1-6.el10.x86_64.rpm", "capstone.rpm"],
+    ["http://rockylinux.mirror.intermax.nl/10.1/AppStream/x86_64/os/Packages/p/pixman-0.43.4-2.el10.x86_64.rpm", "pixman.rpm"],
+    ["http://rockylinux.mirror.intermax.nl/10.1/AppStream/x86_64/os/Packages/l/libslirp-4.7.0-10.el10.x86_64.rpm", "libslirp.rpm"],
+    ["http://rockylinux.mirror.intermax.nl/10.1/AppStream/x86_64/os/Packages/i/ipxe-roms-qemu-20240119-5.gitde8a0821.el10.noarch.rpm", "ipxe-roms-qemu.rpm"],
+];
 
 let ctx = #{
     description: "QEMU and OVMF for boot testing",
     name: "qemu-deps",
-    rpms: "[[\"http://rockylinux.mirror.intermax.nl/10.1/AppStream/x86_64/os/Packages/q/qemu-kvm-core-10.0.0-14.el10_1.x86_64.rpm\", \"qemu-kvm-core.rpm\"], [\"http://rockylinux.mirror.intermax.nl/10.1/AppStream/x86_64/os/Packages/q/qemu-kvm-common-10.0.0-14.el10_1.x86_64.rpm\", \"qemu-kvm-common.rpm\"], [\"http://rockylinux.mirror.intermax.nl/10.1/AppStream/x86_64/os/Packages/e/edk2-ovmf-20250523-2.el10.noarch.rpm\", \"edk2-ovmf.rpm\"], [\"http://rockylinux.mirror.intermax.nl/10.1/AppStream/x86_64/os/Packages/c/capstone-5.0.1-6.el10.x86_64.rpm\", \"capstone.rpm\"], [\"http://rockylinux.mirror.intermax.nl/10.1/AppStream/x86_64/os/Packages/p/pixman-0.43.4-2.el10.x86_64.rpm\", \"pixman.rpm\"], [\"http://rockylinux.mirror.intermax.nl/10.1/AppStream/x86_64/os/Packages/l/libslirp-4.7.0-10.el10.x86_64.rpm\", \"libslirp.rpm\"], [\"http://rockylinux.mirror.intermax.nl/10.1/AppStream/x86_64/os/Packages/i/ipxe-roms-qemu-20240119-5.gitde8a0821.el10.noarch.rpm\", \"ipxe-roms-qemu.rpm\"]]",
 };
 
 fn is_installed(ctx) {
@@ -33,7 +40,7 @@ fn is_installed(ctx) {
 fn cleanup(ctx, reason) { ctx }
 
 fn is_acquired(ctx) {
-    for rpm in ctx.rpms {
+    for rpm in rpms {
         if !is_file(join_path(BUILD_DIR, rpm[1])) {
             throw rpm[1] + " not downloaded";
         }
@@ -43,7 +50,7 @@ fn is_acquired(ctx) {
 
 fn acquire(ctx) {
     mkdir(BUILD_DIR);
-    for rpm in ctx.rpms {
+    for rpm in rpms {
         let dest = join_path(BUILD_DIR, rpm[1]);
         if !is_file(dest) {
             log("Downloading " + rpm[1] + "...");
@@ -55,7 +62,7 @@ fn acquire(ctx) {
 
 fn install(ctx) {
     mkdir(TOOLS_PREFIX);
-    for rpm in ctx.rpms {
+    for rpm in rpms {
         let rpm_path = join_path(BUILD_DIR, rpm[1]);
         log("Extracting " + rpm[1] + "...");
         shell_in(TOOLS_PREFIX, "rpm2cpio '" + rpm_path + "' | cpio -idmu --quiet 2>/dev/null");

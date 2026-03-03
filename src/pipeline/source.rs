@@ -6,6 +6,9 @@ use std::path::{Path, PathBuf};
 
 use crate::pipeline::paths::{normalize_distro_id, resolve_repo_path};
 use crate::pipeline::plan::ensure_non_legacy_rootfs_source;
+use crate::recipe::alpine_stage01::{
+    augment_defines_with_preseed_paths, is_alpine_stage01_recipe, preseed_spec_from_defines,
+};
 use crate::recipe::rocky_stage01::{
     materialize_rootfs, materialize_rootfs_from_recipe, RockyStage01RecipeSpec,
     Stage01RootfsRecipeSpec,
@@ -151,12 +154,19 @@ pub(crate) fn materialize_source_rootfs(
                     build_dir.display()
                 )
             })?;
+            let recipe_defines = if is_alpine_stage01_recipe(recipe_script) {
+                let preseed_spec = preseed_spec_from_defines(repo_root, distro_id, defines)?;
+                augment_defines_with_preseed_paths(defines, &preseed_spec)
+            } else {
+                defines.clone()
+            };
+
             let source_rootfs_dir = materialize_rootfs_from_recipe(
                 repo_root,
                 &build_dir,
                 &Stage01RootfsRecipeSpec {
                     recipe_script: recipe_script.clone(),
-                    defines: defines.clone(),
+                    defines: recipe_defines,
                 },
             )
             .with_context(|| {

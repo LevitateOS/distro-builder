@@ -10,45 +10,111 @@
 // - ALPINE_APK_TOOLS_VERSION (example: 3.0.4-r0)
 // - ALPINE_APK_TOOLS_SHA256
 // - ALPINE_STAGE01_PROFILE (example: iuppiter|acorn)
+// - ALPINE_PRESEED_ISO
+// - ALPINE_PRESEED_APK_TOOLS
+// - ALPINE_TRUST_DIR
 //
 // This recipe intentionally keeps all outputs under BUILD_DIR so Stage 01 can
 // consume it through non-legacy rootfs_source wiring.
+// Stage builds never download/redownload Alpine assets.
 
 let ctx = #{
     alpine_version: ALPINE_EXTENDED_VERSION,
     apk_static_path: "",
+    apk_tools_preseed_path: ALPINE_PRESEED_APK_TOOLS,
     apk_tools_sha256: ALPINE_APK_TOOLS_SHA256,
     apk_tools_version: ALPINE_APK_TOOLS_VERSION,
     description: "Alpine Stage 01 rootfs source producer",
     iso_path: "",
+    iso_preseed_path: ALPINE_PRESEED_ISO,
     iso_sha256: ALPINE_EXTENDED_SHA256,
     name: "alpine-stage01-rootfs",
     profile: ALPINE_STAGE01_PROFILE,
     release_branch: ALPINE_RELEASE_BRANCH,
     rootfs_path: "",
     rootfs_recipe_version: "alpine-stage01-v5",
+    trust_dir: ALPINE_TRUST_DIR,
 };
 
 fn _iso_name(ctx) {
     "alpine-extended-" + ctx.alpine_version + "-x86_64.iso"
 }
 
-fn _iso_url(ctx) {
-    "https://dl-cdn.alpinelinux.org/alpine/" +
-    ctx.release_branch +
-    "/releases/x86_64/" +
-    _iso_name(ctx)
-}
-
 fn _apk_tools_name(ctx) {
     "apk-tools-static-" + ctx.apk_tools_version + ".apk"
 }
 
-fn _apk_tools_url(ctx) {
-    "https://dl-cdn.alpinelinux.org/alpine/" +
-    ctx.release_branch +
-    "/main/x86_64/" +
-    _apk_tools_name(ctx)
+fn _verify_marker_path(trust_dir) {
+    join_path(trust_dir, ".alpine-stage01-preseed.marker")
+}
+
+fn _fingerprint(path) {
+    trim(shell_output("stat -c '%s' '" + path + "'"))
+}
+
+fn _verify_marker_content(iso_path, iso_sha256, apk_tools_path, apk_tools_sha256) {
+    "iso_sha256=" + iso_sha256 + "\n" +
+    "iso_fingerprint=" + _fingerprint(iso_path) + "\n" +
+    "apk_tools_sha256=" + apk_tools_sha256 + "\n" +
+    "apk_tools_fingerprint=" + _fingerprint(apk_tools_path) + "\n"
+}
+
+fn _marker_is_valid(trust_dir, iso_path, iso_sha256, apk_tools_path, apk_tools_sha256) {
+    let marker = _verify_marker_path(trust_dir);
+    if !is_file(marker) {
+        return false;
+    }
+    let expected = _verify_marker_content(iso_path, iso_sha256, apk_tools_path, apk_tools_sha256);
+    read_file_or_empty(marker) == expected
+}
+
+fn _ensure_parent_dir(path) {
+    let parent = dirname(path);
+    if parent != "" {
+        mkdir(parent);
+    }
+}
+
+fn _ensure_build_asset_present(build_path, preseed_path, label) {
+    if is_file(build_path) {
+        return;
+    }
+    if preseed_path == "" || !is_file(preseed_path) {
+        return;
+    }
+    _ensure_parent_dir(build_path);
+    shell("cp --reflink=auto '" + preseed_path + "' '" + build_path + "'");
+    log("Staged " + label + " from trusted preseed cache: " + preseed_path);
+}
+
+fn _require_preseeded_asset(build_path, preseed_path, label, remediation) {
+    _ensure_build_asset_present(build_path, preseed_path, label);
+    if is_file(build_path) {
+        return;
+    }
+    throw label + " is missing at '" + build_path + "'.\n" +
+          "Stage builds forbid download/redownload.\n" +
+          "Pre-seed canonical cache at '" + preseed_path + "'.\n" +
+          remediation;
+}
+
+fn _require_trusted_preseed_assets(ctx, remediation) {
+    if !is_file(ctx.iso_preseed_path) {
+        throw "Alpine preseed ISO missing at '" + ctx.iso_preseed_path + "'.\n" + remediation;
+    }
+    if !is_file(ctx.apk_tools_preseed_path) {
+        throw "Alpine preseed apk-tools package missing at '" + ctx.apk_tools_preseed_path + "'.\n" + remediation;
+    }
+    if !_marker_is_valid(
+        ctx.trust_dir,
+        ctx.iso_preseed_path,
+        ctx.iso_sha256,
+        ctx.apk_tools_preseed_path,
+        ctx.apk_tools_sha256
+    ) {
+        throw "Alpine Stage 01 trust marker missing/stale under '" + ctx.trust_dir + "'.\n" +
+              remediation;
+    }
 }
 
 fn _profile_packages(profile) {
@@ -184,14 +250,19 @@ fn _ensure_openrc_stage01_completeness(rootfs) {
 }
 
 fn is_acquired(ctx) {
+    let remediation = "Run 'cargo run -p distro-builder --bin distro-builder -- artifact preseed-alpine-stage01-assets " + ctx.profile + " --refresh'";
     let iso_path = join_path(BUILD_DIR, _iso_name(ctx));
+    _require_preseeded_asset(iso_path, ctx.iso_preseed_path, "Alpine ISO", remediation);
+    _require_trusted_preseed_assets(ctx, remediation);
     let apk_tools_dir = join_path(BUILD_DIR, "apk-tools");
+    let apk_tools_pkg = join_path(apk_tools_dir, _apk_tools_name(ctx));
+    _require_preseeded_asset(
+        apk_tools_pkg,
+        ctx.apk_tools_preseed_path,
+        "apk-tools-static package",
+        remediation
+    );
     let apk_static = _resolve_apk_static(apk_tools_dir);
-
-    if !is_file(iso_path) {
-        throw "Alpine ISO not acquired at " + iso_path;
-    }
-    verify_sha256(iso_path, ctx.iso_sha256);
 
     if apk_static == "" {
         throw "apk.static not acquired under " + apk_tools_dir;
@@ -203,16 +274,11 @@ fn is_acquired(ctx) {
 }
 
 fn acquire(ctx) {
+    let remediation = "Run 'cargo run -p distro-builder --bin distro-builder -- artifact preseed-alpine-stage01-assets " + ctx.profile + " --refresh'";
     mkdir(BUILD_DIR);
-
     let iso_dest = join_path(BUILD_DIR, _iso_name(ctx));
-    if !is_file(iso_dest) {
-        log("Downloading " + basename(iso_dest) + "...");
-        let downloaded = download(_iso_url(ctx), iso_dest);
-        if downloaded == "" {
-            throw "failed to download Alpine ISO from " + _iso_url(ctx);
-        }
-    }
+    _require_preseeded_asset(iso_dest, ctx.iso_preseed_path, "Alpine ISO", remediation);
+    _require_trusted_preseed_assets(ctx, remediation);
     verify_sha256(iso_dest, ctx.iso_sha256);
 
     let apk_tools_dir = join_path(BUILD_DIR, "apk-tools");
@@ -220,13 +286,12 @@ fn acquire(ctx) {
     let apk_static = _resolve_apk_static(apk_tools_dir);
     mkdir(apk_tools_dir);
 
-    if !is_file(apk_tools_pkg) {
-        log("Downloading " + basename(apk_tools_pkg) + "...");
-        let downloaded = download(_apk_tools_url(ctx), apk_tools_pkg);
-        if downloaded == "" {
-            throw "failed to download apk-tools-static from " + _apk_tools_url(ctx);
-        }
-    }
+    _require_preseeded_asset(
+        apk_tools_pkg,
+        ctx.apk_tools_preseed_path,
+        "apk-tools-static package",
+        remediation
+    );
     verify_sha256(apk_tools_pkg, ctx.apk_tools_sha256);
 
     if apk_static == "" {

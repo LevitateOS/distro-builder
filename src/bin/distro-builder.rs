@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde::Serialize;
 
 mod stage_paths;
@@ -53,10 +53,12 @@ struct StageRunMetadata {
 }
 
 fn usage() -> &'static str {
-    "Usage:\n  distro-builder iso build [<distro_id|stage>] [<distro_id|stage>] \n    stage defaults to 00Build, distro defaults to levitate\n    stage aliases: 0|00|01|1|02|2\n  distro-builder iso build-all [00Build|01Boot|02LiveTools]\n  distro-builder artifact build-rootfs-erofs <source_dir> <output>\n  distro-builder artifact build-overlayfs-erofs <source_dir> <output>\n  distro-builder artifact prepare-stage-inputs <stage> <distro_id> <output_dir>\n  distro-builder artifact prepare-s00-build-inputs <distro_id> <output_dir>\n  distro-builder artifact prepare-s01-boot-inputs <distro_id> <output_dir>\n  distro-builder artifact prepare-s02-live-tools-inputs <distro_id> <output_dir>"
+    "Usage:\n  distro-builder iso build [<distro_id|stage>] [<distro_id|stage>] \n    stage defaults to 00Build, distro defaults to levitate\n    stage aliases: 0|00|01|1|02|2\n  distro-builder iso build-all [00Build|01Boot|02LiveTools]\n  distro-builder artifact build-rootfs-erofs <source_dir> <output>\n  distro-builder artifact build-overlayfs-erofs <source_dir> <output>\n  distro-builder artifact prepare-stage-inputs <stage> <distro_id> <output_dir>\n  distro-builder artifact prepare-s00-build-inputs <distro_id> <output_dir>\n  distro-builder artifact prepare-s01-boot-inputs <distro_id> <output_dir>\n  distro-builder artifact prepare-s02-live-tools-inputs <distro_id> <output_dir>\n  distro-builder artifact preseed-rocky-iso <distro_id> [--refresh]\n  distro-builder artifact preseed-alpine-stage01-assets <distro_id> [--refresh]"
 }
 
 fn main() -> Result<()> {
+    arm_parent_death_signal()?;
+
     let args: Vec<String> = std::env::args().skip(1).collect();
 
     if workflows::is_iso_build_invocation(&args) {
@@ -65,4 +67,21 @@ fn main() -> Result<()> {
 
     workflows::enforce_legacy_binding_policy_guard()?;
     workflows::dispatch_non_iso_command(&args)
+}
+
+#[cfg(unix)]
+fn arm_parent_death_signal() -> Result<()> {
+    // If launcher/wrapper dies (cancel/abort), terminate this process too so
+    // long-running sub-steps do not continue as orphans.
+    let rc = unsafe { libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM) };
+    if rc != 0 {
+        return Err(std::io::Error::last_os_error())
+            .context("Failed to arm parent-death signal for distro-builder");
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn arm_parent_death_signal() -> Result<()> {
+    Ok(())
 }

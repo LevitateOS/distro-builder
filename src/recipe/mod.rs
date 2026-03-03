@@ -11,6 +11,7 @@
 //! 5. System PATH (`which recipe`)
 
 pub mod alpine;
+pub mod alpine_stage01;
 pub mod linux;
 pub mod rocky_stage01;
 
@@ -20,6 +21,8 @@ use distro_spec::shared::LEVITATE_CARGO_TOOLS;
 use std::env;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+#[cfg(unix)]
+use std::{io, os::unix::process::CommandExt};
 
 /// Extract the distro directory name from a base_dir path.
 ///
@@ -310,10 +313,27 @@ pub fn run_recipe_phase_json_with_defines(
         cmd.arg("--define").arg(format!("{}={}", key, value));
     }
 
-    let status = cmd
+    #[cfg(unix)]
+    {
+        // Ensure recipe subprocesses cannot outlive distro-builder when parent gets cancelled.
+        // This prevents orphaned recipe processes from keeping recipe locks after cancellation.
+        unsafe {
+            cmd.pre_exec(|| {
+                if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM) != 0 {
+                    return Err(io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+    }
+
+    let mut child = cmd
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
-        .status()
+        .spawn()
+        .with_context(|| format!("Failed to execute recipe: {}", recipe_bin.display()))?;
+    let status = child
+        .wait()
         .with_context(|| format!("Failed to execute recipe: {}", recipe_bin.display()))?;
 
     if !status.success() {

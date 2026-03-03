@@ -1,6 +1,8 @@
 use std::path::Path;
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
+use distro_builder::recipe::alpine_stage01::preseed_alpine_stage01_assets;
+use distro_builder::recipe::rocky_stage01::preseed_rocky_iso;
 use distro_builder::stages::s01_boot_inputs::{
     load_s00_build_input_spec, load_s01_boot_input_spec,
     prepare_s00_build_inputs as prepare_s00_build_inputs_for_distro,
@@ -110,5 +112,70 @@ pub(crate) fn prepare_stage_inputs_cmd(
     println!("  rootfs source: {}", prepared_rootfs_source.display());
     println!("  live overlay:  {}", prepared_live_overlay.display());
     println!("  source path:   {}", source_path_file.display());
+    Ok(())
+}
+
+pub(crate) fn preseed_rocky_iso_cmd(distro_id: &str, refresh: bool) -> Result<()> {
+    let cwd = std::env::current_dir().context("resolving current directory")?;
+    let bundle = load_stage_00_contract_bundle_for_distro_from(&cwd, distro_id)
+        .with_context(|| format!("loading 00Build contract for '{}'", distro_id))?;
+    let s01_spec = load_s01_boot_input_spec(&bundle.repo_root, &bundle.variant_dir, distro_id)
+        .with_context(|| format!("loading 01Boot config for '{}'", distro_id))?;
+    let rocky_spec = s01_spec
+        .rocky_iso_preseed_spec()
+        .with_context(|| format!("resolving Stage 01 Rocky preseed spec for '{}'", distro_id))?;
+    let Some(rocky_spec) = rocky_spec else {
+        bail!(
+            "Stage 01 for '{}' does not use kind='recipe_rocky'; no Rocky ISO preseed recipe is configured in '{}'",
+            distro_id,
+            bundle.variant_dir.join("01Boot.toml").display()
+        );
+    };
+
+    let iso_path =
+        preseed_rocky_iso(&bundle.repo_root, &rocky_spec, refresh).with_context(|| {
+            format!(
+                "preseeding Stage 01 Rocky ISO for '{}' in '{}'",
+                distro_id,
+                rocky_spec.trust_dir.display()
+            )
+        })?;
+
+    println!("Rocky ISO preseed ready for {}:", distro_id);
+    println!("  ISO:   {}", iso_path.display());
+    println!("  Trust: {}", rocky_spec.trust_dir.display());
+    Ok(())
+}
+
+pub(crate) fn preseed_alpine_stage01_assets_cmd(distro_id: &str, refresh: bool) -> Result<()> {
+    let cwd = std::env::current_dir().context("resolving current directory")?;
+    let bundle = load_stage_00_contract_bundle_for_distro_from(&cwd, distro_id)
+        .with_context(|| format!("loading 00Build contract for '{}'", distro_id))?;
+    let s01_spec = load_s01_boot_input_spec(&bundle.repo_root, &bundle.variant_dir, distro_id)
+        .with_context(|| format!("loading 01Boot config for '{}'", distro_id))?;
+    let alpine_spec = s01_spec
+        .alpine_stage01_preseed_spec()
+        .with_context(|| format!("resolving Stage 01 Alpine preseed spec for '{}'", distro_id))?;
+    let Some(alpine_spec) = alpine_spec else {
+        bail!(
+            "Stage 01 for '{}' does not use the canonical Alpine Stage 01 recipe; no Alpine preseed recipe is configured in '{}'",
+            distro_id,
+            bundle.variant_dir.join("01Boot.toml").display()
+        );
+    };
+
+    let output = preseed_alpine_stage01_assets(&bundle.repo_root, &alpine_spec, refresh)
+        .with_context(|| {
+            format!(
+                "preseeding Stage 01 Alpine assets for '{}' in '{}'",
+                distro_id,
+                alpine_spec.trust_dir.display()
+            )
+        })?;
+
+    println!("Alpine Stage 01 preseed ready for {}:", distro_id);
+    println!("  ISO:        {}", output.iso_path.display());
+    println!("  apk-tools:  {}", output.apk_tools_path.display());
+    println!("  Trust:      {}", alpine_spec.trust_dir.display());
     Ok(())
 }

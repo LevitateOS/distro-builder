@@ -22,7 +22,7 @@ let ctx = #{
     iso_path: "/data/vince/LevitateOS/.artifacts/work/levitate/stage01-rootfs-provider/rocky/Rocky-10.1-x86_64-dvd1.iso",
     name: "rocky-stage01-rootfs",
     rootfs_path: "/data/vince/LevitateOS/.artifacts/work/levitate/stage01-rootfs-provider/rocky/rootfs-minimal",
-    rootfs_recipe_version: "s01-minimal-v11",
+    rootfs_recipe_version: "s01-minimal-v19",
     sha256: "55f96d45a052c0ed4f06309480155cb66281a008691eb7f3f359957205b1849a",
     sha256_url: "https://download.rockylinux.org/pub/rocky/10/isos/x86_64/CHECKSUM",
     torrent_url: "https://download.rockylinux.org/pub/rocky/10/isos/x86_64/Rocky-10.1-x86_64-dvd1.torrent",
@@ -196,6 +196,21 @@ fn is_built(ctx) {
         "usr/lib64/libcom_err.so.2",
         "usr/lib64/libkeyutils.so.1",
         "usr/lib64/libverto.so.1",
+        "usr/bin/sfdisk",
+        "usr/bin/ping",
+        "usr/bin/curl",
+        "usr/bin/lspci",
+        "usr/bin/lsusb",
+        "usr/bin/less",
+        "usr/lib64/libbrotlidec.so.1",
+        "usr/lib64/libbrotlicommon.so.1",
+        "usr/lib64/libevent-2.1.so.7",
+        "usr/lib64/libsasl2.so.3",
+        "usr/lib/systemd/system/dbus.socket",
+        "usr/lib/systemd/system/dbus-broker.service",
+        "etc/systemd/system/dbus.service",
+        "etc/systemd/system/sockets.target.wants/dbus.socket",
+        "usr/lib64/libexpat.so.1",
         "etc/pam.d/system-auth",
         "etc/pam.d/password-auth",
         "etc/pam.d/postlogin",
@@ -258,6 +273,27 @@ fn build(ctx) {
         "kmod",
         "util-linux",
         "util-linux-core",
+        "iputils",
+        "curl",
+        "libcurl",
+        "libidn2",
+        "libunistring",
+        "libnghttp2",
+        "libssh",
+        "libpsl",
+        "openldap",
+        "brotli",
+        "libbrotli",
+        "libevent",
+        "cyrus-sasl-lib",
+        "pciutils",
+        "pciutils-libs",
+        "usbutils",
+        "libusb1",
+        "less",
+        "libfdisk",
+        "readline",
+        "kmod-libs",
         "libmount",
         "libblkid",
         "libsmartcols",
@@ -274,7 +310,10 @@ fn build(ctx) {
         "libverto",
         "libcom_err",
         "dbus",
+        "dbus-common",
+        "dbus-daemon",
         "dbus-broker",
+        "expat",
         // Locale + console essentials.
         "glibc",
         "glibc-common",
@@ -345,6 +384,20 @@ fn build(ctx) {
     if !exists(join_path(rootfs, "usr/bin/login")) && exists(join_path(rootfs, "usr/sbin/login")) {
         shell("ln -sfn ../sbin/login '" + join_path(rootfs, "usr/bin/login") + "'");
     }
+    if !exists(join_path(rootfs, "usr/bin/sfdisk")) && exists(join_path(rootfs, "usr/sbin/sfdisk")) {
+        shell("ln -sfn ../sbin/sfdisk '" + join_path(rootfs, "usr/bin/sfdisk") + "'");
+    }
+    if !exists(join_path(rootfs, "usr/bin/lspci")) && exists(join_path(rootfs, "usr/sbin/lspci")) {
+        shell("ln -sfn ../sbin/lspci '" + join_path(rootfs, "usr/bin/lspci") + "'");
+    }
+    if !exists(join_path(rootfs, "usr/bin/lsusb")) && exists(join_path(rootfs, "usr/sbin/lsusb")) {
+        shell("ln -sfn ../sbin/lsusb '" + join_path(rootfs, "usr/bin/lsusb") + "'");
+    }
+    // RPM scriptlets are not executed in this producer path. Ensure dbus broker
+    // is reachable via dbus.service and dbus.socket is enabled for socket activation.
+    mkdir(join_path(rootfs, "etc/systemd/system/sockets.target.wants"));
+    shell("ln -sfn /usr/lib/systemd/system/dbus-broker.service '" + join_path(rootfs, "etc/systemd/system/dbus.service") + "'");
+    shell("ln -sfn /usr/lib/systemd/system/dbus.socket '" + join_path(rootfs, "etc/systemd/system/sockets.target.wants/dbus.socket") + "'");
 
     // RPM scriptlets are not executed in this producer path. Ensure OpenSSH
     // privilege-separation account entries exist so sshd can start in Stage 01.
@@ -357,6 +410,10 @@ fn build(ctx) {
     shell("grep -q '^sshd:' '" + gshadow_file + "' || printf 'sshd:!::\\n' >> '" + gshadow_file + "'");
     shell("grep -q '^sshd:' '" + passwd_file + "' || printf 'sshd:x:74:74:Privilege-separated SSH:/run/sshd:/sbin/nologin\\n' >> '" + passwd_file + "'");
     shell("grep -q '^sshd:' '" + shadow_file + "' || printf 'sshd:!:20000:0:99999:7:::\\n' >> '" + shadow_file + "'");
+    shell("grep -q '^dbus:' '" + group_file + "' || printf 'dbus:x:81:\\n' >> '" + group_file + "'");
+    shell("grep -q '^dbus:' '" + gshadow_file + "' || printf 'dbus:!::\\n' >> '" + gshadow_file + "'");
+    shell("grep -q '^dbus:' '" + passwd_file + "' || printf 'dbus:x:81:81:System Message Bus:/:/sbin/nologin\\n' >> '" + passwd_file + "'");
+    shell("grep -q '^dbus:' '" + shadow_file + "' || printf 'dbus:!:20000:0:99999:7:::\\n' >> '" + shadow_file + "'");
 
     // RPM scriptlets are not executed in this producer path, so PAM include
     // stack files normally materialized by auth tooling must be created here.

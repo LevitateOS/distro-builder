@@ -66,10 +66,15 @@ pub(crate) fn add_required_tools(
         })?;
     }
 
-    let dest_dirs = [
-        tool_payload_dir.join("usr/bin"),
-        tool_payload_dir.join("bin"),
-    ];
+    // Preserve merged-/usr roots (e.g. /bin -> usr/bin): creating a real
+    // overlay /bin directory would shadow the symlink and hide /bin/bash,/bin/sh.
+    let mut dest_dirs = vec![tool_payload_dir.join("usr/bin")];
+    let rootfs_bin = rootfs_source_dir.join("bin");
+    if let Ok(meta) = fs::symlink_metadata(&rootfs_bin) {
+        if meta.file_type().is_dir() {
+            dest_dirs.push(tool_payload_dir.join("bin"));
+        }
+    }
     for dest_dir in &dest_dirs {
         fs::create_dir_all(dest_dir)
             .with_context(|| format!("creating tool destination '{}'", dest_dir.display()))?;
@@ -547,6 +552,49 @@ fn install_mode_payload(
         )
     })?;
 
+    if install_experience == Stage02InstallExperience::Ux {
+        let docs_cmd_path = rootfs_source_dir.join("usr/local/bin/levitate-install-docs");
+        let docs_text_path =
+            rootfs_source_dir.join("usr/local/share/levitate/stage-02-install-docs.txt");
+        let docs_text = format!(
+            "LevitateOS Stage 02 Live Tools\n\
+             Distro: {distro}\n\
+             \n\
+             This shell is intended for interactive install preparation.\n\
+             Available baseline commands include: recstrap, recfstab, recchroot, sfdisk, mkfs.ext4, ip, ping, curl.\n\
+             \n\
+             If this host is used for automation, switch to the stage profile that sets install_experience=automated_ssh.\n",
+            distro = distro_id
+        );
+        write_text(&docs_text_path, &docs_text).with_context(|| {
+            format!(
+                "writing Stage 02 docs payload '{}'",
+                docs_text_path.display()
+            )
+        })?;
+
+        let docs_cmd = "#!/bin/sh\n\
+set -eu\n\
+\n\
+DOCS_FILE=\"/usr/local/share/levitate/stage-02-install-docs.txt\"\n\
+if [ -f \"$DOCS_FILE\" ]; then\n\
+    if command -v less >/dev/null 2>&1; then\n\
+        exec less \"$DOCS_FILE\"\n\
+    fi\n\
+    cat \"$DOCS_FILE\"\n\
+else\n\
+    echo \"Stage 02 docs payload missing at $DOCS_FILE\"\n\
+fi\n\
+\n\
+exec \"${SHELL:-/bin/sh}\" -l\n";
+        write_executable(&docs_cmd_path, docs_cmd).with_context(|| {
+            format!(
+                "installing Stage 02 docs command '{}'",
+                docs_cmd_path.display()
+            )
+        })?;
+    }
+
     let entrypoint_path = rootfs_source_dir.join("usr/local/bin/stage-02-install-entrypoint");
     let entrypoint_script = match install_experience {
         Stage02InstallExperience::Ux => format!(
@@ -630,9 +678,21 @@ esac\n\
 [ -n \"${TMUX:-}\" ] && return 0\n\
 [ \"${STAGE02_UX_LAUNCHED:-0}\" = \"1\" ] && return 0\n\
 \n\
-TTY=\"$(tty 2>/dev/null || true)\"\n\
-[ \"$TTY\" = \"/dev/tty1\" ] || return 0\n\
+if [ -r /run/boot-injection/payload.env ]; then\n\
+    # shellcheck disable=SC1091\n\
+    . /run/boot-injection/payload.env || true\n\
+fi\n\
 \n\
+TTY=\"$(tty 2>/dev/null || true)\"\n\
+if [ \"$TTY\" = \"/dev/tty1\" ]; then\n\
+    :\n\
+elif [ \"$TTY\" = \"/dev/ttyS0\" ] && [ \"${STAGE02_SERIAL_UX:-0}\" = \"1\" ]; then\n\
+    :\n\
+else\n\
+    return 0\n\
+fi\n\
+\n\
+echo \"[stage02-ux] Launching install UX on $TTY...\"\n\
 export STAGE02_UX_LAUNCHED=1\n\
 exec /usr/local/bin/stage-02-install-entrypoint\n";
         write_text(&ux_profile_path, ux_profile).with_context(|| {

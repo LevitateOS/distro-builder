@@ -51,14 +51,15 @@ pub(crate) fn add_required_tools(
             },
         )?;
     }
-    install_mode_payload(tool_payload_dir, distro_id, install_experience).with_context(|| {
-        format!(
-            "writing Stage 02 install experience payload for '{}'",
-            distro_id
-        )
-    })?;
+    install_mode_payload(repo_root, rootfs_source_dir, distro_id, install_experience)
+        .with_context(|| {
+            format!(
+                "writing Stage 02 install experience payload for '{}'",
+                distro_id
+            )
+        })?;
     if install_experience == Stage02InstallExperience::Ux {
-        install_split_launcher(repo_root, tool_payload_dir, target).with_context(|| {
+        install_split_launcher(repo_root, rootfs_source_dir, target).with_context(|| {
             format!(
                 "installing Stage 02 split launcher binary for '{}'",
                 distro_id
@@ -532,7 +533,141 @@ fn install_split_launcher(
     Ok(())
 }
 
+fn find_executable_in_path(name: &str) -> Option<PathBuf> {
+    let path_var = env::var_os("PATH")?;
+    env::split_paths(&path_var)
+        .map(|entry| entry.join(name))
+        .find(|candidate| candidate.is_file())
+}
+
+fn install_bun_docs_tui_payload(
+    repo_root: &Path,
+    rootfs_source_dir: &Path,
+    docs_cmd_path: &Path,
+) -> Result<()> {
+    let docs_app_dir = repo_root.join("tui/apps/s02-live-tools/install-docs");
+    if !docs_app_dir.is_dir() {
+        bail!(
+            "Stage 02 docs app source missing at '{}'. Expected workspace path 'tui/apps/s02-live-tools/install-docs'.",
+            docs_app_dir.display()
+        );
+    }
+
+    let bun_bin = find_executable_in_path("bun").ok_or_else(|| {
+        anyhow::anyhow!(
+            "bun is required to build Stage 02 docs TUI payload.\n\
+             Remediation: install bun and ensure it is in PATH (https://bun.sh)."
+        )
+    })?;
+
+    // Ensure docs app dependencies are available for bundling.
+    let docs_tui_kit = docs_app_dir.join("node_modules/@levitate/tui-kit/package.json");
+    if !docs_tui_kit.is_file() {
+        let install = Command::new(&bun_bin)
+            .arg("install")
+            .current_dir(&docs_app_dir)
+            .output()
+            .with_context(|| {
+                format!(
+                    "running bun install for Stage 02 docs app at '{}'",
+                    docs_app_dir.display()
+                )
+            })?;
+        if !install.status.success() {
+            let stdout = String::from_utf8_lossy(&install.stdout);
+            let stderr = String::from_utf8_lossy(&install.stderr);
+            bail!(
+                "bun install failed for Stage 02 docs app '{}': {}\n{}",
+                docs_app_dir.display(),
+                stdout.trim(),
+                stderr.trim()
+            );
+        }
+    }
+
+    let docs_bundle_dir = rootfs_source_dir.join("usr/local/share/levitate/docs-tui");
+    fs::create_dir_all(&docs_bundle_dir).with_context(|| {
+        format!(
+            "creating Stage 02 docs bundle directory '{}'",
+            docs_bundle_dir.display()
+        )
+    })?;
+    let docs_bundle = docs_bundle_dir.join("levitate-install-docs.js");
+
+    let build = Command::new(&bun_bin)
+        .arg("build")
+        .arg("src/main.ts")
+        .arg("--target=bun")
+        .arg("--minify")
+        .arg("--outfile")
+        .arg(&docs_bundle)
+        .current_dir(&docs_app_dir)
+        .output()
+        .with_context(|| {
+            format!(
+                "building Stage 02 docs bundle from '{}' to '{}'",
+                docs_app_dir.display(),
+                docs_bundle.display()
+            )
+        })?;
+    if !build.status.success() {
+        let stdout = String::from_utf8_lossy(&build.stdout);
+        let stderr = String::from_utf8_lossy(&build.stderr);
+        bail!(
+            "bun build failed for Stage 02 docs bundle '{}': {}\n{}",
+            docs_app_dir.display(),
+            stdout.trim(),
+            stderr.trim()
+        );
+    }
+    if !docs_bundle.is_file() {
+        bail!(
+            "Stage 02 docs bundle missing after build at '{}'",
+            docs_bundle.display()
+        );
+    }
+
+    let bun_dest = rootfs_source_dir.join("usr/local/bin/bun");
+    if let Some(parent) = bun_dest.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("creating bun destination '{}'", parent.display()))?;
+    }
+    fs::copy(&bun_bin, &bun_dest).with_context(|| {
+        format!(
+            "copying bun runtime '{}' -> '{}'",
+            bun_bin.display(),
+            bun_dest.display()
+        )
+    })?;
+    let mut bun_perms = fs::metadata(&bun_dest)
+        .with_context(|| format!("reading permissions for '{}'", bun_dest.display()))?
+        .permissions();
+    bun_perms.set_mode(0o755);
+    fs::set_permissions(&bun_dest, bun_perms)
+        .with_context(|| format!("setting executable permissions on '{}'", bun_dest.display()))?;
+
+    let docs_cmd = "#!/bin/sh\n\
+set -eu\n\
+\n\
+APP=\"/usr/local/share/levitate/docs-tui/levitate-install-docs.js\"\n\
+if [ ! -r \"$APP\" ]; then\n\
+    echo \"Stage 02 docs bundle missing at $APP\" >&2\n\
+    exit 1\n\
+fi\n\
+\n\
+exec /usr/local/bin/bun \"$APP\" \"$@\"\n";
+    write_executable(docs_cmd_path, docs_cmd).with_context(|| {
+        format!(
+            "installing Stage 02 docs command launcher '{}'",
+            docs_cmd_path.display()
+        )
+    })?;
+
+    Ok(())
+}
+
 fn install_mode_payload(
+    repo_root: &Path,
     rootfs_source_dir: &Path,
     distro_id: &str,
     install_experience: Stage02InstallExperience,
@@ -552,8 +687,16 @@ fn install_mode_payload(
         )
     })?;
 
+    install_shell_color_profile(rootfs_source_dir).with_context(|| {
+        format!(
+            "installing shell color profile defaults under '{}'",
+            rootfs_source_dir.display()
+        )
+    })?;
+
     if install_experience == Stage02InstallExperience::Ux {
         let docs_cmd_path = rootfs_source_dir.join("usr/local/bin/levitate-install-docs");
+        let docs_tui_cmd_path = rootfs_source_dir.join("usr/local/bin/docs-tui");
         let docs_text_path =
             rootfs_source_dir.join("usr/local/share/levitate/stage-02-install-docs.txt");
         let docs_text = format!(
@@ -573,13 +716,28 @@ fn install_mode_payload(
             )
         })?;
 
-        let docs_cmd = "#!/bin/sh\n\
+        if distro_id == "levitate" {
+            install_bun_docs_tui_payload(repo_root, rootfs_source_dir, &docs_cmd_path)
+                .with_context(|| {
+                    format!(
+                        "installing bun-based Stage 02 docs payload for '{}'",
+                        distro_id
+                    )
+                })?;
+        } else {
+            let docs_cmd = "#!/bin/sh\n\
 set -eu\n\
 \n\
 DOCS_FILE=\"/usr/local/share/levitate/stage-02-install-docs.txt\"\n\
 if [ -f \"$DOCS_FILE\" ]; then\n\
-    if command -v less >/dev/null 2>&1; then\n\
-        exec less \"$DOCS_FILE\"\n\
+    if [ \"${LEVITATE_DOCS_PLAIN:-0}\" != \"1\" ] && command -v less >/dev/null 2>&1; then\n\
+        case \"${TERM:-}\" in\n\
+            \"\"|dumb|vt100)\n\
+                ;;\n\
+            *)\n\
+                exec less \"$DOCS_FILE\"\n\
+                ;;\n\
+        esac\n\
     fi\n\
     cat \"$DOCS_FILE\"\n\
 else\n\
@@ -587,10 +745,21 @@ else\n\
 fi\n\
 \n\
 exec \"${SHELL:-/bin/sh}\" -l\n";
-        write_executable(&docs_cmd_path, docs_cmd).with_context(|| {
+            write_executable(&docs_cmd_path, docs_cmd).with_context(|| {
+                format!(
+                    "installing Stage 02 docs command '{}'",
+                    docs_cmd_path.display()
+                )
+            })?;
+        }
+
+        // Canonical docs-tui command alias for split-pane right-side launchers.
+        let docs_tui_cmd = "#!/bin/sh\n\
+exec /usr/local/bin/levitate-install-docs \"$@\"\n";
+        write_executable(&docs_tui_cmd_path, docs_tui_cmd).with_context(|| {
             format!(
-                "installing Stage 02 docs command '{}'",
-                docs_cmd_path.display()
+                "installing Stage 02 docs-tui alias '{}'",
+                docs_tui_cmd_path.display()
             )
         })?;
     }
@@ -687,6 +856,11 @@ TTY=\"$(tty 2>/dev/null || true)\"\n\
 if [ \"$TTY\" = \"/dev/tty1\" ]; then\n\
     :\n\
 elif [ \"$TTY\" = \"/dev/ttyS0\" ] && [ \"${STAGE02_SERIAL_UX:-0}\" = \"1\" ]; then\n\
+    if [ -z \"${STAGE02_RIGHT_CMD:-}\" ]; then\n\
+        STAGE02_RIGHT_CMD=\"docs-tui --slug installation\"\n\
+        export STAGE02_RIGHT_CMD\n\
+    fi\n\
+    export LEVITATE_DOCS_PLAIN=1\n\
     :\n\
 else\n\
     return 0\n\
@@ -704,6 +878,46 @@ exec /usr/local/bin/stage-02-install-entrypoint\n";
     }
 
     Ok(())
+}
+
+fn install_shell_color_profile(rootfs_source_dir: &Path) -> Result<()> {
+    let profile_path = rootfs_source_dir.join("etc/profile.d/25-shell-color.sh");
+    let profile = "#!/bin/sh\n\
+case \"$-\" in\n\
+    *i*) ;;\n\
+    *) return 0 ;;\n\
+esac\n\
+\n\
+[ \"${NO_COLOR:-0}\" = \"1\" ] && return 0\n\
+\n\
+if [ -z \"${TERM:-}\" ] || [ \"${TERM:-}\" = \"dumb\" ] || [ \"${TERM:-}\" = \"vt100\" ]; then\n\
+    TTY=\"$(tty 2>/dev/null || true)\"\n\
+    case \"$TTY\" in\n\
+        /dev/ttyS*|/dev/tty[0-9]*)\n\
+            export TERM=xterm-256color\n\
+            ;;\n\
+    esac\n\
+fi\n\
+\n\
+export CLICOLOR=\"${CLICOLOR:-1}\"\n\
+export COLORTERM=\"${COLORTERM:-truecolor}\"\n\
+export LESS=\"${LESS:--FRSX}\"\n\
+\n\
+if command -v dircolors >/dev/null 2>&1; then\n\
+    eval \"$(dircolors -b 2>/dev/null || true)\"\n\
+fi\n\
+\n\
+if command -v ls >/dev/null 2>&1; then\n\
+    alias ls='ls --color=auto'\n\
+    alias ll='ls -alF --color=auto'\n\
+    alias la='ls -A --color=auto'\n\
+fi\n\
+\n\
+if [ -n \"${BASH_VERSION:-}\" ]; then\n\
+    export PS1=\"\\[\\033[1;32m\\]\\u@\\h\\[\\033[0m\\]:\\[\\033[1;34m\\]\\w\\[\\033[0m\\]\\\\$ \"\n\
+fi\n";
+    write_text(&profile_path, profile)
+        .with_context(|| format!("writing shell color profile '{}'", profile_path.display()))
 }
 
 fn write_executable(path: &Path, content: &str) -> Result<()> {

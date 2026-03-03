@@ -5,7 +5,7 @@ mod layout;
 mod parse;
 
 pub(crate) use artifacts::{
-    build_overlayfs_erofs, build_rootfs_erofs, prepare_stage_inputs_cmd,
+    build_overlayfs_erofs, build_rootfs_erofs, build_stage_erofs_cmd, prepare_stage_inputs_cmd,
     preseed_alpine_stage01_assets_cmd, preseed_rocky_iso_cmd,
 };
 pub(crate) use build::{

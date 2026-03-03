@@ -41,6 +41,11 @@ pub(crate) fn dispatch_non_iso_command(args: &[String]) -> Result<()> {
         {
             crate::workflows::build_overlayfs_erofs(Path::new(source_dir), Path::new(output))
         }
+        [artifact, build_stage_erofs, stage, distro]
+            if artifact == "artifact" && build_stage_erofs == "build-stage-erofs" =>
+        {
+            crate::workflows::build_stage_erofs_cmd(stage, distro)
+        }
         [artifact, prepare_stage, stage, distro, output_dir]
             if artifact == "artifact" && prepare_stage == "prepare-stage-inputs" =>
         {

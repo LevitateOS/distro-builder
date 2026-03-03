@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::{fs, path::PathBuf};
 
 use anyhow::{bail, Context, Result};
 use distro_builder::recipe::alpine_stage01::preseed_alpine_stage01_assets;
@@ -33,6 +34,100 @@ pub(crate) fn build_overlayfs_erofs(source_dir: &Path, output: &Path) -> Result<
             output.display()
         )
     })
+}
+
+fn stage_artifact_tag_for_slug(stage_slug: &str) -> &'static str {
+    match stage_slug {
+        crate::STAGE00_SLUG => crate::STAGE00_ARTIFACT_TAG,
+        crate::STAGE01_SLUG => crate::STAGE01_ARTIFACT_TAG,
+        crate::STAGE02_SLUG => crate::STAGE02_ARTIFACT_TAG,
+        _ => unreachable!("validated in parse_stage"),
+    }
+}
+
+fn read_stage_rootfs_source_path(path_file: &Path) -> Result<PathBuf> {
+    let raw = fs::read_to_string(path_file)
+        .with_context(|| format!("reading rootfs source path file '{}'", path_file.display()))?;
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        bail!(
+            "rootfs source path file '{}' is empty; expected absolute source directory path",
+            path_file.display()
+        );
+    }
+    Ok(PathBuf::from(trimmed))
+}
+
+pub(crate) fn build_stage_erofs_cmd(stage: &str, distro_id: &str) -> Result<()> {
+    let stage = crate::workflows::parse_stage(Some(stage))?;
+    let cwd = std::env::current_dir().context("resolving current directory")?;
+    let bundle = load_stage_00_contract_bundle_for_distro_from(&cwd, distro_id)
+        .with_context(|| format!("loading 00Build contract for '{}'", distro_id))?;
+    let stage_output_dir =
+        crate::stage_paths::stage_output_dir_for(&bundle.repo_root, distro_id, stage.dir_name);
+
+    fs::create_dir_all(&stage_output_dir).with_context(|| {
+        format!(
+            "creating stage output directory '{}'",
+            stage_output_dir.display()
+        )
+    })?;
+
+    prepare_stage_inputs_cmd(stage.canonical, distro_id, &stage_output_dir).with_context(|| {
+        format!(
+            "preparing {} inputs for '{}' in '{}'",
+            stage.canonical,
+            distro_id,
+            stage_output_dir.display()
+        )
+    })?;
+
+    let stage_artifact_tag = stage_artifact_tag_for_slug(stage.slug);
+    let rootfs_source_file =
+        stage_output_dir.join(format!(".{}-live-rootfs-source.path", stage_artifact_tag));
+    let rootfs_source_dir = read_stage_rootfs_source_path(&rootfs_source_file)?;
+    let live_overlay_dir = stage_output_dir.join(format!("{stage_artifact_tag}-live-overlay"));
+    if !live_overlay_dir.is_dir() {
+        bail!(
+            "live overlay source directory missing for {} at '{}'\n\
+             Remediation: rerun `distro-builder artifact prepare-stage-inputs {} {} {}` and verify overlay preparation succeeds.",
+            stage.canonical,
+            live_overlay_dir.display(),
+            stage.canonical,
+            distro_id,
+            stage_output_dir.display()
+        );
+    }
+
+    let rootfs_output = stage_output_dir.join(format!("{stage_artifact_tag}-filesystem.erofs"));
+    let overlay_output = stage_output_dir.join(format!("{stage_artifact_tag}-overlayfs.erofs"));
+
+    build_rootfs_erofs(&rootfs_source_dir, &rootfs_output).with_context(|| {
+        format!(
+            "building {} rootfs EROFS from '{}' to '{}'",
+            stage.canonical,
+            rootfs_source_dir.display(),
+            rootfs_output.display()
+        )
+    })?;
+    build_overlayfs_erofs(&live_overlay_dir, &overlay_output).with_context(|| {
+        format!(
+            "building {} overlayfs EROFS from '{}' to '{}'",
+            stage.canonical,
+            live_overlay_dir.display(),
+            overlay_output.display()
+        )
+    })?;
+
+    println!(
+        "{} EROFS artifacts built for {}:",
+        stage.canonical, distro_id
+    );
+    println!("  rootfs source: {}", rootfs_source_dir.display());
+    println!("  overlay source: {}", live_overlay_dir.display());
+    println!("  rootfs erofs: {}", rootfs_output.display());
+    println!("  overlay erofs: {}", overlay_output.display());
+    Ok(())
 }
 
 pub(crate) fn prepare_stage_inputs_cmd(

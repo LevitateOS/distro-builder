@@ -354,6 +354,52 @@ pub fn create_systemd_live_overlay(
     fs::create_dir_all(live_overlay.join("usr/local/bin"))?;
     fs::create_dir_all(live_overlay.join("usr/local/sbin"))?;
 
+    let live_help_script = r#"#!/bin/sh
+cat <<'EOF'
+LevitateOS Live Quick Help
+
+Common commands:
+  stage-02-install-entrypoint --probe
+  stage-03-installation.sh
+  live-net-setup.service (systemd unit)
+  recstrap / recfstab / recchroot
+  docs-tui --slug installation
+
+Split-pane controls:
+  Ctrl-g  toggle focused pane
+  Ctrl-q  quit split-pane UI
+EOF
+"#;
+    write_executable(
+        &live_overlay.join("usr/local/bin/live-help"),
+        live_help_script,
+    )?;
+
+    let shell_ux_profile = r#"#!/bin/sh
+case "$-" in
+    *i*) ;;
+    *) return 0 ;;
+esac
+
+export EDITOR="${EDITOR:-vi}"
+export VISUAL="${VISUAL:-$EDITOR}"
+export PAGER="${PAGER:-less}"
+export LESS="${LESS:--FRSX}"
+
+if [ -z "${PS1:-}" ]; then
+    export PS1='[live \u@\h \W]\$ '
+fi
+
+if [ "${LIVE_HELP_HINT_SHOWN:-0}" != "1" ]; then
+    export LIVE_HELP_HINT_SHOWN=1
+    echo "[live] run 'live-help' for common commands."
+fi
+"#;
+    write_executable(
+        &live_overlay.join("etc/profile.d/20-live-shell-ux.sh"),
+        shell_ux_profile,
+    )?;
+
     let tty1_autologin =
         "[Service]\nExecStart=\nExecStart=-/sbin/agetty --autologin root --noclear %I $TERM\n";
     fs::write(

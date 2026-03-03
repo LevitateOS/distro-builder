@@ -22,7 +22,7 @@ let ctx = #{
     iso_path: "/data/vince/LevitateOS/.artifacts/work/levitate/stage01-rootfs-provider/rocky/Rocky-10.1-x86_64-dvd1.iso",
     name: "rocky-stage01-rootfs",
     rootfs_path: "/data/vince/LevitateOS/.artifacts/work/levitate/stage01-rootfs-provider/rocky/rootfs-minimal",
-    rootfs_recipe_version: "s01-minimal-v19",
+    rootfs_recipe_version: "s01-minimal-v21",
     sha256: "55f96d45a052c0ed4f06309480155cb66281a008691eb7f3f359957205b1849a",
     sha256_url: "https://download.rockylinux.org/pub/rocky/10/isos/x86_64/CHECKSUM",
     torrent_url: "https://download.rockylinux.org/pub/rocky/10/isos/x86_64/Rocky-10.1-x86_64-dvd1.torrent",
@@ -177,12 +177,14 @@ fn is_built(ctx) {
     let required_paths = [
         "usr/lib/systemd/systemd",
         "usr/sbin/sshd",
+        "usr/sbin/auditd",
         "usr/sbin/ip",
         "usr/lib64/libbpf.so.1",
         "usr/lib64/libelf.so.1",
         "usr/lib64/libmnl.so.0",
         "usr/lib64/libzstd.so.1",
         "usr/lib/systemd/system/sshd.service",
+        "usr/lib/systemd/system/auditd.service",
         "usr/bin/systemd-tmpfiles",
         "usr/bin/udevadm",
         "usr/sbin/modprobe",
@@ -210,6 +212,7 @@ fn is_built(ctx) {
         "usr/lib/systemd/system/dbus-broker.service",
         "etc/systemd/system/dbus.service",
         "etc/systemd/system/sockets.target.wants/dbus.socket",
+        "var/log/audit",
         "usr/lib64/libexpat.so.1",
         "etc/pam.d/system-auth",
         "etc/pam.d/password-auth",
@@ -257,6 +260,7 @@ fn build(ctx) {
         "setup",
         "basesystem",
         "bash",
+        "bash-completion",
         "coreutils",
         "coreutils-common",
         "findutils",
@@ -338,6 +342,7 @@ fn build(ctx) {
         "libmnl",
         "libzstd",
         "audit-libs",
+        "audit",
         "libselinux",
         "openssl-libs",
         "zlib-ng-compat",
@@ -453,7 +458,8 @@ fn build(ctx) {
 
     // Keep rootfs recipe outputs deterministic and lean.
     shell("rm -rf '" + join_path(rootfs, "var/cache") + "' '" + join_path(rootfs, "var/log") + "'");
-    shell("mkdir -p '" + join_path(rootfs, "var/cache") + "' '" + join_path(rootfs, "var/log") + "'");
+    shell("mkdir -p '" + join_path(rootfs, "var/cache") + "' '" + join_path(rootfs, "var/log") + "' '" + join_path(rootfs, "var/log/audit") + "'");
+    shell("chmod 0700 '" + join_path(rootfs, "var/log/audit") + "' >/dev/null 2>&1 || true");
     write_file(join_path(rootfs, ".stage01-rootfs.recipe-version"), ctx.rootfs_recipe_version + "\n");
 
     ctx.iso_path = iso;

@@ -655,6 +655,17 @@ if [ ! -r \"$APP\" ]; then\n\
     exit 1\n\
 fi\n\
 \n\
+case \"${TERM:-}\" in\n\
+    \"\"|dumb|vt100|vt102|linux)\n\
+        export TERM=xterm-256color\n\
+        ;;\n\
+esac\n\
+export COLORTERM=\"${COLORTERM:-truecolor}\"\n\
+export FORCE_COLOR=\"${FORCE_COLOR:-3}\"\n\
+if [ -n \"${NO_COLOR:-}\" ]; then\n\
+    unset NO_COLOR\n\
+fi\n\
+\n\
 exec /usr/local/bin/bun \"$APP\" \"$@\"\n";
     write_executable(docs_cmd_path, docs_cmd).with_context(|| {
         format!(
@@ -672,6 +683,11 @@ fn install_mode_payload(
     distro_id: &str,
     install_experience: Stage02InstallExperience,
 ) -> Result<()> {
+    let interactive_shell = match distro_id {
+        "levitate" | "ralph" => "/bin/bash",
+        _ => "/bin/sh",
+    };
+
     let marker_dir = rootfs_source_dir.join("usr/lib/levitate/stage-02");
     fs::create_dir_all(&marker_dir).with_context(|| {
         format!(
@@ -725,13 +741,25 @@ fn install_mode_payload(
                     )
                 })?;
         } else {
-            let docs_cmd = "#!/bin/sh\n\
+            let docs_cmd = format!(
+                "#!/bin/sh\n\
 set -eu\n\
 \n\
 DOCS_FILE=\"/usr/local/share/levitate/stage-02-install-docs.txt\"\n\
+case \"${{TERM:-}}\" in\n\
+    \"\"|dumb|vt100|vt102|linux)\n\
+        export TERM=xterm-256color\n\
+        ;;\n\
+esac\n\
+export COLORTERM=\"${{COLORTERM:-truecolor}}\"\n\
+export FORCE_COLOR=\"${{FORCE_COLOR:-3}}\"\n\
+if [ -n \"${{NO_COLOR:-}}\" ]; then\n\
+    unset NO_COLOR\n\
+fi\n\
+\n\
 if [ -f \"$DOCS_FILE\" ]; then\n\
-    if [ \"${LEVITATE_DOCS_PLAIN:-0}\" != \"1\" ] && command -v less >/dev/null 2>&1; then\n\
-        case \"${TERM:-}\" in\n\
+    if [ \"${{LEVITATE_DOCS_PLAIN:-0}}\" != \"1\" ] && command -v less >/dev/null 2>&1; then\n\
+        case \"${{TERM:-}}\" in\n\
             \"\"|dumb|vt100)\n\
                 ;;\n\
             *)\n\
@@ -744,8 +772,10 @@ else\n\
     echo \"Stage 02 docs payload missing at $DOCS_FILE\"\n\
 fi\n\
 \n\
-exec \"${SHELL:-/bin/sh}\" -l\n";
-            write_executable(&docs_cmd_path, docs_cmd).with_context(|| {
+exec \"${{SHELL:-{shell}}}\" -l\n",
+                shell = interactive_shell
+            );
+            write_executable(&docs_cmd_path, &docs_cmd).with_context(|| {
                 format!(
                     "installing Stage 02 docs command '{}'",
                     docs_cmd_path.display()
@@ -816,7 +846,8 @@ if [ -n \"$helper\" ]; then\n\
 fi\n\
 \n\
 echo \"No local docs TUI binary found; dropping to shell.\"\n\
-exec \"${{SHELL:-/bin/sh}}\" -l\n",
+exec \"${{SHELL:-{shell}}}\" -l\n",
+            shell = interactive_shell,
             distro = distro_id
         ),
         Stage02InstallExperience::AutomatedSsh => format!(
@@ -825,7 +856,8 @@ set -eu\n\
 \n\
 echo \"[{distro}] Stage 02 install experience: automated SSH\"\n\
 echo \"This ISO profile is intended for SSH-driven automation (qcow2/.img pipelines).\"\n\
-exec \"${{SHELL:-/bin/sh}}\" -l\n",
+exec \"${{SHELL:-{shell}}}\" -l\n",
+            shell = interactive_shell,
             distro = distro_id
         ),
     };
@@ -890,7 +922,7 @@ esac\n\
 \n\
 [ \"${NO_COLOR:-0}\" = \"1\" ] && return 0\n\
 \n\
-if [ -z \"${TERM:-}\" ] || [ \"${TERM:-}\" = \"dumb\" ] || [ \"${TERM:-}\" = \"vt100\" ]; then\n\
+if [ -z \"${TERM:-}\" ] || [ \"${TERM:-}\" = \"dumb\" ] || [ \"${TERM:-}\" = \"vt100\" ] || [ \"${TERM:-}\" = \"vt102\" ] || [ \"${TERM:-}\" = \"linux\" ]; then\n\
     TTY=\"$(tty 2>/dev/null || true)\"\n\
     case \"$TTY\" in\n\
         /dev/ttyS*|/dev/tty[0-9]*)\n\
@@ -902,6 +934,7 @@ fi\n\
 export CLICOLOR=\"${CLICOLOR:-1}\"\n\
 export COLORTERM=\"${COLORTERM:-truecolor}\"\n\
 export LESS=\"${LESS:--FRSX}\"\n\
+export PAGER=\"${PAGER:-less}\"\n\
 \n\
 if command -v dircolors >/dev/null 2>&1; then\n\
     eval \"$(dircolors -b 2>/dev/null || true)\"\n\
@@ -913,7 +946,24 @@ if command -v ls >/dev/null 2>&1; then\n\
     alias la='ls -A --color=auto'\n\
 fi\n\
 \n\
+if command -v grep >/dev/null 2>&1; then\n\
+    alias grep='grep --color=auto'\n\
+    alias egrep='grep -E --color=auto'\n\
+    alias fgrep='grep -F --color=auto'\n\
+fi\n\
+\n\
 if [ -n \"${BASH_VERSION:-}\" ]; then\n\
+    export HISTCONTROL=\"${HISTCONTROL:-ignoredups:erasedups}\"\n\
+    export HISTSIZE=\"${HISTSIZE:-10000}\"\n\
+    export HISTFILESIZE=\"${HISTFILESIZE:-20000}\"\n\
+    export HISTTIMEFORMAT=\"${HISTTIMEFORMAT:-%F %T }\"\n\
+    shopt -s histappend 2>/dev/null || true\n\
+    shopt -s checkwinsize 2>/dev/null || true\n\
+    if [ -r /usr/share/bash-completion/bash_completion ]; then\n\
+        . /usr/share/bash-completion/bash_completion\n\
+    elif [ -r /etc/bash_completion ]; then\n\
+        . /etc/bash_completion\n\
+    fi\n\
     export PS1=\"\\[\\033[1;32m\\]\\u@\\h\\[\\033[0m\\]:\\[\\033[1;34m\\]\\w\\[\\033[0m\\]\\\\$ \"\n\
 fi\n";
     write_text(&profile_path, profile)

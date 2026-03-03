@@ -422,6 +422,15 @@ fi
 
 echo "___SHELL_READY___"
 
+# Keep interactive serial shell readable: suppress non-critical kernel console spam
+# (audit/info lines still go to journal, but won't clobber the login shell).
+if [ -w /proc/sys/kernel/printk ]; then
+    echo 1 >/proc/sys/kernel/printk 2>/dev/null || true
+fi
+if command -v dmesg >/dev/null 2>&1; then
+    dmesg -n 1 >/dev/null 2>&1 || true
+fi
+
 if [ "${STAGE02_SERIAL_UX:-0}" = "1" ] && [ -x /usr/local/bin/stage-02-install-entrypoint ]; then
     echo "[autologin] Launching Stage 02 install UX on serial console..."
     export STAGE02_UX_LAUNCHED=1

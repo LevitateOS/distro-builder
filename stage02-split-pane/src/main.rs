@@ -23,7 +23,7 @@ use ratatui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    text::{Line, Text},
+    text::{Line, Span, Text},
     widgets::{Block, Borders, Paragraph},
     Frame, Terminal,
 };
@@ -509,11 +509,23 @@ fn build_shell_script_command(script: &str) -> CommandBuilder {
 }
 
 fn apply_common_env(cmd: &mut CommandBuilder) {
-    let term = env::var("TERM").unwrap_or_else(|_| "xterm-256color".to_string());
-    cmd.env("TERM", term);
-    if let Ok(colorterm) = env::var("COLORTERM") {
-        cmd.env("COLORTERM", colorterm);
+    let mut term = env::var("TERM").unwrap_or_else(|_| "xterm-256color".to_string());
+    let normalized = term.trim().to_ascii_lowercase();
+    if normalized.is_empty()
+        || normalized == "dumb"
+        || normalized == "vt100"
+        || normalized == "vt102"
+        || normalized == "linux"
+    {
+        term = "xterm-256color".to_string();
     }
+    cmd.env("TERM", term);
+    let colorterm = env::var("COLORTERM").unwrap_or_else(|_| "truecolor".to_string());
+    cmd.env("COLORTERM", colorterm);
+    let force_color = env::var("FORCE_COLOR").unwrap_or_else(|_| "3".to_string());
+    cmd.env("FORCE_COLOR", force_color);
+    // Ensure NO_COLOR from host/session cannot silently downgrade docs rendering.
+    cmd.env("NO_COLOR", "");
 }
 
 fn right_launch_script(right: Option<&str>) -> String {
@@ -561,17 +573,97 @@ fn render_pane(frame: &mut Frame, area: Rect, pane: &PaneState, focused: bool) {
         .border_style(border_style);
 
     let inner = block.inner(area);
-    let contents = pane.parser.screen().contents();
-    let mut rows = contents
-        .lines()
-        .map(|line| Line::from(line.to_string()))
-        .collect::<Vec<_>>();
-    let max_rows = inner.height as usize;
-    if rows.len() > max_rows {
-        rows.drain(0..(rows.len() - max_rows));
-    }
+    let rows = render_styled_rows(&pane.parser, inner.height, inner.width);
     let paragraph = Paragraph::new(Text::from(rows)).block(block);
     frame.render_widget(paragraph, area);
+}
+
+fn render_styled_rows(
+    parser: &vt100::Parser,
+    max_rows: u16,
+    max_cols: u16,
+) -> Vec<Line<'static>> {
+    let screen = parser.screen();
+    let (rows, cols) = screen.size();
+    let rows_to_render = rows.min(max_rows);
+    let cols_to_render = cols.min(max_cols);
+    let start_row = rows.saturating_sub(rows_to_render);
+
+    let mut lines = Vec::with_capacity(rows_to_render as usize);
+    for row in start_row..rows {
+        let mut spans: Vec<Span<'static>> = Vec::new();
+        let mut run_text = String::new();
+        let mut run_style = Style::default();
+        let mut have_run = false;
+
+        for col in 0..cols_to_render {
+            let Some(cell) = screen.cell(row, col) else {
+                continue;
+            };
+            if cell.is_wide_continuation() {
+                continue;
+            }
+
+            let mut text = cell.contents();
+            if text.is_empty() {
+                text.push(' ');
+            }
+            let style = style_for_cell(cell);
+
+            if have_run && style == run_style {
+                run_text.push_str(&text);
+                continue;
+            }
+
+            if !run_text.is_empty() {
+                spans.push(Span::styled(std::mem::take(&mut run_text), run_style));
+            }
+            run_style = style;
+            have_run = true;
+            run_text.push_str(&text);
+        }
+
+        if !run_text.is_empty() {
+            spans.push(Span::styled(run_text, run_style));
+        }
+        lines.push(Line::from(spans));
+    }
+
+    lines
+}
+
+fn style_for_cell(cell: &vt100::Cell) -> Style {
+    let mut fg = ratatui_color(cell.fgcolor());
+    let mut bg = ratatui_color(cell.bgcolor());
+    if cell.inverse() {
+        std::mem::swap(&mut fg, &mut bg);
+    }
+
+    let mut style = Style::default();
+    if let Some(color) = fg {
+        style = style.fg(color);
+    }
+    if let Some(color) = bg {
+        style = style.bg(color);
+    }
+    if cell.bold() {
+        style = style.add_modifier(Modifier::BOLD);
+    }
+    if cell.italic() {
+        style = style.add_modifier(Modifier::ITALIC);
+    }
+    if cell.underline() {
+        style = style.add_modifier(Modifier::UNDERLINED);
+    }
+    style
+}
+
+fn ratatui_color(color: vt100::Color) -> Option<Color> {
+    match color {
+        vt100::Color::Default => None,
+        vt100::Color::Idx(idx) => Some(Color::Indexed(idx)),
+        vt100::Color::Rgb(r, g, b) => Some(Color::Rgb(r, g, b)),
+    }
 }
 
 fn pane_layout(area: Rect) -> Vec<Rect> {

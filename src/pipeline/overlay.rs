@@ -172,23 +172,39 @@ pub(crate) fn ensure_required_service_wiring(
 ) -> Result<()> {
     for service in required_services {
         match (overlay_policy, service.as_str()) {
-            (S01OverlayPolicy::Systemd { .. }, "sshd") => {
+            (S01OverlayPolicy::Systemd { .. }, service_name) => {
+                if service_name.is_empty()
+                    || !service_name
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '@'))
+                {
+                    bail!(
+                        "unsupported Stage 01 required systemd service '{}': invalid token",
+                        service_name
+                    );
+                }
+                let service_unit = if service_name.ends_with(".service") {
+                    service_name.to_string()
+                } else if service_name.contains('.') {
+                    bail!(
+                        "unsupported Stage 01 required systemd service '{}': use bare name or '.service' unit",
+                        service_name
+                    );
+                } else {
+                    format!("{service_name}.service")
+                };
                 let wants_dir = live_overlay_dir.join("etc/systemd/system/multi-user.target.wants");
                 fs::create_dir_all(&wants_dir)
                     .with_context(|| format!("creating '{}'", wants_dir.display()))?;
-                let wants_link = wants_dir.join("sshd.service");
+                let wants_link = wants_dir.join(&service_unit);
                 if wants_link.symlink_metadata().is_ok() {
                     fs::remove_file(&wants_link)
                         .with_context(|| format!("removing '{}'", wants_link.display()))?;
                 }
-                symlink("/usr/lib/systemd/system/sshd.service", &wants_link).with_context(
-                    || {
-                        format!(
-                            "linking '{}' -> '/usr/lib/systemd/system/sshd.service'",
-                            wants_link.display()
-                        )
-                    },
-                )?;
+                let service_source = format!("/usr/lib/systemd/system/{service_unit}");
+                symlink(&service_source, &wants_link).with_context(|| {
+                    format!("linking '{}' -> '{}'", wants_link.display(), service_source)
+                })?;
             }
             (S01OverlayPolicy::OpenRc { .. }, "sshd") => {
                 let runlevel_dir = live_overlay_dir.join("etc/runlevels/default");

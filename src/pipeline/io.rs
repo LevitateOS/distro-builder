@@ -73,16 +73,9 @@ pub(crate) fn resolve_parent_stage_rootfs_image(
     marker_stage_dir: &str,
     parent_stage_label: &str,
     rootfs_filename: &str,
-    legacy_path_allowed: bool,
 ) -> Result<PathBuf> {
     let distro_output = locate_distro_output_root(output_dir, marker_stage_dir)?;
     let stage_root = distro_output.join(marker_stage_dir);
-    if legacy_path_allowed {
-        let legacy_path = stage_root.join(rootfs_filename);
-        if legacy_path.is_file() {
-            return Ok(legacy_path);
-        }
-    }
 
     let run_id = crate::stage_runs::latest_successful_run_id(&stage_root)?.ok_or_else(|| {
         anyhow::anyhow!(

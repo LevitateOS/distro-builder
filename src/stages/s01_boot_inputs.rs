@@ -211,7 +211,6 @@ pub fn prepare_s01_boot_inputs(
         "s00-build",
         "Stage 00",
         "s00-filesystem.erofs",
-        false,
     )?;
     extract_erofs_rootfs(&parent_rootfs, &rootfs_source_dir).with_context(|| {
         format!(

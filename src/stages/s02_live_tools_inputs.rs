@@ -101,7 +101,6 @@ pub fn prepare_s02_live_tools_inputs(
         "s01-boot",
         "Stage 01",
         "s01-filesystem.erofs",
-        true,
     )?;
     extract_erofs_rootfs(&parent_rootfs, &rootfs_source_dir).with_context(|| {
         format!(

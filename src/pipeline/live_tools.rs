@@ -880,11 +880,29 @@ esac\n\
 [ \"${STAGE02_UX_LAUNCHED:-0}\" = \"1\" ] && return 0\n\
 \n\
 if [ -r /run/boot-injection/payload.env ]; then\n\
-    # shellcheck disable=SC1091\n\
-    . /run/boot-injection/payload.env || true\n\
+    while IFS= read -r line; do\n\
+        case \"$line\" in\n\
+            \"\"|\\#*) continue ;;\n\
+            *=*)\n\
+                key=\"${line%%=*}\"\n\
+                value=\"${line#*=}\"\n\
+                case \"$key\" in\n\
+                    [A-Za-z_][A-Za-z0-9_]*) export \"$key=$value\" ;;\n\
+                esac\n\
+                ;;\n\
+        esac\n\
+    done < /run/boot-injection/payload.env\n\
 fi\n\
 \n\
 TTY=\"$(tty 2>/dev/null || true)\"\n\
+if [ -z \"${STAGE02_LEFT_CMD:-}\" ]; then\n\
+    if [ -x /bin/bash ]; then\n\
+        STAGE02_LEFT_CMD=\"/bin/bash -il\"\n\
+    else\n\
+        STAGE02_LEFT_CMD=\"/bin/sh -il\"\n\
+    fi\n\
+    export STAGE02_LEFT_CMD\n\
+fi\n\
 if [ \"$TTY\" = \"/dev/tty1\" ]; then\n\
     :\n\
 elif [ \"$TTY\" = \"/dev/ttyS0\" ] && [ \"${STAGE02_SERIAL_UX:-0}\" = \"1\" ]; then\n\

@@ -83,21 +83,31 @@ fn print_help() {
 #[derive(Debug, Clone)]
 struct Config {
     shell: String,
+    left_command: Option<String>,
     right_command: Option<String>,
 }
 
 impl Config {
     fn load() -> Self {
-        let shell = env::var("SHELL")
-            .ok()
-            .filter(|s| !s.trim().is_empty())
-            .unwrap_or_else(|| "/bin/bash".to_string());
+        let shell = resolved_shell_path();
+        let left_command = resolve_left_command();
         let right_command = resolve_right_command();
         Self {
             shell,
+            left_command,
             right_command,
         }
     }
+}
+
+fn resolve_left_command() -> Option<String> {
+    if let Ok(raw) = env::var("STAGE02_LEFT_CMD") {
+        let raw = raw.trim();
+        if !raw.is_empty() {
+            return Some(raw.to_string());
+        }
+    }
+    None
 }
 
 fn resolve_right_command() -> Option<String> {
@@ -136,6 +146,24 @@ fn first_token(command: &str) -> Option<&str> {
     command.split_whitespace().next()
 }
 
+fn resolved_shell_path() -> String {
+    if let Some(shell) = env::var("SHELL")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty() && command_exists(s))
+    {
+        return shell;
+    }
+
+    for candidate in ["/bin/bash", "/usr/bin/bash", "/bin/sh", "/usr/bin/sh"] {
+        if command_exists(candidate) {
+            return candidate.to_string();
+        }
+    }
+
+    "/bin/sh".to_string()
+}
+
 fn run_smoke(config: &Config) -> Result<()> {
     let right_command = config.right_command.as_deref().ok_or_else(|| {
         anyhow!("split-smoke: missing right-pane docs command (levitate-install-docs/acorn-docs)")
@@ -151,7 +179,7 @@ fn run_smoke(config: &Config) -> Result<()> {
         pixel_height: 0,
     };
 
-    let left_cmd = build_shell_command(&config.shell);
+    let left_cmd = build_left_pane_command(config);
     let right_probe = format!(
         "if command -v {cmd} >/dev/null 2>&1; then printf '{ok}\\n'; else printf '__LEVITATE_SPLIT_RIGHT_MISSING__\\n'; fi; sleep 0.2",
         cmd = shell_quote(right_token),
@@ -241,12 +269,7 @@ fn run_ui(config: &Config) -> Result<()> {
 
     let (tx, rx) = mpsc::channel::<PtyEvent>();
 
-    let left = spawn_raw_pane(
-        PaneId::Left,
-        build_shell_command(&config.shell),
-        left_size,
-        tx.clone(),
-    )?;
+    let left = spawn_raw_pane(PaneId::Left, build_left_pane_command(config), left_size, tx.clone())?;
     let right = spawn_raw_pane(
         PaneId::Right,
         build_shell_script_command(&right_launch_script(config.right_command.as_deref())),
@@ -348,6 +371,13 @@ impl App {
     fn new(config: &Config, left: PaneState, right: PaneState) -> Self {
         let mut logs = VecDeque::new();
         logs.push_back(format!("shell={}", config.shell));
+        logs.push_back(format!(
+            "left={}",
+            config
+                .left_command
+                .clone()
+                .unwrap_or_else(|| "<default-shell>".to_string())
+        ));
         logs.push_back(format!(
             "right={}",
             config
@@ -496,8 +526,18 @@ fn spawn_raw_pane(
 
 fn build_shell_command(shell: &str) -> CommandBuilder {
     let mut cmd = CommandBuilder::new(shell);
+    // Always force an interactive shell for the left pane so users get a prompt
+    // even when PTY controlling-tty detection is inconsistent across environments.
+    cmd.arg("-i");
     apply_common_env(&mut cmd);
     cmd
+}
+
+fn build_left_pane_command(config: &Config) -> CommandBuilder {
+    if let Some(left) = config.left_command.as_deref() {
+        return build_shell_script_command(&format!("exec {}", left));
+    }
+    build_shell_command(&config.shell)
 }
 
 fn build_shell_script_command(script: &str) -> CommandBuilder {

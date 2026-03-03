@@ -22,7 +22,7 @@ let ctx = #{
     iso_path: "/data/vince/LevitateOS/.artifacts/work/levitate/stage01-rootfs-provider/rocky/Rocky-10.1-x86_64-dvd1.iso",
     name: "rocky-stage01-rootfs",
     rootfs_path: "/data/vince/LevitateOS/.artifacts/work/levitate/stage01-rootfs-provider/rocky/rootfs-minimal",
-    rootfs_recipe_version: "s01-minimal-v21",
+    rootfs_recipe_version: "s01-minimal-v22",
     sha256: "55f96d45a052c0ed4f06309480155cb66281a008691eb7f3f359957205b1849a",
     sha256_url: "https://download.rockylinux.org/pub/rocky/10/isos/x86_64/CHECKSUM",
     torrent_url: "https://download.rockylinux.org/pub/rocky/10/isos/x86_64/Rocky-10.1-x86_64-dvd1.torrent",
@@ -217,6 +217,7 @@ fn is_built(ctx) {
         "etc/pam.d/system-auth",
         "etc/pam.d/password-auth",
         "etc/pam.d/postlogin",
+        "usr/local/bin/gnu-smoke",
     ];
     for rel in required_paths {
         let full = join_path(rootfs, rel);
@@ -455,6 +456,49 @@ fn build(ctx) {
     shell("ln -sfn usr/sbin '" + join_path(rootfs, "sbin") + "'");
     shell("ln -sfn usr/lib '" + join_path(rootfs, "lib") + "'");
     shell("ln -sfn usr/lib64 '" + join_path(rootfs, "lib64") + "'");
+
+    // Install a callable GNU userland smoke script for Levitate live/rootfs validation.
+    shell("mkdir -p '" + join_path(rootfs, "usr/local/bin") + "'");
+    let gnu_smoke = "#!/bin/sh\n";
+    gnu_smoke += "set -u\n";
+    gnu_smoke += "fails=0\n";
+    gnu_smoke += "\n";
+    gnu_smoke += "check_cmd() {\n";
+    gnu_smoke += "    label=\"$1\"\n";
+    gnu_smoke += "    pattern=\"$2\"\n";
+    gnu_smoke += "    shift 2\n";
+    gnu_smoke += "    cmd=\"$1\"\n";
+    gnu_smoke += "    if ! command -v \"$cmd\" >/dev/null 2>&1; then\n";
+    gnu_smoke += "        echo \"[FAIL] $label: missing command '$cmd'\"\n";
+    gnu_smoke += "        fails=$((fails + 1))\n";
+    gnu_smoke += "        return\n";
+    gnu_smoke += "    fi\n";
+    gnu_smoke += "    out=\"$($@ 2>&1 | head -n 2)\"\n";
+    gnu_smoke += "    if printf '%s\\n' \"$out\" | grep -Eqi \"$pattern\"; then\n";
+    gnu_smoke += "        echo \"[PASS] $label\"\n";
+    gnu_smoke += "    else\n";
+    gnu_smoke += "        echo \"[FAIL] $label: expected pattern '$pattern'\"\n";
+    gnu_smoke += "        printf '%s\\n' \"$out\"\n";
+    gnu_smoke += "        fails=$((fails + 1))\n";
+    gnu_smoke += "    fi\n";
+    gnu_smoke += "}\n";
+    gnu_smoke += "\n";
+    gnu_smoke += "check_cmd \"GNU Bash\" \"GNU bash\" bash --version\n";
+    gnu_smoke += "check_cmd \"GNU Coreutils\" \"GNU coreutils\" ls --version\n";
+    gnu_smoke += "check_cmd \"GNU Grep\" \"GNU grep\" grep --version\n";
+    gnu_smoke += "check_cmd \"GNU Sed\" \"GNU sed\" sed --version\n";
+    gnu_smoke += "check_cmd \"GNU Findutils\" \"GNU findutils\" find --version\n";
+    gnu_smoke += "check_cmd \"GNU Awk\" \"GNU Awk\" awk --version\n";
+    gnu_smoke += "check_cmd \"glibc runtime\" \"GNU C Library|glibc\" ldd --version\n";
+    gnu_smoke += "\n";
+    gnu_smoke += "if [ \"$fails\" -eq 0 ]; then\n";
+    gnu_smoke += "    echo \"GNU smoke PASS\"\n";
+    gnu_smoke += "    exit 0\n";
+    gnu_smoke += "fi\n";
+    gnu_smoke += "echo \"GNU smoke FAIL ($fails checks)\"\n";
+    gnu_smoke += "exit 1\n";
+    write_file(join_path(rootfs, "usr/local/bin/gnu-smoke"), gnu_smoke);
+    shell("chmod 0755 '" + join_path(rootfs, "usr/local/bin/gnu-smoke") + "'");
 
     // Keep rootfs recipe outputs deterministic and lean.
     shell("rm -rf '" + join_path(rootfs, "var/cache") + "' '" + join_path(rootfs, "var/log") + "'");

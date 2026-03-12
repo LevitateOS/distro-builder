@@ -314,7 +314,7 @@ fn install(ctx) {
         // Copy vmlinuz
         let bzimage = join_path(build_dir, "arch/x86/boot/bzImage");
         let vmlinuz = join_path(staging_tmp, "boot/vmlinuz");
-        shell("cp " + bzimage + " " + vmlinuz);
+        copy_file(bzimage, vmlinuz);
         log("  Installed vmlinuz");
 
         // Install modules via hookable helper

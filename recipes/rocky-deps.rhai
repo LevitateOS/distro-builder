@@ -53,9 +53,9 @@ fn install(ctx) {
         let extract_dir = join_path(BUILD_DIR, "7z");
         mkdir(extract_dir);
         shell("tar xf " + join_path(BUILD_DIR, "7z.tar.xz") + " -C " + extract_dir);
-        shell("cp " + join_path(extract_dir, "7zz") + " " + join_path(bin_dir, "7zz"));
-        shell("chmod +x " + join_path(bin_dir, "7zz"));
-        ln(join_path(bin_dir, "7zz"), join_path(bin_dir, "7z"));
+        copy_into_dir(join_path(extract_dir, "7zz"), bin_dir);
+        chmod(join_path(bin_dir, "7zz"), 0o755);
+        ln_force(join_path(bin_dir, "7zz"), join_path(bin_dir, "7z"));
     }
 
     ctx

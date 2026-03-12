@@ -83,7 +83,7 @@ fn _ensure_build_asset_present(build_path, preseed_path, label) {
         return;
     }
     _ensure_parent_dir(build_path);
-    shell("cp --reflink=auto '" + preseed_path + "' '" + build_path + "'");
+    copy_file_reflink(preseed_path, build_path);
     log("Staged " + label + " from trusted preseed cache: " + preseed_path);
 }
 

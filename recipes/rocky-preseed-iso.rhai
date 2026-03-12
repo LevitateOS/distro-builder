@@ -105,7 +105,7 @@ fn acquire(ctx) {
         let fetched = torrent(ctx.torrent_url, target_dir);
         let resolved = _normalize_torrent_output(fetched, ctx.iso_name);
         if resolved != ctx.iso_path {
-            shell("mv -f '" + resolved + "' '" + ctx.iso_path + "'");
+            mv(resolved, ctx.iso_path);
         }
     } else {
         log("Rocky ISO already present at preseed path; re-validating checksum.");

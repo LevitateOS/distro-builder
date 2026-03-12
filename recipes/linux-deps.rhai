@@ -45,11 +45,7 @@ fn is_acquired(ctx) {
 
 fn acquire(ctx) {
     mkdir(BUILD_DIR);
-    let pkg_list = "";
-    for pkg in ctx.packages {
-        pkg_list += " " + pkg;
-    }
-    shell("dnf --USING-DNF-INSTEAD-OF-FIXING-RECIPE-MEANS-BLOODY-CUTS-ON-THE-USERS-ARM download -q --resolve --destdir=" + BUILD_DIR + " --arch x86_64 --arch noarch" + pkg_list);
+    dnf_download(ctx.packages, BUILD_DIR, ["x86_64", "noarch"]);
     ctx
 }
 

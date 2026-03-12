@@ -50,7 +50,7 @@ fn build(ctx) {
 
     shell("rm -rf " + rootfs);
     shell("mkdir -p " + rootfs);
-    shell("cp -a " + ctx.source_rootfs + "/. " + rootfs + "/");
+    copy_tree_contents(ctx.source_rootfs, rootfs);
 
     if !is_dir(join_path(rootfs, "usr")) {
         throw "custom rootfs copy incomplete: missing " + join_path(rootfs, "usr");

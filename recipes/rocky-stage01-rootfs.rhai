@@ -91,7 +91,7 @@ fn _ensure_build_iso_present(iso_path, preseed_iso) {
     }
     let dst_dir = dirname(iso_path);
     mkdir(dst_dir);
-    shell("cp --reflink=auto '" + preseed_iso + "' '" + iso_path + "'");
+    copy_file_reflink(preseed_iso, iso_path);
     log("Staged Rocky ISO from trusted preseed cache: " + preseed_iso);
 }
 
@@ -379,31 +379,31 @@ fn build(ctx) {
     shell("mkdir -p '" + join_path(rootfs, "etc") + "'");
     shell("mkdir -p '" + join_path(rootfs, "var") + "'");
     if !exists(join_path(rootfs, "usr/bin/sh")) {
-        shell("ln -sfn bash '" + join_path(rootfs, "usr/bin/sh") + "'");
+        ln_force("bash", join_path(rootfs, "usr/bin/sh"));
     }
     if !exists(join_path(rootfs, "usr/sbin/agetty")) && exists(join_path(rootfs, "usr/bin/agetty")) {
-        shell("ln -sfn ../bin/agetty '" + join_path(rootfs, "usr/sbin/agetty") + "'");
+        ln_force("../bin/agetty", join_path(rootfs, "usr/sbin/agetty"));
     }
     if !exists(join_path(rootfs, "usr/sbin/modprobe")) && exists(join_path(rootfs, "usr/bin/kmod")) {
-        shell("ln -sfn ../bin/kmod '" + join_path(rootfs, "usr/sbin/modprobe") + "'");
+        ln_force("../bin/kmod", join_path(rootfs, "usr/sbin/modprobe"));
     }
     if !exists(join_path(rootfs, "usr/bin/login")) && exists(join_path(rootfs, "usr/sbin/login")) {
-        shell("ln -sfn ../sbin/login '" + join_path(rootfs, "usr/bin/login") + "'");
+        ln_force("../sbin/login", join_path(rootfs, "usr/bin/login"));
     }
     if !exists(join_path(rootfs, "usr/bin/sfdisk")) && exists(join_path(rootfs, "usr/sbin/sfdisk")) {
-        shell("ln -sfn ../sbin/sfdisk '" + join_path(rootfs, "usr/bin/sfdisk") + "'");
+        ln_force("../sbin/sfdisk", join_path(rootfs, "usr/bin/sfdisk"));
     }
     if !exists(join_path(rootfs, "usr/bin/lspci")) && exists(join_path(rootfs, "usr/sbin/lspci")) {
-        shell("ln -sfn ../sbin/lspci '" + join_path(rootfs, "usr/bin/lspci") + "'");
+        ln_force("../sbin/lspci", join_path(rootfs, "usr/bin/lspci"));
     }
     if !exists(join_path(rootfs, "usr/bin/lsusb")) && exists(join_path(rootfs, "usr/sbin/lsusb")) {
-        shell("ln -sfn ../sbin/lsusb '" + join_path(rootfs, "usr/bin/lsusb") + "'");
+        ln_force("../sbin/lsusb", join_path(rootfs, "usr/bin/lsusb"));
     }
     // RPM scriptlets are not executed in this producer path. Ensure dbus broker
     // is reachable via dbus.service and dbus.socket is enabled for socket activation.
     mkdir(join_path(rootfs, "etc/systemd/system/sockets.target.wants"));
-    shell("ln -sfn /usr/lib/systemd/system/dbus-broker.service '" + join_path(rootfs, "etc/systemd/system/dbus.service") + "'");
-    shell("ln -sfn /usr/lib/systemd/system/dbus.socket '" + join_path(rootfs, "etc/systemd/system/sockets.target.wants/dbus.socket") + "'");
+    ln_force("/usr/lib/systemd/system/dbus-broker.service", join_path(rootfs, "etc/systemd/system/dbus.service"));
+    ln_force("/usr/lib/systemd/system/dbus.socket", join_path(rootfs, "etc/systemd/system/sockets.target.wants/dbus.socket"));
 
     // RPM scriptlets are not executed in this producer path. Ensure OpenSSH
     // privilege-separation account entries exist so sshd can start in Stage 01.
@@ -412,14 +412,14 @@ fn build(ctx) {
     let passwd_file = join_path(rootfs, "etc/passwd");
     let shadow_file = join_path(rootfs, "etc/shadow");
     shell("touch '" + group_file + "' '" + gshadow_file + "' '" + passwd_file + "' '" + shadow_file + "'");
-    shell("grep -q '^sshd:' '" + group_file + "' || printf 'sshd:x:74:\\n' >> '" + group_file + "'");
-    shell("grep -q '^sshd:' '" + gshadow_file + "' || printf 'sshd:!::\\n' >> '" + gshadow_file + "'");
-    shell("grep -q '^sshd:' '" + passwd_file + "' || printf 'sshd:x:74:74:Privilege-separated SSH:/run/sshd:/sbin/nologin\\n' >> '" + passwd_file + "'");
-    shell("grep -q '^sshd:' '" + shadow_file + "' || printf 'sshd:!:20000:0:99999:7:::\\n' >> '" + shadow_file + "'");
-    shell("grep -q '^dbus:' '" + group_file + "' || printf 'dbus:x:81:\\n' >> '" + group_file + "'");
-    shell("grep -q '^dbus:' '" + gshadow_file + "' || printf 'dbus:!::\\n' >> '" + gshadow_file + "'");
-    shell("grep -q '^dbus:' '" + passwd_file + "' || printf 'dbus:x:81:81:System Message Bus:/:/sbin/nologin\\n' >> '" + passwd_file + "'");
-    shell("grep -q '^dbus:' '" + shadow_file + "' || printf 'dbus:!:20000:0:99999:7:::\\n' >> '" + shadow_file + "'");
+    append_line_if_missing(group_file, "sshd:x:74:");
+    append_line_if_missing(gshadow_file, "sshd:!::");
+    append_line_if_missing(passwd_file, "sshd:x:74:74:Privilege-separated SSH:/run/sshd:/sbin/nologin");
+    append_line_if_missing(shadow_file, "sshd:!:20000:0:99999:7:::");
+    append_line_if_missing(group_file, "dbus:x:81:");
+    append_line_if_missing(gshadow_file, "dbus:!::");
+    append_line_if_missing(passwd_file, "dbus:x:81:81:System Message Bus:/:/sbin/nologin");
+    append_line_if_missing(shadow_file, "dbus:!:20000:0:99999:7:::");
 
     // RPM scriptlets are not executed in this producer path, so PAM include
     // stack files normally materialized by auth tooling must be created here.
@@ -430,7 +430,7 @@ fn build(ctx) {
     let postlogin = join_path(pam_dir, "postlogin");
     shell("mkdir -p '" + pam_dir + "'");
     if !exists(system_auth) && exists(factory_system_auth) {
-        shell("cp -f '" + factory_system_auth + "' '" + system_auth + "'");
+        copy_into_dir(factory_system_auth, pam_dir);
     }
     if !exists(password_auth) {
         write_file(
@@ -452,10 +452,10 @@ fn build(ctx) {
 
     // Enforce merged-usr symlink contract expected by Stage 01 envelope.
     shell("mkdir -p '" + join_path(rootfs, "usr/bin") + "' '" + join_path(rootfs, "usr/sbin") + "' '" + join_path(rootfs, "usr/lib") + "' '" + join_path(rootfs, "usr/lib64") + "'");
-    shell("ln -sfn usr/bin '" + join_path(rootfs, "bin") + "'");
-    shell("ln -sfn usr/sbin '" + join_path(rootfs, "sbin") + "'");
-    shell("ln -sfn usr/lib '" + join_path(rootfs, "lib") + "'");
-    shell("ln -sfn usr/lib64 '" + join_path(rootfs, "lib64") + "'");
+    ln_force("usr/bin", join_path(rootfs, "bin"));
+    ln_force("usr/sbin", join_path(rootfs, "sbin"));
+    ln_force("usr/lib", join_path(rootfs, "lib"));
+    ln_force("usr/lib64", join_path(rootfs, "lib64"));
 
     // Install a callable GNU userland smoke script for Levitate live/rootfs validation.
     shell("mkdir -p '" + join_path(rootfs, "usr/local/bin") + "'");

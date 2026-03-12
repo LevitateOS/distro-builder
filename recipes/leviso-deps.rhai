@@ -223,8 +223,8 @@ fn install(ctx) {
         // Configure with static linking to our built libs
         shell_in(src, env + " LDFLAGS=-L" + lib_dir + " CFLAGS=-I" + inc_dir + " ./configure --prefix=" + TOOLS_PREFIX + " --with-zstd --with-lz4 --without-fuse --without-selinux --disable-shared --enable-static");
         shell_in(src, env + " make -j" + jobs);
-        shell("cp " + join_path(src, "mkfs/mkfs.erofs") + " " + join_path(bin_dir, "mkfs.erofs"));
-        shell("chmod +x " + join_path(bin_dir, "mkfs.erofs"));
+        copy_into_dir(join_path(src, "mkfs/mkfs.erofs"), bin_dir);
+        chmod(join_path(bin_dir, "mkfs.erofs"), 0o755);
     }
 
     // =========================================================================
@@ -238,8 +238,8 @@ fn install(ctx) {
         }
         shell_in(src, "./configure --prefix=" + TOOLS_PREFIX + " --disable-shared");
         shell_in(src, "make -j" + jobs);
-        shell("cp " + join_path(src, "xorriso/xorriso") + " " + join_path(bin_dir, "xorriso"));
-        shell("chmod +x " + join_path(bin_dir, "xorriso"));
+        copy_into_dir(join_path(src, "xorriso/xorriso"), bin_dir);
+        chmod(join_path(bin_dir, "xorriso"), 0o755);
     }
 
     // =========================================================================
@@ -254,10 +254,12 @@ fn install(ctx) {
         shell_in(src, "./configure --prefix=" + TOOLS_PREFIX);
         shell_in(src, "make -j" + jobs);
         // Copy just the tools we need
-        shell("cp " + join_path(src, "mmd") + " " + join_path(bin_dir, "mmd"));
-        shell("cp " + join_path(src, "mcopy") + " " + join_path(bin_dir, "mcopy"));
-        shell("cp " + join_path(src, "mformat") + " " + join_path(bin_dir, "mformat"));
-        shell("chmod +x " + join_path(bin_dir, "mmd") + " " + join_path(bin_dir, "mcopy") + " " + join_path(bin_dir, "mformat"));
+        copy_into_dir(join_path(src, "mmd"), bin_dir);
+        copy_into_dir(join_path(src, "mcopy"), bin_dir);
+        copy_into_dir(join_path(src, "mformat"), bin_dir);
+        chmod(join_path(bin_dir, "mmd"), 0o755);
+        chmod(join_path(bin_dir, "mcopy"), 0o755);
+        chmod(join_path(bin_dir, "mformat"), 0o755);
     }
 
     // =========================================================================
@@ -271,8 +273,8 @@ fn install(ctx) {
         }
         shell_in(src, "./configure --prefix=" + TOOLS_PREFIX + " --enable-compat-symlinks");
         shell_in(src, "make -j" + jobs);
-        shell("cp " + join_path(src, "src/mkfs.fat") + " " + join_path(bin_dir, "mkfs.fat"));
-        shell("chmod +x " + join_path(bin_dir, "mkfs.fat"));
+        copy_into_dir(join_path(src, "src/mkfs.fat"), bin_dir);
+        chmod(join_path(bin_dir, "mkfs.fat"), 0o755);
     }
 
     // =========================================================================
@@ -287,8 +289,8 @@ fn install(ctx) {
         // ukify is a standalone Python script
         let ukify_src = join_path(src, "src/ukify/ukify.py");
         let ukify_dest = join_path(bin_dir, "ukify");
-        shell("cp " + ukify_src + " " + ukify_dest);
-        shell("chmod +x " + ukify_dest);
+        copy_into_dir(ukify_src, bin_dir);
+        chmod(ukify_dest, 0o755);
 
         // Install pefile if not already available
         if shell_status("python3 -c 'import pefile'") != 0 {
@@ -313,8 +315,14 @@ fn install(ctx) {
         // Copy just the tools we need
         let isoinfo = join_path(build_dir, "3rd-party/zlib/contrib/minizip/isoinfo");
         // cdrkit puts isoinfo in genisoimage/ dir
-        shell("cp " + join_path(build_dir, "genisoimage/isoinfo") + " " + join_path(bin_dir, "isoinfo") + " 2>/dev/null || cp " + join_path(build_dir, "isoinfo/isoinfo") + " " + join_path(bin_dir, "isoinfo"));
-        shell("cp " + join_path(build_dir, "genisoimage/genisoimage") + " " + join_path(bin_dir, "genisoimage") + " 2>/dev/null || true");
+        copy_first_existing([
+            join_path(build_dir, "genisoimage/isoinfo"),
+            join_path(build_dir, "isoinfo/isoinfo")
+        ], join_path(bin_dir, "isoinfo"));
+        let genisoimage_src = join_path(build_dir, "genisoimage/genisoimage");
+        if is_file(genisoimage_src) {
+            copy_file(genisoimage_src, join_path(bin_dir, "genisoimage"));
+        }
         shell("chmod +x " + join_path(bin_dir, "isoinfo"));
     }
 

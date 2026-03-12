@@ -64,7 +64,7 @@ fn _apply_kconfig(src, build_dir, kconfig) {
         return;
     }
 
-    shell("cp " + kconfig + " " + join_path(build_dir, ".config"));
+    copy_file(kconfig, join_path(build_dir, ".config"));
     shell("make -C " + src + " O=" + build_dir + " olddefconfig");
 }
 
@@ -197,7 +197,7 @@ fn install(ctx) {
     // Copy vmlinuz
     let bzimage = join_path(build_dir, "arch/x86/boot/bzImage");
     let vmlinuz = join_path(staging, "boot/vmlinuz");
-    shell("cp " + bzimage + " " + vmlinuz);
+    copy_file(bzimage, vmlinuz);
     log("  Installed vmlinuz");
 
     // Install modules via hookable helper

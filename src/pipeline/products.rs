@@ -14,21 +14,17 @@ use crate::pipeline::overlay::{
     ensure_systemd_default_target, ensure_systemd_locale_completeness, ensure_systemd_sshd_dirs,
     S01OverlayPolicy,
 };
+#[cfg(test)]
+use crate::pipeline::plan::ensure_non_legacy_rootfs_source;
 use crate::pipeline::plan::{
     apply_producer_plan, boot_baseline_producers, build_baseline_producers, ProducerPlan,
     RootfsProducer,
 };
-#[cfg(test)]
-use crate::pipeline::plan::ensure_non_legacy_rootfs_source;
 use crate::pipeline::scripts::install_stage_test_scripts;
 use crate::pipeline::source::{
     cleanup_legacy_provider_dir, materialize_source_rootfs, S01RootfsSourcePolicy,
 };
 use crate::recipe::alpine_stage01::is_alpine_stage01_recipe;
-
-const COMPAT_STAGE00_ARTIFACT_TAG: &str = "s00";
-const COMPAT_STAGE01_ARTIFACT_TAG: &str = "s01";
-const COMPAT_STAGE02_ARTIFACT_TAG: &str = "s02";
 
 #[derive(Debug, Clone)]
 pub struct BaseRootfsProduct {
@@ -54,7 +50,34 @@ pub struct BaseRootfsProductSpec {
     pub os_name: String,
     pub os_id: String,
     pub rootfs_source_dir: PathBuf,
+    overlay_artifact_tag: String,
     plan: ProducerPlan,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct BaseProductLayout {
+    pub rootfs_source_dir: PathBuf,
+    pub overlay_artifact_tag: String,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ParentRootfsInput {
+    pub run_dir_name: String,
+    pub producer_label: String,
+    pub rootfs_filename: String,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct OverlayLayout {
+    pub issue_banner_label: String,
+    pub artifact_tag: String,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct DerivedProductLayout {
+    pub rootfs_source_dir: PathBuf,
+    pub parent_rootfs: ParentRootfsInput,
+    pub live_overlay: OverlayLayout,
 }
 
 #[derive(Debug, Clone)]
@@ -63,6 +86,8 @@ pub struct LiveBootProductSpec {
     pub distro_id: String,
     pub os_name: String,
     pub rootfs_source_dir: PathBuf,
+    parent_rootfs: ParentRootfsInput,
+    live_overlay: OverlayLayout,
     add_plan: ProducerPlan,
     required_services: Vec<String>,
     rootfs_source_policy: Option<S01RootfsSourcePolicy>,
@@ -109,6 +134,8 @@ pub struct LiveToolsProductSpec {
     pub os_name: String,
     install_experience: Stage02InstallExperience,
     pub rootfs_source_dir: PathBuf,
+    parent_rootfs: ParentRootfsInput,
+    live_overlay: OverlayLayout,
     overlay: S01OverlayPolicy,
     required_services: Vec<String>,
 }
@@ -137,12 +164,14 @@ pub fn load_base_rootfs_product_spec(
     os_name: &str,
     os_id: &str,
     _output_root: &Path,
+    layout: BaseProductLayout,
 ) -> Result<BaseRootfsProductSpec> {
     Ok(BaseRootfsProductSpec {
         distro_id: distro_id.to_string(),
         os_name: os_name.to_string(),
         os_id: os_id.to_string(),
-        rootfs_source_dir: PathBuf::from("s00-rootfs-source"),
+        rootfs_source_dir: layout.rootfs_source_dir,
+        overlay_artifact_tag: layout.overlay_artifact_tag,
         plan: ProducerPlan {
             source_rootfs_dir: None,
             producers: build_baseline_producers(distro_id, os_name, os_id),
@@ -165,7 +194,7 @@ pub fn prepare_base_rootfs_product(
     apply_producer_plan(&spec.plan, &rootfs_source_dir)
         .with_context(|| format!("materializing base rootfs for '{}'", spec.distro_id))?;
 
-    let live_overlay_dir = create_empty_overlay_dir(output_dir, COMPAT_STAGE00_ARTIFACT_TAG)
+    let live_overlay_dir = create_empty_overlay_dir(output_dir, &spec.overlay_artifact_tag)
         .with_context(|| format!("creating empty overlay for {}", spec.distro_id))?;
 
     Ok(BaseRootfsProduct {
@@ -178,6 +207,7 @@ pub fn load_live_boot_product_spec(
     repo_root: &Path,
     variant_dir: &Path,
     distro_id: &str,
+    layout: DerivedProductLayout,
 ) -> Result<LiveBootProductSpec> {
     let loaded = load_boot_config(repo_root, variant_dir, distro_id)?;
 
@@ -193,7 +223,9 @@ pub fn load_live_boot_product_spec(
         repo_root: repo_root.to_path_buf(),
         distro_id: distro_id.to_string(),
         os_name: loaded.os_name,
-        rootfs_source_dir: PathBuf::from("s01-rootfs-source"),
+        rootfs_source_dir: layout.rootfs_source_dir,
+        parent_rootfs: layout.parent_rootfs,
+        live_overlay: layout.live_overlay,
         add_plan: ProducerPlan {
             source_rootfs_dir: None,
             producers: add_producers,
@@ -224,9 +256,9 @@ pub fn prepare_live_boot_product(
     })?;
     let parent_rootfs = resolve_parent_stage_rootfs_image(
         output_dir,
-        "s00-build",
-        "Stage 00",
-        "s00-filesystem.erofs",
+        &spec.parent_rootfs.run_dir_name,
+        &spec.parent_rootfs.producer_label,
+        &spec.parent_rootfs.rootfs_filename,
     )?;
     extract_erofs_rootfs(&parent_rootfs, &rootfs_source_dir).with_context(|| {
         format!(
@@ -297,8 +329,8 @@ pub fn prepare_live_boot_product(
         output_dir,
         &spec.distro_id,
         &spec.os_name,
-        "S01 Boot",
-        COMPAT_STAGE01_ARTIFACT_TAG,
+        &spec.live_overlay.issue_banner_label,
+        &spec.live_overlay.artifact_tag,
         &spec.overlay,
     )?;
 
@@ -332,6 +364,7 @@ pub fn load_live_tools_product_spec(
     repo_root: &Path,
     variant_dir: &Path,
     distro_id: &str,
+    layout: DerivedProductLayout,
 ) -> Result<LiveToolsProductSpec> {
     let config_path = variant_dir.join("02LiveTools.toml");
     let config_bytes = fs::read_to_string(&config_path)
@@ -339,20 +372,23 @@ pub fn load_live_tools_product_spec(
     let parsed: LiveToolsToml = toml::from_str(&config_bytes)
         .with_context(|| format!("parsing Stage 02 config '{}'", config_path.display()))?;
 
-    let live_boot_spec = load_live_boot_product_spec(repo_root, variant_dir, distro_id)
-        .with_context(|| {
-            format!(
-                "loading live boot baseline while preparing live tools for '{}'",
-                distro_id
-            )
-        })?;
+    let live_boot_spec =
+        load_live_boot_product_spec(repo_root, variant_dir, distro_id, layout.clone())
+            .with_context(|| {
+                format!(
+                    "loading live boot baseline while preparing live tools for '{}'",
+                    distro_id
+                )
+            })?;
 
     Ok(LiveToolsProductSpec {
         repo_root: repo_root.to_path_buf(),
         distro_id: distro_id.to_string(),
         os_name: parsed.stage_02.live_tools.os_name,
         install_experience: parsed.stage_02.live_tools.install_experience,
-        rootfs_source_dir: PathBuf::from("s02-rootfs-source"),
+        rootfs_source_dir: layout.rootfs_source_dir,
+        parent_rootfs: layout.parent_rootfs,
+        live_overlay: layout.live_overlay,
         overlay: live_boot_spec.overlay.clone(),
         required_services: live_boot_spec.required_services().to_vec(),
     })
@@ -372,9 +408,9 @@ pub fn prepare_live_tools_product(
     let rootfs_source_dir = create_unique_output_dir(output_dir, &spec.rootfs_source_dir)?;
     let parent_rootfs = resolve_parent_stage_rootfs_image(
         output_dir,
-        "s01-boot",
-        "Stage 01",
-        "s01-filesystem.erofs",
+        &spec.parent_rootfs.run_dir_name,
+        &spec.parent_rootfs.producer_label,
+        &spec.parent_rootfs.rootfs_filename,
     )?;
     extract_erofs_rootfs(&parent_rootfs, &rootfs_source_dir).with_context(|| {
         format!(
@@ -402,8 +438,8 @@ pub fn prepare_live_tools_product(
         output_dir,
         &spec.distro_id,
         &spec.os_name,
-        "S02 Live Tools",
-        COMPAT_STAGE02_ARTIFACT_TAG,
+        &spec.live_overlay.issue_banner_label,
+        &spec.live_overlay.artifact_tag,
         &spec.overlay,
     )?;
 

@@ -19,41 +19,70 @@ pub(crate) fn preflight_iso_build(
     product: BuildProduct,
 ) -> Result<()> {
     let stage = product.compatibility_stage;
-    if stage.slug == crate::STAGE00_SLUG {
-        return Ok(());
+    match stage.slug {
+        crate::STAGE00_SLUG => {}
+        crate::STAGE01_SLUG => require_parent_stage_rootfs(
+            repo_root,
+            distro_id,
+            product.canonical,
+            crate::STAGE00_CANONICAL,
+            crate::STAGE00_DIRNAME,
+            "s00-filesystem.erofs",
+            crate::PRODUCT_BASE_ROOTFS,
+        )?,
+        crate::STAGE02_SLUG => require_parent_stage_rootfs(
+            repo_root,
+            distro_id,
+            product.canonical,
+            crate::STAGE01_CANONICAL,
+            crate::STAGE01_DIRNAME,
+            "s01-filesystem.erofs",
+            crate::PRODUCT_LIVE_BOOT,
+        )?,
+        _ => unreachable!("validated in parse_stage"),
     }
 
-    if stage.slug == crate::STAGE01_SLUG {
-        let s00_root =
-            crate::stage_paths::stage_output_dir_for(repo_root, distro_id, crate::STAGE00_DIRNAME);
-        let run_id =
-            crate::stage_runs::latest_successful_stage_run_id(&s00_root)?.ok_or_else(|| {
-                anyhow::anyhow!(
-                    "preflight failed for '{}' release product '{}': no successful Stage 00 runs found under '{}'.\n\
-                     Build the '{}' release first: `cargo run -p distro-builder --bin distro-builder -- release build iso {} {}`",
-                    distro_id,
-                    product.canonical,
-                    s00_root.display(),
-                    crate::PRODUCT_BASE_ROOTFS,
-                    distro_id,
-                    crate::PRODUCT_BASE_ROOTFS
-                )
-            })?;
-        let parent_rootfs = s00_root.join(&run_id).join("s00-filesystem.erofs");
-        if !parent_rootfs.is_file() {
-            bail!(
-                "preflight failed for '{}' release product '{}': missing Stage 00 rootfs image '{}'.\n\
-                 Build the '{}' release first: `cargo run -p distro-builder --bin distro-builder -- release build iso {} {}`",
-                distro_id,
-                product.canonical,
-                parent_rootfs.display(),
-                crate::PRODUCT_BASE_ROOTFS,
-                distro_id,
-                crate::PRODUCT_BASE_ROOTFS
-            );
-        }
-    }
+    Ok(())
+}
 
+fn require_parent_stage_rootfs(
+    repo_root: &Path,
+    distro_id: &str,
+    product_name: &str,
+    parent_stage_name: &str,
+    parent_stage_dir: &str,
+    parent_rootfs_filename: &str,
+    remediation_product: &str,
+) -> Result<()> {
+    let parent_root =
+        crate::stage_paths::stage_output_dir_for(repo_root, distro_id, parent_stage_dir);
+    let run_id = crate::stage_runs::latest_successful_stage_run_id(&parent_root)?.ok_or_else(|| {
+        anyhow::anyhow!(
+            "preflight failed for '{}' release product '{}': no successful {} runs found under '{}'.\n\
+             Build the '{}' release first: `cargo run -p distro-builder --bin distro-builder -- release build iso {} {}`",
+            distro_id,
+            product_name,
+            parent_stage_name,
+            parent_root.display(),
+            remediation_product,
+            distro_id,
+            remediation_product
+        )
+    })?;
+    let parent_rootfs = parent_root.join(&run_id).join(parent_rootfs_filename);
+    if !parent_rootfs.is_file() {
+        bail!(
+            "preflight failed for '{}' release product '{}': missing {} rootfs image '{}'.\n\
+             Build the '{}' release first: `cargo run -p distro-builder --bin distro-builder -- release build iso {} {}`",
+            distro_id,
+            product_name,
+            parent_stage_name,
+            parent_rootfs.display(),
+            remediation_product,
+            distro_id,
+            remediation_product
+        );
+    }
     Ok(())
 }
 

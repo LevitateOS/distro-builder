@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use crate::pipeline::config::load_boot_config;
 use crate::pipeline::io::{
     create_empty_overlay_dir, create_unique_output_dir, extract_erofs_rootfs,
-    resolve_parent_stage_rootfs_image,
+    resolve_parent_stage_rootfs_image_for_distro,
 };
 use crate::pipeline::live_tools::{add_required_tools, Stage02InstallExperience};
 use crate::pipeline::overlay::{
@@ -254,8 +254,9 @@ pub fn prepare_live_boot_product(
             output_dir.display()
         )
     })?;
-    let parent_rootfs = resolve_parent_stage_rootfs_image(
-        output_dir,
+    let parent_rootfs = resolve_parent_stage_rootfs_image_for_distro(
+        &spec.repo_root,
+        &spec.distro_id,
         &spec.parent_rootfs.run_dir_name,
         &spec.parent_rootfs.producer_label,
         &spec.parent_rootfs.rootfs_filename,
@@ -406,8 +407,9 @@ pub fn prepare_live_tools_product(
     })?;
 
     let rootfs_source_dir = create_unique_output_dir(output_dir, &spec.rootfs_source_dir)?;
-    let parent_rootfs = resolve_parent_stage_rootfs_image(
-        output_dir,
+    let parent_rootfs = resolve_parent_stage_rootfs_image_for_distro(
+        &spec.repo_root,
+        &spec.distro_id,
         &spec.parent_rootfs.run_dir_name,
         &spec.parent_rootfs.producer_label,
         &spec.parent_rootfs.rootfs_filename,

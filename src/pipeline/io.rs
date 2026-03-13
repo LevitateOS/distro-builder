@@ -68,14 +68,18 @@ pub(crate) fn rename_live_overlay_for_stage(
     Ok(target_overlay)
 }
 
-pub(crate) fn resolve_parent_stage_rootfs_image(
-    output_dir: &Path,
+pub(crate) fn resolve_parent_stage_rootfs_image_for_distro(
+    repo_root: &Path,
+    distro_id: &str,
     marker_stage_dir: &str,
     parent_stage_label: &str,
     rootfs_filename: &str,
 ) -> Result<PathBuf> {
-    let distro_output = locate_distro_output_root(output_dir, marker_stage_dir)?;
-    let stage_root = distro_output.join(marker_stage_dir);
+    let stage_root = repo_root
+        .join(".artifacts")
+        .join("out")
+        .join(distro_id)
+        .join(marker_stage_dir);
 
     let run_id = crate::stage_runs::latest_successful_run_id(&stage_root)?.ok_or_else(|| {
         anyhow::anyhow!(
@@ -92,26 +96,6 @@ pub(crate) fn resolve_parent_stage_rootfs_image(
         );
     }
     Ok(path)
-}
-
-fn locate_distro_output_root(output_dir: &Path, marker_stage_dir: &str) -> Result<PathBuf> {
-    let mut cursor = output_dir;
-    for _ in 0..8 {
-        if cursor.join(marker_stage_dir).is_dir() {
-            return Ok(cursor.to_path_buf());
-        }
-        cursor = cursor.parent().ok_or_else(|| {
-            anyhow::anyhow!(
-                "cannot resolve distro output root from '{}'; no ancestor with '{}' exists",
-                output_dir.display(),
-                marker_stage_dir
-            )
-        })?;
-    }
-    Err(anyhow::anyhow!(
-        "failed to resolve distro output root for '{}' (too many directory levels)",
-        output_dir.display()
-    ))
 }
 
 pub(crate) fn extract_erofs_rootfs(image: &Path, destination: &Path) -> Result<()> {
@@ -150,4 +134,43 @@ pub(crate) fn extract_erofs_rootfs(image: &Path, destination: &Path) -> Result<(
         stdout.trim(),
         stderr.trim()
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn resolve_parent_stage_rootfs_image_for_distro_uses_repo_layout_not_output_dir_ancestry() {
+        let repo_root = tempfile::tempdir().expect("repo tempdir");
+        let stage_root = repo_root
+            .path()
+            .join(".artifacts/out/levitate/s00-build/run-1");
+        fs::create_dir_all(&stage_root).expect("create stage root");
+        fs::write(
+            crate::stage_runs::manifest_path(&stage_root),
+            serde_json::to_vec_pretty(&json!({
+                "run_id": "run-1",
+                "status": "success",
+                "created_at_utc": "20260313T120000Z",
+                "finished_at_utc": "20260313T120001Z",
+            }))
+            .expect("serialize manifest"),
+        )
+        .expect("write run manifest");
+        let rootfs = stage_root.join("s00-filesystem.erofs");
+        fs::write(&rootfs, b"test rootfs").expect("write rootfs file");
+
+        let resolved = resolve_parent_stage_rootfs_image_for_distro(
+            repo_root.path(),
+            "levitate",
+            "s00-build",
+            "Stage 00",
+            "s00-filesystem.erofs",
+        )
+        .expect("resolve parent rootfs");
+
+        assert_eq!(resolved, rootfs);
+    }
 }

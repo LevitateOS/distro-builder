@@ -15,12 +15,25 @@ use distro_builder::stages::s02_live_tools_inputs::{
 };
 use distro_builder::{build_erofs_default, build_overlayfs_default};
 use distro_contract::load_stage_00_contract_bundle_for_distro_from;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug)]
 struct PreparedProductInputs {
     rootfs_source_dir: PathBuf,
     live_overlay_dir: PathBuf,
     compatibility_stage: crate::BuildStage,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct PreparedProductManifest {
+    product: String,
+    distro_id: String,
+    compatibility_stage_name: String,
+    compatibility_stage_slug: String,
+    rootfs_source_dir: String,
+    live_overlay_dir: String,
+    rootfs_erofs_filename: String,
+    overlay_erofs_filename: String,
 }
 
 pub(crate) fn build_rootfs_erofs(source_dir: &Path, output: &Path) -> Result<()> {
@@ -54,16 +67,9 @@ fn stage_artifact_tag_for_slug(stage_slug: &str) -> &'static str {
 
 pub(crate) fn build_stage_erofs_cmd(stage: &str, distro_id: &str) -> Result<()> {
     let stage = crate::workflows::parse_stage(Some(stage))?;
-    let product = crate::workflows::parse::product_for_stage(stage);
-    build_product_erofs_cmd(product.canonical, distro_id)
-}
-
-pub(crate) fn build_product_erofs_cmd(product: &str, distro_id: &str) -> Result<()> {
-    let product = crate::workflows::parse_product(Some(product))?;
     let cwd = std::env::current_dir().context("resolving current directory")?;
     let bundle = load_stage_00_contract_bundle_for_distro_from(&cwd, distro_id)
         .with_context(|| format!("loading 00Build contract for '{}'", distro_id))?;
-    let stage = product.compatibility_stage;
     let stage_output_dir =
         crate::stage_paths::stage_output_dir_for(&bundle.repo_root, distro_id, stage.dir_name);
 
@@ -74,48 +80,77 @@ pub(crate) fn build_product_erofs_cmd(product: &str, distro_id: &str) -> Result<
         )
     })?;
 
-    let prepared = prepare_product_inputs(product, distro_id, &stage_output_dir)?;
+    prepare_stage_inputs_cmd(stage.canonical, distro_id, &stage_output_dir).with_context(|| {
+        format!(
+            "preparing {} inputs for '{}' in '{}'",
+            stage.canonical,
+            distro_id,
+            stage_output_dir.display()
+        )
+    })?;
 
-    let stage_artifact_tag = stage_artifact_tag_for_slug(stage.slug);
-    if !prepared.live_overlay_dir.is_dir() {
+    build_prepared_product_erofs_cmd(&stage_output_dir)
+}
+
+pub(crate) fn build_prepared_product_erofs_cmd(prepared_dir: &Path) -> Result<()> {
+    let manifest = read_prepared_product_manifest(prepared_dir)?;
+    let rootfs_source_dir =
+        resolve_prepared_product_path(prepared_dir, &manifest.rootfs_source_dir);
+    let live_overlay_dir = resolve_prepared_product_path(prepared_dir, &manifest.live_overlay_dir);
+    if !live_overlay_dir.is_dir() {
         bail!(
             "live overlay source directory missing for product '{}' at '{}'\n\
              Remediation: rerun `distro-builder product prepare {} {} {}` and verify overlay preparation succeeds.",
-            product.canonical,
-            prepared.live_overlay_dir.display(),
-            product.canonical,
-            distro_id,
-            stage_output_dir.display()
+            manifest.product,
+            live_overlay_dir.display(),
+            manifest.product,
+            manifest.distro_id,
+            prepared_dir.display()
+        );
+    }
+    if !rootfs_source_dir.is_dir() {
+        bail!(
+            "rootfs source directory missing for product '{}' at '{}'\n\
+             Remediation: rerun `distro-builder product prepare {} {} {}` and verify rootfs preparation succeeds.",
+            manifest.product,
+            rootfs_source_dir.display(),
+            manifest.product,
+            manifest.distro_id,
+            prepared_dir.display()
         );
     }
 
-    let rootfs_output = stage_output_dir.join(format!("{stage_artifact_tag}-filesystem.erofs"));
-    let overlay_output = stage_output_dir.join(format!("{stage_artifact_tag}-overlayfs.erofs"));
+    let rootfs_output = prepared_dir.join(&manifest.rootfs_erofs_filename);
+    let overlay_output = prepared_dir.join(&manifest.overlay_erofs_filename);
 
-    build_rootfs_erofs(&prepared.rootfs_source_dir, &rootfs_output).with_context(|| {
+    build_rootfs_erofs(&rootfs_source_dir, &rootfs_output).with_context(|| {
         format!(
             "building product '{}' rootfs EROFS from '{}' to '{}'",
-            product.canonical,
-            prepared.rootfs_source_dir.display(),
+            manifest.product,
+            rootfs_source_dir.display(),
             rootfs_output.display()
         )
     })?;
-    build_overlayfs_erofs(&prepared.live_overlay_dir, &overlay_output).with_context(|| {
+    build_overlayfs_erofs(&live_overlay_dir, &overlay_output).with_context(|| {
         format!(
             "building product '{}' overlayfs EROFS from '{}' to '{}'",
-            product.canonical,
-            prepared.live_overlay_dir.display(),
+            manifest.product,
+            live_overlay_dir.display(),
             overlay_output.display()
         )
     })?;
 
     println!(
         "product '{}' EROFS artifacts built for {}:",
-        product.canonical, distro_id
+        manifest.product, manifest.distro_id
     );
-    println!("  compatibility stage: {}", stage.canonical);
-    println!("  rootfs source: {}", prepared.rootfs_source_dir.display());
-    println!("  overlay source: {}", prepared.live_overlay_dir.display());
+    println!(
+        "  compatibility stage: {}",
+        manifest.compatibility_stage_name
+    );
+    println!("  prepared dir: {}", prepared_dir.display());
+    println!("  rootfs source: {}", rootfs_source_dir.display());
+    println!("  overlay source: {}", live_overlay_dir.display());
     println!("  rootfs erofs: {}", rootfs_output.display());
     println!("  overlay erofs: {}", overlay_output.display());
     Ok(())
@@ -145,6 +180,25 @@ pub(crate) fn prepare_product_cmd(product: &str, distro_id: &str, output_dir: &P
             source_path_file.display()
         )
     })?;
+    write_prepared_product_manifest(
+        output_dir,
+        &PreparedProductManifest {
+            product: product.canonical.to_string(),
+            distro_id: distro_id.to_string(),
+            compatibility_stage_name: prepared.compatibility_stage.canonical.to_string(),
+            compatibility_stage_slug: prepared.compatibility_stage.slug.to_string(),
+            rootfs_source_dir: relative_prepared_product_path(
+                output_dir,
+                &prepared.rootfs_source_dir,
+            )?,
+            live_overlay_dir: relative_prepared_product_path(
+                output_dir,
+                &prepared.live_overlay_dir,
+            )?,
+            rootfs_erofs_filename: format!("{stage_artifact_tag}-filesystem.erofs"),
+            overlay_erofs_filename: format!("{stage_artifact_tag}-overlayfs.erofs"),
+        },
+    )?;
 
     println!(
         "product '{}' inputs prepared for {}:",
@@ -226,6 +280,56 @@ fn prepare_product_inputs(
         }
         _ => unreachable!("validated in parse_stage"),
     }
+}
+
+fn prepared_product_manifest_path(output_dir: &Path) -> PathBuf {
+    output_dir.join(".prepared-product.json")
+}
+
+fn write_prepared_product_manifest(
+    output_dir: &Path,
+    manifest: &PreparedProductManifest,
+) -> Result<()> {
+    let manifest_path = prepared_product_manifest_path(output_dir);
+    let bytes =
+        serde_json::to_vec_pretty(manifest).context("serializing prepared product manifest")?;
+    fs::write(&manifest_path, bytes).with_context(|| {
+        format!(
+            "writing prepared product manifest '{}'",
+            manifest_path.display()
+        )
+    })
+}
+
+fn read_prepared_product_manifest(prepared_dir: &Path) -> Result<PreparedProductManifest> {
+    let manifest_path = prepared_product_manifest_path(prepared_dir);
+    let bytes = fs::read(&manifest_path).with_context(|| {
+        format!(
+            "reading prepared product manifest '{}'",
+            manifest_path.display()
+        )
+    })?;
+    serde_json::from_slice(&bytes).with_context(|| {
+        format!(
+            "parsing prepared product manifest '{}'",
+            manifest_path.display()
+        )
+    })
+}
+
+fn relative_prepared_product_path(output_dir: &Path, path: &Path) -> Result<String> {
+    let relative = path.strip_prefix(output_dir).with_context(|| {
+        format!(
+            "prepared product path '{}' is not under output dir '{}'",
+            path.display(),
+            output_dir.display()
+        )
+    })?;
+    Ok(relative.display().to_string())
+}
+
+fn resolve_prepared_product_path(prepared_dir: &Path, relative: &str) -> PathBuf {
+    prepared_dir.join(relative)
 }
 
 pub(crate) fn preseed_stage01_source_cmd(distro_id: &str, refresh: bool) -> Result<()> {

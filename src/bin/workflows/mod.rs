@@ -5,9 +5,9 @@ mod layout;
 mod parse;
 
 pub(crate) use artifacts::{
-    build_overlayfs_erofs, build_product_erofs_cmd, build_rootfs_erofs, build_stage_erofs_cmd,
-    materialize_stage01_source_rootfs_cmd, prepare_product_cmd, prepare_stage_inputs_cmd,
-    preseed_stage01_source_cmd,
+    build_overlayfs_erofs, build_prepared_product_erofs_cmd, build_rootfs_erofs,
+    build_stage_erofs_cmd, materialize_stage01_source_rootfs_cmd, prepare_product_cmd,
+    prepare_stage_inputs_cmd, preseed_stage01_source_cmd,
 };
 pub(crate) use build::{
     build_all, build_one, enforce_legacy_binding_policy_guard, preflight_iso_build,

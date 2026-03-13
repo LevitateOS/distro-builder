@@ -74,10 +74,10 @@ pub(crate) fn dispatch_non_release_command(args: &[String]) -> Result<()> {
         {
             crate::workflows::build_overlayfs_erofs(Path::new(source_dir), Path::new(output))
         }
-        [transform, build, product_erofs, product_name, distro]
+        [transform, build, product_erofs, prepared_dir]
             if transform == "transform" && build == "build" && product_erofs == "product-erofs" =>
         {
-            crate::workflows::build_product_erofs_cmd(product_name, distro)
+            crate::workflows::build_prepared_product_erofs_cmd(Path::new(prepared_dir))
         }
         [artifact, build_rootfs, source_dir, output]
             if artifact == "artifact" && build_rootfs == "build-rootfs-erofs" =>

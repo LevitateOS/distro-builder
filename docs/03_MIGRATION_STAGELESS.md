@@ -518,7 +518,7 @@ Implemented:
 - canonical transform surface is now:
   - `distro-builder transform build rootfs-erofs ...`
   - `distro-builder transform build overlayfs-erofs ...`
-  - `distro-builder transform build product-erofs <product> <distro>`
+  - `distro-builder transform build product-erofs <prepared_product_dir>`
 - legacy stage commands remain available only as compatibility aliases:
   - `iso build`
   - `iso build-all`

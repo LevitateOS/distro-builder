@@ -90,29 +90,11 @@ pub(crate) fn dispatch_non_iso_command(args: &[String]) -> Result<()> {
         {
             crate::workflows::preseed_stage01_source_cmd(distro, true)
         }
-        [artifact, preseed_rocky, distro]
-            if artifact == "artifact" && preseed_rocky == "preseed-rocky-iso" =>
-        {
-            crate::workflows::preseed_stage01_source_cmd(distro, false)
-        }
-        [artifact, preseed_rocky, distro, refresh]
+        [artifact, materialize_stage01, distro]
             if artifact == "artifact"
-                && preseed_rocky == "preseed-rocky-iso"
-                && refresh == "--refresh" =>
+                && materialize_stage01 == "materialize-stage01-source-rootfs" =>
         {
-            crate::workflows::preseed_stage01_source_cmd(distro, true)
-        }
-        [artifact, preseed_alpine, distro]
-            if artifact == "artifact" && preseed_alpine == "preseed-alpine-stage01-assets" =>
-        {
-            crate::workflows::preseed_stage01_source_cmd(distro, false)
-        }
-        [artifact, preseed_alpine, distro, refresh]
-            if artifact == "artifact"
-                && preseed_alpine == "preseed-alpine-stage01-assets"
-                && refresh == "--refresh" =>
-        {
-            crate::workflows::preseed_stage01_source_cmd(distro, true)
+            crate::workflows::materialize_stage01_source_rootfs_cmd(distro)
         }
         _ => bail!(crate::usage()),
     };

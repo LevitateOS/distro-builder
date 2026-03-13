@@ -1,6 +1,6 @@
 # 01 Fedora Swap Migration Plan
 
-Status: active; canonical Fedora preseed validated, compatibility cleanup still pending
+Status: completed
 
 ## Goal
 
@@ -35,18 +35,18 @@ Replace the current Rocky Linux Stage 01 DVD/rootfs source path with Fedora Serv
 - `distro-builder/recipes/stage01-dvd-deps.rhai`
 - `distro-builder/recipes/fedora-stage01-rootfs.rhai`
 - `distro-builder/recipes/fedora-preseed-iso.rhai`
-- `distro-builder/recipes/rocky-stage01-rootfs.rhai`
-- `distro-builder/recipes/rocky-preseed-iso.rhai`
 
 ## Current Repo Reality
 
 - Levitate Stage 01 now uses `kind = "recipe_rpm_dvd"` in `distro-variants/levitate/01Boot.toml`.
 - Levitate now points at the Fedora Stage 01 source recipes in `distro-variants/levitate/01Boot.toml`.
 - Ralph now declares an explicit Fedora-backed `rootfs_source` in `distro-variants/ralph/01Boot.toml`.
-- The current Stage 01 source parser in `distro-builder/src/pipeline/source.rs` supports the neutral `recipe_rpm_dvd` path plus legacy `recipe_rocky` compatibility and `recipe_custom`.
+- The current Stage 01 source parser in `distro-builder/src/pipeline/source.rs` supports the neutral `recipe_rpm_dvd` path and `recipe_custom`.
 - The Stage 01 recipe path is now self-contained for the canonical case: the Rocky, Fedora, and Alpine Stage 01 recipes no longer require large injected metadata define maps.
 - The Stage 01 source adapter now lives in `distro-builder/src/recipe/stage01_source.rs` and exposes neutral rootfs materialization and preseed APIs.
-- The default artifact CLI path is now generic (`artifact preseed-stage01-source <distro>`); the Rocky/Alpine command names remain only as compatibility aliases.
+- The default artifact CLI path is now generic:
+  - `artifact preseed-stage01-source <distro> [--refresh]`
+  - `artifact materialize-stage01-source-rootfs <distro>`
 - The canonical RPM/DVD Stage 01 dependency owner is now `distro-builder/recipes/stage01-dvd-deps.rhai`.
 - There are repo-side Rocky references outside the immediate source-policy path, but they are not all part of this migration. Example: `distro-builder/recipes/qemu-deps.rhai`.
 
@@ -61,10 +61,11 @@ Already landed:
 - Levitate now points at the Fedora Stage 01 rootfs and preseed recipes by default.
 - The default RPM/DVD Stage 01 dependency recipe is now neutralized as `stage01-dvd-deps`.
 
-Still blocking migration completion:
+Completion notes:
 
-- The legacy `recipe_rocky` parser branch and Rocky compatibility recipes still exist.
-- A full Fedora-backed Stage 01 rootfs output has not yet been validated through the canonical builder path.
+- The canonical Fedora preseed path has been validated with a real Fedora 43 Server DVD torrent download, trust marker creation, and idempotent rerun.
+- The canonical Fedora Stage 01 source rootfs path has been materialized through the builder and enforced through `ensure_non_legacy_rootfs_source(...)`.
+- `distro-builder/recipes/qemu-deps.rhai` remains intentionally Rocky-based and is out of scope for this migration.
 
 ## Migration Strategy
 
@@ -72,11 +73,10 @@ Use a generic RPM/DVD Stage 01 source boundary as the compatibility bridge, then
 
 Do not add `recipe_fedora` as a second permanent distro-specific default kind unless there is a very strong reason to keep separate source-policy branches.
 
-The intended shape is:
+The final shape is:
 
-- `recipe_rocky` current state
-- temporary bridge: generic RPM/DVD source kind and adapter
-- canonical near-term use: Fedora Server DVD through that generic path
+- generic RPM/DVD source kind and adapter
+- Fedora Server DVD as the canonical Stage 01 source for Levitate/Ralph
 
 ## Current Chosen Fedora Artifact
 
@@ -87,7 +87,7 @@ The intended shape is:
 
 This is the current concrete migration target for the first Fedora-backed preseed/source recipe.
 
-## Decision Log To Resolve First
+## Decisions
 
 - [x] Decide the new source kind name.
   Recommended: `recipe_rpm_dvd`.
@@ -105,21 +105,20 @@ This is the current concrete migration target for the first Fedora-backed presee
 - [x] Replace `preseed_rocky_iso(...)` with a neutral preseed/source-preparation API name.
 - [x] Remove Rocky-specific metadata define injection from the canonical Rust execution path.
 - [x] Replace remaining Rocky-specific helper/env names such as `ROCKY_FORCE_REFRESH` if Rocky compatibility remains.
-  Canonical path now uses neutral `STAGE01_SOURCE_FORCE_REFRESH`; legacy Rocky/Fedora envs still work as compatibility inputs.
+  Canonical path now uses neutral `STAGE01_SOURCE_FORCE_REFRESH`.
 
 Exit criteria:
 
 - no default builder path requires the word `rocky` in the Rust type or enum names for the RPM/DVD Stage 01 source path
-- the source-policy parser can represent Fedora metadata without pretending it is Rocky
+- the source-policy parser represents Fedora metadata without pretending it is Rocky
 
 ## Phase 1: Replace Rocky-Specific Recipe Inputs
 
-- [x] Create a Fedora-backed rootfs source recipe to replace `distro-builder/recipes/rocky-stage01-rootfs.rhai`.
+- [x] Create a Fedora-backed rootfs source recipe to replace the old Rocky Stage 01 rootfs source recipe.
   Current owner: `distro-builder/recipes/fedora-stage01-rootfs.rhai`
-- [x] Create a Fedora-backed ISO/source-preparation recipe to replace `distro-builder/recipes/rocky-preseed-iso.rhai`.
+- [x] Create a Fedora-backed ISO/source-preparation recipe to replace the old Rocky Stage 01 preseed recipe.
   Current owner: `distro-builder/recipes/fedora-preseed-iso.rhai`
 - [x] Remove Rocky-only marker naming from the canonical Fedora recipe path.
-  Rocky compatibility recipes still retain their original marker names.
 - [x] Ensure the new recipe names and outputs are not Rocky-branded on disk.
 - [x] Replace the Rocky-named Stage 01 dependency owner in the canonical path with `distro-builder/recipes/stage01-dvd-deps.rhai`.
 - [x] Keep the same reproducibility model: explicit ISO name, checksum, checksum URL, and torrent/download source.
@@ -139,7 +138,7 @@ Exit criteria:
 ## Phase 2: Flip Variant Metadata
 
 - [x] Update `distro-variants/levitate/01Boot.toml` from Rocky ownership to Fedora-backed Stage 01 recipes.
-- [x] Replace `kind = "recipe_rocky"` with the new generic source kind.
+- [x] Replace the old Rocky-specific source kind with the generic `recipe_rpm_dvd` kind.
 - [x] Replace the Stage 01 recipe script path with the Fedora-backed RPM/DVD recipe path.
 - [x] Move the canonical Fedora ISO filename, SHA256, checksum URL, and torrent/download metadata into the Fedora recipes rather than variant TOML.
 - [x] Decide whether `distro-variants/ralph/01Boot.toml` should gain its own explicit `rootfs_source` block.
@@ -164,7 +163,7 @@ Exit criteria:
 - [x] Replace Rocky-only help text in the default builder CLI usage surface.
 - [x] Replace Rocky-only wording in default Stage 01 preseed diagnostics emitted by the builder path.
 - [x] Audit the default builder path so operators are not taught Rocky/Alpine-specific preseed commands.
-- [ ] Decide whether the explicit `preseed-rocky-iso` and `preseed-alpine-stage01-assets` aliases should be retained temporarily as compatibility commands or removed entirely in the next cleanup pass.
+- [x] Remove the explicit `preseed-rocky-iso` and `preseed-alpine-stage01-assets` compatibility aliases.
 
 Recommended command target:
 
@@ -179,8 +178,9 @@ Exit criteria:
 - [x] Remove or retire `distro-builder/src/recipe/rocky_stage01.rs` once the neutral owner exists.
 - [x] Remove Rocky-only Stage 01 recipe files from the canonical builder path once they are replaced.
 - [x] Audit repo references to `stage01-rootfs-provider/rocky` and either update or explicitly classify them as out of scope.
-- [ ] Audit docs and tests for stale Rocky wording.
-- [ ] Decide whether `distro-builder/recipes/qemu-deps.rhai` is intentionally Rocky-based and separate from this migration.
+- [x] Audit docs and tests for stale Rocky wording.
+- [x] Decide whether `distro-builder/recipes/qemu-deps.rhai` is intentionally Rocky-based and separate from this migration.
+  Decision: yes, `qemu-deps.rhai` is a separate Rocky-based dependency recipe and is out of scope for the Stage 01 Fedora swap.
 
 Out-of-scope unless explicitly chosen:
 
@@ -194,22 +194,22 @@ Out-of-scope unless explicitly chosen:
 - [x] Levitate Stage 01 config parses with the new Fedora metadata.
 - [x] Stage 01 source preparation succeeds through the canonical builder command path.
 - [x] Canonical Fedora preseed is idempotent after trust-marker creation.
-- [ ] Stage 01 source output is non-legacy and policy-clean.
+- [x] Stage 01 source output is non-legacy and policy-clean.
 - [x] The builder no longer requires Rocky-branded CLI commands for the default Fedora path.
 - [x] Any Ralph source-path choice is explicit and documented.
 - [x] Docs and migration index point at the new canonical Fedora document.
 
-## Risks
+## Residual Notes
 
-- Fedora media layout may not match Rocky assumptions embedded in the current Rhai recipes.
-- Stage 01 CLI and recipe naming currently encode Rocky as if it were the product, not just the current source.
-- Ralph may accidentally continue inheriting behavior in a way that obscures source ownership if it is left implicit.
+- Fedora Server media layout can still drift in future releases, so the package list and required-path envelope should be rechecked when the canonical Fedora artifact changes.
+- `qemu-deps.rhai` remains Rocky-based by explicit choice and should be handled in its own migration if desired.
 
-## Recommended Execution Order
+## Validation Commands Run
 
-1. Validate the full Fedora-backed Stage 01 rootfs output through the canonical builder path.
-2. Decide whether to keep or remove the legacy `recipe_rocky` parser branch and Rocky CLI aliases.
-3. Audit remaining docs/tests for stale Rocky wording.
+1. `cargo xtask policy audit-legacy-bindings`
+2. `cargo run -p distro-builder --bin distro-builder -- artifact preseed-stage01-source levitate --refresh`
+3. `cargo run -p distro-builder --bin distro-builder -- artifact preseed-stage01-source levitate`
+4. `cargo run -p distro-builder --bin distro-builder -- artifact materialize-stage01-source-rootfs levitate`
 
 ## Definition of Done
 

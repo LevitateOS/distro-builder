@@ -5,7 +5,7 @@ use anyhow::{bail, Context, Result};
 use distro_builder::recipe::alpine_stage01::preseed_alpine_stage01_assets;
 use distro_builder::recipe::stage01_source::preseed_stage01_dvd;
 use distro_builder::stages::s01_boot_inputs::{
-    load_s00_build_input_spec, load_s01_boot_input_spec,
+    load_s00_build_input_spec, load_s01_boot_input_spec, materialize_s01_source_rootfs,
     prepare_s00_build_inputs as prepare_s00_build_inputs_for_distro,
     prepare_s01_boot_inputs as prepare_s01_boot_inputs_for_distro,
 };
@@ -265,4 +265,23 @@ pub(crate) fn preseed_stage01_source_cmd(distro_id: &str, refresh: bool) -> Resu
         distro_id,
         bundle.variant_dir.join("01Boot.toml").display()
     );
+}
+
+pub(crate) fn materialize_stage01_source_rootfs_cmd(distro_id: &str) -> Result<()> {
+    let cwd = std::env::current_dir().context("resolving current directory")?;
+    let bundle = load_stage_00_contract_bundle_for_distro_from(&cwd, distro_id)
+        .with_context(|| format!("loading 00Build contract for '{}'", distro_id))?;
+    let s01_spec = load_s01_boot_input_spec(&bundle.repo_root, &bundle.variant_dir, distro_id)
+        .with_context(|| format!("loading 01Boot config for '{}'", distro_id))?;
+
+    let source_rootfs_dir = materialize_s01_source_rootfs(&s01_spec).with_context(|| {
+        format!(
+            "materializing canonical Stage 01 source rootfs for '{}'",
+            distro_id
+        )
+    })?;
+
+    println!("Stage 01 source rootfs ready for {}:", distro_id);
+    println!("  rootfs source: {}", source_rootfs_dir.display());
+    Ok(())
 }

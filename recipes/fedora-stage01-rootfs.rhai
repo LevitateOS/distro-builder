@@ -105,7 +105,7 @@ fn _ensure_trusted_iso(build_dir, iso_path, sha256, trust_dir_define, trust_iso_
 
 fn _find_rpm_path(iso_contents, pkg_name) {
     let cmd = "find '" + iso_contents + "' " +
-              "-type f -path '*/Packages/" + pkg_name + "-[0-9]*.rpm' 2>/dev/null | " +
+              "-type f -path '*/Packages/*/" + pkg_name + "-[0-9]*.rpm' 2>/dev/null | " +
               "grep -E '(x86_64|noarch)\\.rpm$' | " +
               "head -1";
     trim(shell_output(cmd))
@@ -492,4 +492,23 @@ fn is_installed(ctx) {
     // Returning a throwing path here ensures the recipe executes acquire/build/install
     // instead of returning early on cached state.
     throw "forced reinstall";
+}
+
+fn install(ctx) {
+    let rootfs = join_path(BUILD_DIR, "rootfs-minimal");
+    if !is_dir(join_path(rootfs, "usr")) {
+        throw "cannot install: rootfs missing at " + rootfs;
+    }
+    ctx.rootfs_path = rootfs;
+    ctx
+}
+
+fn cleanup(ctx, reason) {
+    if reason == "manual" {
+        let marker = join_path(join_path(BUILD_DIR, "rootfs-minimal"), ".stage01-rootfs.recipe-version");
+        if is_file(marker) {
+            rm(marker);
+        }
+    }
+    ctx
 }

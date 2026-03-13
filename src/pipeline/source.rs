@@ -26,14 +26,6 @@ pub(crate) struct S01RootfsSourceToml {
     kind: String,
     recipe_script: String,
     preseed_recipe_script: Option<String>,
-    #[serde(rename = "iso_name")]
-    _legacy_iso_name: Option<String>,
-    #[serde(rename = "sha256")]
-    _legacy_sha256: Option<String>,
-    #[serde(rename = "sha256_url")]
-    _legacy_sha256_url: Option<String>,
-    #[serde(rename = "torrent_url")]
-    _legacy_torrent_url: Option<String>,
     defines: Option<BTreeMap<String, String>>,
 }
 
@@ -47,13 +39,10 @@ pub(crate) fn parse_rootfs_source_policy(
     };
 
     match source.kind.trim().to_ascii_lowercase().as_str() {
-        "recipe_rpm_dvd" | "recipe_rocky" => {
+        "recipe_rpm_dvd" => {
             let recipe_script = resolve_repo_path(repo_root, source.recipe_script.trim());
             let preseed_recipe_script = match source.preseed_recipe_script {
                 Some(script) => resolve_repo_path(repo_root, script.trim()),
-                None if source.kind.trim().eq_ignore_ascii_case("recipe_rocky") => {
-                    resolve_repo_path(repo_root, "distro-builder/recipes/rocky-preseed-iso.rhai")
-                }
                 None => bail!(
                     "invalid Stage 01 config '{}': rootfs_source.preseed_recipe_script is required for kind='recipe_rpm_dvd'",
                     config_path.display()
@@ -208,10 +197,6 @@ mod tests {
             kind: "recipe_custom".to_string(),
             recipe_script: "distro-builder/recipes/custom-stage01-rootfs.rhai".to_string(),
             preseed_recipe_script: None,
-            _legacy_iso_name: None,
-            _legacy_sha256: None,
-            _legacy_sha256_url: None,
-            _legacy_torrent_url: None,
             defines: Some(BTreeMap::from([(
                 "CUSTOM_ROOTFS_DIR".to_string(),
                 "/tmp/rootfs".to_string(),
@@ -231,31 +216,6 @@ mod tests {
     }
 
     #[test]
-    fn rootfs_source_policy_accepts_legacy_recipe_rocky_without_metadata_fields() {
-        let source = S01RootfsSourceToml {
-            kind: "recipe_rocky".to_string(),
-            recipe_script: "distro-builder/recipes/rocky-stage01-rootfs.rhai".to_string(),
-            preseed_recipe_script: None,
-            _legacy_iso_name: None,
-            _legacy_sha256: None,
-            _legacy_sha256_url: None,
-            _legacy_torrent_url: None,
-            defines: None,
-        };
-        let policy = parse_rootfs_source_policy(
-            Path::new("."),
-            &PathBuf::from("distro-variants/levitate/01Boot.toml"),
-            Some(source),
-        )
-        .expect("parsing recipe_rocky without metadata must succeed");
-
-        assert!(matches!(
-            policy,
-            Some(S01RootfsSourcePolicy::RecipeRpmDvd { .. })
-        ));
-    }
-
-    #[test]
     fn rootfs_source_policy_accepts_neutral_rpm_dvd_kind() {
         let source = S01RootfsSourceToml {
             kind: "recipe_rpm_dvd".to_string(),
@@ -263,10 +223,6 @@ mod tests {
             preseed_recipe_script: Some(
                 "distro-builder/recipes/fedora-preseed-iso.rhai".to_string(),
             ),
-            _legacy_iso_name: None,
-            _legacy_sha256: None,
-            _legacy_sha256_url: None,
-            _legacy_torrent_url: None,
             defines: None,
         };
         let policy = parse_rootfs_source_policy(
@@ -280,6 +236,28 @@ mod tests {
             policy,
             Some(S01RootfsSourcePolicy::RecipeRpmDvd { .. })
         ));
+    }
+
+    #[test]
+    fn rootfs_source_policy_rejects_legacy_recipe_rocky_kind() {
+        let source = S01RootfsSourceToml {
+            kind: "recipe_rocky".to_string(),
+            recipe_script: "distro-builder/recipes/rocky-stage01-rootfs.rhai".to_string(),
+            preseed_recipe_script: None,
+            defines: None,
+        };
+        let err = parse_rootfs_source_policy(
+            Path::new("."),
+            &PathBuf::from("distro-variants/levitate/01Boot.toml"),
+            Some(source),
+        )
+        .expect_err("legacy recipe_rocky kind must fail");
+
+        assert!(
+            err.to_string()
+                .contains("unsupported rootfs_source.kind 'recipe_rocky'"),
+            "unexpected error: {err:#}"
+        );
     }
 
     #[test]

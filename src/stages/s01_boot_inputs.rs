@@ -285,6 +285,10 @@ pub fn prepare_s01_boot_inputs(
     })
 }
 
+pub fn materialize_s01_source_rootfs(spec: &S01BootInputSpec) -> Result<PathBuf> {
+    materialize_source_rootfs(&spec.repo_root, &spec.distro_id, &spec.rootfs_source_policy)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

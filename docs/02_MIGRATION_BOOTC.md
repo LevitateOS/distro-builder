@@ -8,7 +8,7 @@ This document slot is reserved for the future migration from the current install
 
 ## Why It Is Stopped
 
-- The Fedora swap should land first so the Stage 01 source path is no longer Rocky-specific.
+- The Fedora swap has landed, so the Stage 01 source path is no longer Rocky-specific.
 - The current repo still routes important install/runtime decisions through stage-numbered tests and legacy mutability compatibility paths.
 - Starting `bootc` now would risk mixing runtime-policy work with source-media migration and stage-model cleanup.
 

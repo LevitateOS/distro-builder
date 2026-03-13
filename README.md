@@ -76,6 +76,13 @@ This crate is currently a **structural skeleton**. The abstractions are defined 
 - [leviso](https://github.com/LevitateOS/leviso) - LevitateOS ISO builder
 - [AcornOS](https://github.com/LevitateOS/AcornOS) - AcornOS ISO builder
 
+## Migration Notes
+
+- [docs/00_MIGRATION_INDEX.md](docs/00_MIGRATION_INDEX.md) - migration index for numbered distro-builder migration tracks
+- [docs/01_MIGRATION_FEDORA_SWAP.md](docs/01_MIGRATION_FEDORA_SWAP.md) - active Fedora Server DVD swap plan for the Levitate/Ralph Stage 01 source path
+- [docs/02_MIGRATION_BOOTC.md](docs/02_MIGRATION_BOOTC.md) - stopped placeholder for the future `bootc` migration
+- [docs/03_MIGRATION_STAGELESS.md](docs/03_MIGRATION_STAGELESS.md) - stopped placeholder for the future stageless/product-model migration
+
 ## License
 
 Licensed under either of:

@@ -167,17 +167,10 @@ mod tests {
         assert!(result.is_err());
     }
 
-    #[test]
-    fn levitate_boot_config_uses_fedora_stage01_recipes() {
-        let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .expect("repo root")
-            .to_path_buf();
-        let variant_dir = repo_root.join("distro-variants/levitate");
-
-        let loaded =
-            load_boot_config(&repo_root, &variant_dir, "levitate").expect("load levitate 01Boot");
-
+    fn assert_uses_fedora_stage01_recipes(repo_root: &Path, distro_id: &str) {
+        let variant_dir = repo_root.join(format!("distro-variants/{distro_id}"));
+        let loaded = load_boot_config(repo_root, &variant_dir, distro_id)
+            .unwrap_or_else(|err| panic!("load {distro_id} 01Boot: {err:#}"));
         match loaded.rootfs_source_policy {
             Some(S01RootfsSourcePolicy::RecipeRpmDvd {
                 recipe_script,
@@ -195,7 +188,25 @@ mod tests {
                     preseed_recipe_script.display()
                 );
             }
-            other => panic!("unexpected Levitate Stage 01 source policy: {other:?}"),
+            other => panic!("unexpected {distro_id} Stage 01 source policy: {other:?}"),
         }
+    }
+
+    #[test]
+    fn levitate_boot_config_uses_fedora_stage01_recipes() {
+        let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("repo root")
+            .to_path_buf();
+        assert_uses_fedora_stage01_recipes(&repo_root, "levitate");
+    }
+
+    #[test]
+    fn ralph_boot_config_uses_fedora_stage01_recipes() {
+        let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("repo root")
+            .to_path_buf();
+        assert_uses_fedora_stage01_recipes(&repo_root, "ralph");
     }
 }

@@ -7,24 +7,26 @@
 // - staging/{usr/lib,lib}/modules/<kernel.release>/
 //
 // Required defines:
-// - KERNEL_VERSION
-// - KERNEL_LOCALVERSION
 // - KERNEL_ARTIFACT_ROOT
-// - MODULE_INSTALL_PATH
 //
-// Optional:
+// Orchestrators may also provide:
+// - KERNEL_KCONFIG_PATH (used only to resolve the canonical distro target)
+//
+// Optional env:
 // - KERNEL_FORCE_REBUILD=1 forces re-download/reinstall
 
 let build_deps = [];
 
 let ctx = #{
-    build_dir: "/data/vince/LevitateOS/.artifacts/kernel/levitate/current/kernel-build",
+    build_dir: "",
     description: "Prebuilt Linux kernel artifacts",
-    kernel_version: "6.12.71-levitate",
+    kernel_localversion: "",
+    kernel_version: "?",
     name: "linux-prebuilt",
+    module_install_path: "/usr/lib/modules",
     source_path: "",
-    tarball_filename: "levitate-6.12.71-levitate-runtime.tar.xz",
-    tarball_url: "https://github.com/LevitateOS/leviso/releases/download/0.0.0-pre-alpha/levitate-6.12.71-levitate-runtime.tar.xz",
+    tarball_filename: "",
+    tarball_url: "",
 };
 
 fn _kernel_artifact_root_or_throw(kernel_artifact_root) {
@@ -35,19 +37,57 @@ fn _kernel_artifact_root_or_throw(kernel_artifact_root) {
     kernel_artifact_root
 }
 
-fn _prebuilt_spec_or_throw(localversion) {
+fn _normalize_kernel_target(target) {
+    let normalized = target.to_lower();
+    if normalized == "levitate" || normalized == "leviso" {
+        return "levitate";
+    }
+    if normalized == "acorn" || normalized == "acornos" {
+        return "acorn";
+    }
+    if normalized == "iuppiter" || normalized == "iuppiteros" {
+        return "iuppiter";
+    }
+    if normalized == "ralph" || normalized == "ralphos" {
+        return "ralph";
+    }
+    ""
+}
+
+fn _kernel_target_or_throw(build_dir, kconfig_path) {
+    let build_target = _normalize_kernel_target(basename(dirname(build_dir)));
+    if build_target != "" {
+        return build_target;
+    }
+
+    if kconfig_path != "" {
+        let kconfig_target = _normalize_kernel_target(basename(dirname(kconfig_path)));
+        if kconfig_target != "" {
+            return kconfig_target;
+        }
+    }
+
+    throw "Cannot determine prebuilt kernel target from build dir '" + build_dir + "'";
+}
+
+fn _prebuilt_spec_or_throw(build_dir, kconfig_path) {
+    let target = _kernel_target_or_throw(build_dir, kconfig_path);
+
     // Keep this table explicit so no caller has to discover URLs/hashes manually.
-    if localversion == "-levitate" {
+    if target == "levitate" {
         return #{
-            distro_id: "leviso",
+            distro_id: "levitate",
             repo: "LevitateOS/leviso",
             release_tag: "0.0.0-pre-alpha",
             asset_name: "levitate-6.12.71-levitate-runtime.tar.xz",
             asset_sha256: "064ec622912a8741967c92b4cdf523eca4311bc9179d8ef1049beaf95453a2c8",
             expected_release: "6.12.71-levitate",
+            localversion: "-levitate",
+            module_install_path: "/usr/lib/modules",
+            version: "6.12.71",
         };
     }
-    if localversion == "-acorn" {
+    if target == "acorn" {
         return #{
             distro_id: "acorn",
             repo: "LevitateOS/AcornOS",
@@ -55,15 +95,36 @@ fn _prebuilt_spec_or_throw(localversion) {
             asset_name: "acorn-6.19.0-acorn-runtime.v2.tar.xz",
             asset_sha256: "04e10c6392680b75b80a09beb9036e5954b62cfabddd4cb0fe3c975c0a79e96e",
             expected_release: "6.19.0-acorn",
+            localversion: "-acorn",
+            module_install_path: "/usr/lib/modules",
+            version: "6.19",
         };
     }
 
-    throw "No prebuilt kernel mapping for localversion '" + localversion + "'. " +
-        "Remediation: publish a prebuilt runtime tarball and add its repo/tag/asset/sha in distro-builder/recipes/linux-prebuilt.rhai.";
+    throw "No prebuilt kernel mapping for target '" + target + "'. " +
+        "Remediation: publish a prebuilt runtime tarball and add its repo/tag/asset/sha in distro-builder/recipes/linux-prebuilt.rhai, " +
+        "or keep using distro-builder/recipes/linux.rhai for source builds.";
 }
 
 fn _resolve_asset_url(spec) {
     "https://github.com/" + spec.repo + "/releases/download/" + spec.release_tag + "/" + spec.asset_name
+}
+
+fn _apply_prebuilt_spec(ctx, build_dir, kconfig_path) {
+    let spec = _prebuilt_spec_or_throw(build_dir, kconfig_path);
+    ctx.build_dir = "";
+    ctx.description = "Prebuilt Linux kernel artifacts (" + spec.expected_release + ")";
+    ctx.kernel_localversion = spec.localversion;
+    ctx.kernel_version = spec.version;
+    ctx.module_install_path = spec.module_install_path;
+    ctx.source_path = "";
+    ctx.tarball_filename = spec.asset_name;
+    ctx.tarball_url = _resolve_asset_url(spec);
+    ctx
+}
+
+fn _kernel_force_rebuild_requested() {
+    trim(shell_output("printf '%s' \"${KERNEL_FORCE_REBUILD:-0}\"")) == "1"
 }
 
 fn _validate_payload_or_throw(kernel_root, expected_release, expected_version, expected_localversion, module_install_path) {
@@ -101,8 +162,9 @@ fn _validate_payload_or_throw(kernel_root, expected_release, expected_version, e
 }
 
 fn is_acquired(ctx) {
-    let spec = _prebuilt_spec_or_throw(KERNEL_LOCALVERSION);
-    if KERNEL_FORCE_REBUILD == "1" {
+    ctx = _apply_prebuilt_spec(ctx, BUILD_DIR, KERNEL_KCONFIG_PATH);
+    let spec = _prebuilt_spec_or_throw(BUILD_DIR, KERNEL_KCONFIG_PATH);
+    if _kernel_force_rebuild_requested() {
         throw "forced prebuilt refresh requested";
     }
 
@@ -110,21 +172,20 @@ fn is_acquired(ctx) {
     let rel = _validate_payload_or_throw(
         kernel_root,
         spec.expected_release,
-        KERNEL_VERSION,
-        KERNEL_LOCALVERSION,
-        MODULE_INSTALL_PATH
+        spec.version,
+        spec.localversion,
+        spec.module_install_path
     );
 
     ctx.kernel_version = rel;
     ctx.build_dir = join_path(kernel_root, "kernel-build");
     ctx.source_path = "";
-    ctx.tarball_filename = spec.asset_name;
-    ctx.tarball_url = _resolve_asset_url(spec);
     ctx
 }
 
 fn acquire(ctx) {
-    let spec = _prebuilt_spec_or_throw(KERNEL_LOCALVERSION);
+    ctx = _apply_prebuilt_spec(ctx, BUILD_DIR, KERNEL_KCONFIG_PATH);
+    let spec = _prebuilt_spec_or_throw(BUILD_DIR, KERNEL_KCONFIG_PATH);
     let kernel_root = _kernel_artifact_root_or_throw(KERNEL_ARTIFACT_ROOT);
     let asset_url = _resolve_asset_url(spec);
 
@@ -147,9 +208,9 @@ fn acquire(ctx) {
     let rel = _validate_payload_or_throw(
         extract_tmp,
         spec.expected_release,
-        KERNEL_VERSION,
-        KERNEL_LOCALVERSION,
-        MODULE_INSTALL_PATH
+        spec.version,
+        spec.localversion,
+        spec.module_install_path
     );
 
     shell("rm -rf '" + kernel_root + "'");
@@ -159,32 +220,32 @@ fn acquire(ctx) {
     _validate_payload_or_throw(
         kernel_root,
         spec.expected_release,
-        KERNEL_VERSION,
-        KERNEL_LOCALVERSION,
-        MODULE_INSTALL_PATH
+        spec.version,
+        spec.localversion,
+        spec.module_install_path
     );
 
     ctx.kernel_version = rel;
     ctx.build_dir = join_path(kernel_root, "kernel-build");
     ctx.source_path = "";
-    ctx.tarball_filename = spec.asset_name;
     ctx.tarball_url = asset_url;
     log("Prebuilt kernel artifact installed at " + kernel_root);
     ctx
 }
 
 fn is_built(ctx) {
-    let spec = _prebuilt_spec_or_throw(KERNEL_LOCALVERSION);
-    if KERNEL_FORCE_REBUILD == "1" {
+    ctx = _apply_prebuilt_spec(ctx, BUILD_DIR, KERNEL_KCONFIG_PATH);
+    let spec = _prebuilt_spec_or_throw(BUILD_DIR, KERNEL_KCONFIG_PATH);
+    if _kernel_force_rebuild_requested() {
         throw "forced prebuilt refresh requested";
     }
     let kernel_root = _kernel_artifact_root_or_throw(KERNEL_ARTIFACT_ROOT);
     let rel = _validate_payload_or_throw(
         kernel_root,
         spec.expected_release,
-        KERNEL_VERSION,
-        KERNEL_LOCALVERSION,
-        MODULE_INSTALL_PATH
+        spec.version,
+        spec.localversion,
+        spec.module_install_path
     );
     ctx.kernel_version = rel;
     ctx.build_dir = join_path(kernel_root, "kernel-build");
@@ -194,14 +255,15 @@ fn is_built(ctx) {
 
 fn build(ctx) {
     // Prebuilt recipe has no compile step; treat build as validated no-op.
-    let spec = _prebuilt_spec_or_throw(KERNEL_LOCALVERSION);
+    ctx = _apply_prebuilt_spec(ctx, BUILD_DIR, KERNEL_KCONFIG_PATH);
+    let spec = _prebuilt_spec_or_throw(BUILD_DIR, KERNEL_KCONFIG_PATH);
     let kernel_root = _kernel_artifact_root_or_throw(KERNEL_ARTIFACT_ROOT);
     let rel = _validate_payload_or_throw(
         kernel_root,
         spec.expected_release,
-        KERNEL_VERSION,
-        KERNEL_LOCALVERSION,
-        MODULE_INSTALL_PATH
+        spec.version,
+        spec.localversion,
+        spec.module_install_path
     );
     ctx.kernel_version = rel;
     ctx.build_dir = join_path(kernel_root, "kernel-build");
@@ -210,17 +272,18 @@ fn build(ctx) {
 }
 
 fn is_installed(ctx) {
-    let spec = _prebuilt_spec_or_throw(KERNEL_LOCALVERSION);
-    if KERNEL_FORCE_REBUILD == "1" {
+    ctx = _apply_prebuilt_spec(ctx, BUILD_DIR, KERNEL_KCONFIG_PATH);
+    let spec = _prebuilt_spec_or_throw(BUILD_DIR, KERNEL_KCONFIG_PATH);
+    if _kernel_force_rebuild_requested() {
         throw "forced prebuilt refresh requested";
     }
     let kernel_root = _kernel_artifact_root_or_throw(KERNEL_ARTIFACT_ROOT);
     let rel = _validate_payload_or_throw(
         kernel_root,
         spec.expected_release,
-        KERNEL_VERSION,
-        KERNEL_LOCALVERSION,
-        MODULE_INSTALL_PATH
+        spec.version,
+        spec.localversion,
+        spec.module_install_path
     );
     ctx.kernel_version = rel;
     ctx.build_dir = join_path(kernel_root, "kernel-build");
@@ -230,14 +293,15 @@ fn is_installed(ctx) {
 
 fn install(ctx) {
     // Prebuilt recipe already installs in acquire; install is a validated no-op.
-    let spec = _prebuilt_spec_or_throw(KERNEL_LOCALVERSION);
+    ctx = _apply_prebuilt_spec(ctx, BUILD_DIR, KERNEL_KCONFIG_PATH);
+    let spec = _prebuilt_spec_or_throw(BUILD_DIR, KERNEL_KCONFIG_PATH);
     let kernel_root = _kernel_artifact_root_or_throw(KERNEL_ARTIFACT_ROOT);
     let rel = _validate_payload_or_throw(
         kernel_root,
         spec.expected_release,
-        KERNEL_VERSION,
-        KERNEL_LOCALVERSION,
-        MODULE_INSTALL_PATH
+        spec.version,
+        spec.localversion,
+        spec.module_install_path
     );
     ctx.kernel_version = rel;
     ctx.build_dir = join_path(kernel_root, "kernel-build");

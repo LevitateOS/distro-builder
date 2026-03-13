@@ -1,6 +1,6 @@
 # 01 Fedora Swap Migration Plan
 
-Status: active; Levitate Fedora flip landed, compatibility cleanup still pending
+Status: active; canonical Fedora preseed validated, compatibility cleanup still pending
 
 ## Goal
 
@@ -61,11 +61,10 @@ Already landed:
 - Levitate now points at the Fedora Stage 01 rootfs and preseed recipes by default.
 - The default RPM/DVD Stage 01 dependency recipe is now neutralized as `stage01-dvd-deps`.
 
-Still blocking the actual Fedora swap:
+Still blocking migration completion:
 
-- A real preseeded Fedora ISO run has not been executed yet through the canonical builder path.
 - The legacy `recipe_rocky` parser branch and Rocky compatibility recipes still exist.
-- Ralph source ownership is now explicit.
+- A full Fedora-backed Stage 01 rootfs output has not yet been validated through the canonical builder path.
 
 ## Migration Strategy
 
@@ -193,7 +192,8 @@ Out-of-scope unless explicitly chosen:
 
 - [x] `cargo xtask policy audit-legacy-bindings`
 - [x] Levitate Stage 01 config parses with the new Fedora metadata.
-- [ ] Stage 01 source preparation succeeds through the canonical builder command path.
+- [x] Stage 01 source preparation succeeds through the canonical builder command path.
+- [x] Canonical Fedora preseed is idempotent after trust-marker creation.
 - [ ] Stage 01 source output is non-legacy and policy-clean.
 - [x] The builder no longer requires Rocky-branded CLI commands for the default Fedora path.
 - [x] Any Ralph source-path choice is explicit and documented.
@@ -207,7 +207,7 @@ Out-of-scope unless explicitly chosen:
 
 ## Recommended Execution Order
 
-1. Run a real Fedora preseed/build validation through the canonical builder path.
+1. Validate the full Fedora-backed Stage 01 rootfs output through the canonical builder path.
 2. Decide whether to keep or remove the legacy `recipe_rocky` parser branch and Rocky CLI aliases.
 3. Audit remaining docs/tests for stale Rocky wording.
 

@@ -501,17 +501,37 @@ Acceptance:
 
 ### Phase 5. Split builder routing into products, transforms, and releases
 
-- [ ] Add product-first and transform-first routing in:
+- [x] Add product-first and transform-first routing in:
   - `distro-builder/src/bin/workflows/parse.rs`
   - `distro-builder/src/bin/workflows/build.rs`
   - `distro-builder/src/bin/workflows/artifacts.rs`
-- [ ] Keep `00Build/01Boot/02LiveTools` only as compatibility aliases during migration.
-- [ ] Stop teaching stage-numbered builds as the default path in `distro-builder`.
+- [x] Keep `00Build/01Boot/02LiveTools` only as compatibility aliases during migration.
+- [x] Stop teaching stage-numbered builds as the default path in `distro-builder`.
+
+Implemented:
+
+- canonical release surface is now:
+  - `distro-builder release build iso ...`
+  - `distro-builder release build-all iso ...`
+- canonical product surface is now:
+  - `distro-builder product prepare <product> <distro> <output_dir>`
+- canonical transform surface is now:
+  - `distro-builder transform build rootfs-erofs ...`
+  - `distro-builder transform build overlayfs-erofs ...`
+  - `distro-builder transform build product-erofs <product> <distro>`
+- legacy stage commands remain available only as compatibility aliases:
+  - `iso build`
+  - `iso build-all`
+  - `artifact build-stage-erofs`
+  - `artifact prepare-stage-inputs`
+  - `artifact prepare-s00-build-inputs`
+  - `artifact prepare-s01-boot-inputs`
+  - `artifact prepare-s02-live-tools-inputs`
 
 Acceptance:
 
-- the default explanation/help path is product/transform/release oriented
-- stage commands remain optional compatibility surfaces
+- [x] the default explanation/help path is product/transform/release oriented
+- [x] stage commands remain optional compatibility surfaces
 
 ### Phase 6. Move runtime validation off stage tags
 

@@ -21,14 +21,23 @@ const STAGE02_CANONICAL: &str = "02LiveTools";
 const STAGE02_SLUG: &str = "s02_live_tools";
 const STAGE02_DIRNAME: &str = "s02-live-tools";
 const STAGE02_ARTIFACT_TAG: &str = "s02";
+const PRODUCT_BASE_ROOTFS: &str = "base-rootfs";
+const PRODUCT_LIVE_BOOT: &str = "live-boot";
+const PRODUCT_LIVE_TOOLS: &str = "live-tools";
 const DEFAULT_DISTRO_ID: &str = "levitate";
 const S00_RUN_RETENTION_COUNT: usize = 5;
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 struct BuildStage {
     canonical: &'static str,
     slug: &'static str,
     dir_name: &'static str,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct BuildProduct {
+    canonical: &'static str,
+    compatibility_stage: BuildStage,
 }
 
 #[derive(Debug, Clone)]
@@ -53,7 +62,7 @@ struct StageRunMetadata {
 }
 
 fn usage() -> &'static str {
-    "Usage:\n  distro-builder iso build [<distro_id|stage>] [<distro_id|stage>] \n    stage defaults to 00Build, distro defaults to levitate\n    stage aliases: 0|00|01|1|02|2\n  distro-builder iso build-all [00Build|01Boot|02LiveTools]\n  distro-builder artifact build-rootfs-erofs <source_dir> <output>\n  distro-builder artifact build-overlayfs-erofs <source_dir> <output>\n  distro-builder artifact build-stage-erofs <stage> <distro_id>\n  distro-builder artifact prepare-stage-inputs <stage> <distro_id> <output_dir>\n  distro-builder artifact prepare-s00-build-inputs <distro_id> <output_dir>\n  distro-builder artifact prepare-s01-boot-inputs <distro_id> <output_dir>\n  distro-builder artifact prepare-s02-live-tools-inputs <distro_id> <output_dir>\n  distro-builder artifact preseed-stage01-source <distro_id> [--refresh]\n  distro-builder artifact materialize-stage01-source-rootfs <distro_id>"
+    "Usage:\n  distro-builder release build iso [<distro_id|product>] [<distro_id|product>]\n    product defaults to base-rootfs, distro defaults to levitate\n    products: base-rootfs | live-boot | live-tools\n    compatibility aliases: 00Build|01Boot|02LiveTools|0|00|1|01|2|02\n  distro-builder release build-all iso [base-rootfs|live-boot|live-tools]\n  distro-builder product prepare <base-rootfs|live-boot|live-tools> <distro_id> <output_dir>\n  distro-builder transform build rootfs-erofs <source_dir> <output>\n  distro-builder transform build overlayfs-erofs <source_dir> <output>\n  distro-builder transform build product-erofs <base-rootfs|live-boot|live-tools> <distro_id>\n  distro-builder artifact preseed-stage01-source <distro_id> [--refresh]\n  distro-builder artifact materialize-stage01-source-rootfs <distro_id>\n\nCompatibility aliases:\n  distro-builder iso build [<distro_id|stage>] [<distro_id|stage>]\n  distro-builder iso build-all [00Build|01Boot|02LiveTools]\n  distro-builder artifact build-stage-erofs <stage> <distro_id>\n  distro-builder artifact prepare-stage-inputs <stage> <distro_id> <output_dir>\n  distro-builder artifact prepare-s00-build-inputs <distro_id> <output_dir>\n  distro-builder artifact prepare-s01-boot-inputs <distro_id> <output_dir>\n  distro-builder artifact prepare-s02-live-tools-inputs <distro_id> <output_dir>"
 }
 
 fn main() -> Result<()> {
@@ -61,12 +70,12 @@ fn main() -> Result<()> {
 
     let args: Vec<String> = std::env::args().skip(1).collect();
 
-    if workflows::is_iso_build_invocation(&args) {
-        return workflows::run_iso_build_command(&args);
+    if workflows::is_release_build_invocation(&args) {
+        return workflows::run_release_build_command(&args);
     }
 
     workflows::enforce_legacy_binding_policy_guard()?;
-    workflows::dispatch_non_iso_command(&args)
+    workflows::dispatch_non_release_command(&args)
 }
 
 #[cfg(unix)]

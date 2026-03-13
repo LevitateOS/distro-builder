@@ -11,13 +11,14 @@ use distro_contract::{
 };
 use time::OffsetDateTime;
 
-use crate::{BuildStage, StageOutputLayout};
+use crate::{BuildProduct, BuildStage, StageOutputLayout};
 
 pub(crate) fn preflight_iso_build(
     repo_root: &Path,
     distro_id: &str,
-    stage: BuildStage,
+    product: BuildProduct,
 ) -> Result<()> {
+    let stage = product.compatibility_stage;
     if stage.slug == crate::STAGE00_SLUG {
         return Ok(());
     }
@@ -28,23 +29,27 @@ pub(crate) fn preflight_iso_build(
         let run_id =
             crate::stage_runs::latest_successful_stage_run_id(&s00_root)?.ok_or_else(|| {
                 anyhow::anyhow!(
-                    "preflight failed for '{}' {}: no successful Stage 00 runs found under '{}'.\n\
-                     Build Stage 00 first: `just build 0 {}`",
+                    "preflight failed for '{}' release product '{}': no successful Stage 00 runs found under '{}'.\n\
+                     Build the '{}' release first: `cargo run -p distro-builder --bin distro-builder -- release build iso {} {}`",
                     distro_id,
-                    stage.canonical,
+                    product.canonical,
                     s00_root.display(),
-                    distro_id
+                    crate::PRODUCT_BASE_ROOTFS,
+                    distro_id,
+                    crate::PRODUCT_BASE_ROOTFS
                 )
             })?;
         let parent_rootfs = s00_root.join(&run_id).join("s00-filesystem.erofs");
         if !parent_rootfs.is_file() {
             bail!(
-                "preflight failed for '{}' {}: missing Stage 00 rootfs image '{}'.\n\
-                 Build Stage 00 first: `just build 0 {}`",
+                "preflight failed for '{}' release product '{}': missing Stage 00 rootfs image '{}'.\n\
+                 Build the '{}' release first: `cargo run -p distro-builder --bin distro-builder -- release build iso {} {}`",
                 distro_id,
-                stage.canonical,
+                product.canonical,
                 parent_rootfs.display(),
-                distro_id
+                crate::PRODUCT_BASE_ROOTFS,
+                distro_id,
+                crate::PRODUCT_BASE_ROOTFS
             );
         }
     }
@@ -71,17 +76,20 @@ Run `cargo xtask policy audit-legacy-bindings` and fix violations first.",
     )
 }
 
-pub(crate) fn build_all(stage: BuildStage) -> Result<()> {
+pub(crate) fn build_all(product: BuildProduct) -> Result<()> {
     let cwd = std::env::current_dir().context("resolving current directory")?;
     let distro_ids = crate::workflows::parse::discover_distro_ids(&cwd)?;
     for distro_id in &distro_ids {
-        println!("[iso:{}] building {}...", stage.slug, distro_id);
-        build_one(distro_id, stage)?;
+        println!(
+            "[release:iso:{}] building {}...",
+            product.canonical, distro_id
+        );
+        build_one(distro_id, product)?;
     }
     Ok(())
 }
 
-pub(crate) fn build_one(distro_id: &str, stage: BuildStage) -> Result<()> {
+pub(crate) fn build_one(distro_id: &str, product: BuildProduct) -> Result<()> {
     let cwd = std::env::current_dir().context("resolving current directory")?;
     let bundle = load_stage_00_contract_bundle_for_distro_from(&cwd, distro_id)
         .with_context(|| format!("loading 00Build contract for '{distro_id}'"))?;
@@ -96,6 +104,7 @@ pub(crate) fn build_one(distro_id: &str, stage: BuildStage) -> Result<()> {
             kernel_output_dir.display()
         )
     })?;
+    let stage = product.compatibility_stage;
     let stage_layout = stage_output_layout_for(&bundle.repo_root, distro_id, stage)?;
 
     let stage_output_dir = stage_layout.stage_output_dir.clone();
@@ -151,10 +160,20 @@ pub(crate) fn build_one(distro_id: &str, stage: BuildStage) -> Result<()> {
         .with_context(|| format!("ensuring kernel artifacts for '{distro_id}'"))?
         {
             S00BuildKernelEnsureOutcome::AlreadyInstalled => {
-                println!("[iso:{}:{distro_id}] kernel already installed", stage.slug);
+                println!(
+                    "[release:iso:{}:{distro_id}] kernel already installed",
+                    product.canonical
+                );
             }
         }
-        ensure_iso_exists(&bundle, distro_id, &kernel_output_dir, &stage_layout, stage)?;
+        ensure_iso_exists(
+            &bundle,
+            distro_id,
+            &kernel_output_dir,
+            &stage_layout,
+            product,
+            stage,
+        )?;
 
         let evidence_spec = S00BuildEvidenceSpec {
             script_path: bundle
@@ -196,8 +215,8 @@ pub(crate) fn build_one(distro_id: &str, stage: BuildStage) -> Result<()> {
         .with_context(|| format!("running 00Build evidence for '{distro_id}'"))?;
 
         println!(
-            "[iso:{}:{distro_id}] stage {} passed; ISO at {}",
-            stage.slug,
+            "[release:iso:{}:{distro_id}] compatibility stage {} passed; ISO at {}",
+            product.canonical,
             stage.canonical,
             stage_output_dir
                 .join(iso_filename_for_stage(
@@ -237,8 +256,8 @@ pub(crate) fn build_one(distro_id: &str, stage: BuildStage) -> Result<()> {
                 return Err(err);
             }
             eprintln!(
-                "[iso:{}:{distro_id}] warning: failed to persist stage run metadata: {err:#}",
-                stage.slug
+                "[release:iso:{}:{distro_id}] warning: failed to persist stage run metadata: {err:#}",
+                product.canonical
             );
         }
 
@@ -258,6 +277,7 @@ fn ensure_iso_exists(
     distro_id: &str,
     kernel_output_dir: &Path,
     stage_layout: &StageOutputLayout,
+    product: BuildProduct,
     stage: BuildStage,
 ) -> Result<()> {
     let stage_output_dir = &stage_layout.stage_output_dir;
@@ -285,8 +305,8 @@ fn ensure_iso_exists(
     // Builds always target a freshly allocated per-run output directory.
     // "missing ISO" in that directory is expected and not a cache miss.
     println!(
-        "[iso:{}:{distro_id}] building run {} via {} (output: {})",
-        stage.slug,
+        "[release:iso:{}:{distro_id}] building compatibility run {} via {} (output: {})",
+        product.canonical,
         stage_layout.run_id.as_deref().unwrap_or("adhoc"),
         native_build.display(),
         iso_path.display()
@@ -359,9 +379,10 @@ fn ensure_iso_exists(
         .status()
         .with_context(|| {
             format!(
-                "running {} native build hook for '{}' using {}",
+                "running {} native build hook for '{}' from release product '{}' using {}",
                 stage.canonical,
                 distro_id,
+                product.canonical,
                 native_build.display()
             )
         })?;

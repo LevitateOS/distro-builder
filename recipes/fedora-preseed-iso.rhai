@@ -1,15 +1,7 @@
 // Canonical Fedora Server 43 x86_64 DVD preseed recipe for Stage 01 source producer flows.
 //
 // This recipe performs explicit trusted acquisition into the canonical cache:
-//   .artifacts/work/<distro>/downloads/Fedora-Server-dvd-x86_64-43-1.6.iso
-//
-// Required defines:
-// - FEDORA_ISO_NAME
-// - FEDORA_SHA256
-// - FEDORA_CHECKSUM_URL
-// - FEDORA_TORRENT_URL
-// - FEDORA_PRESEED_ISO
-// - FEDORA_TRUST_DIR
+//   BUILD_DIR/Fedora-Server-dvd-x86_64-43-1.6.iso
 //
 // Current canonical artifact:
 // - Fedora-Server-dvd-x86_64-43-1.6.iso
@@ -17,18 +9,23 @@
 // - CHECKSUM: https://download.fedoraproject.org/pub/fedora/linux/releases/43/Server/x86_64/iso/Fedora-Server-43-1.6-x86_64-CHECKSUM
 // - Torrent: https://torrent.fedoraproject.org/torrents/Fedora-Server-dvd-x86_64-43.torrent
 //
+// Trusted acquire behavior:
+// - verify the pinned SHA256 against the published CHECKSUM manifest
+// - acquire the ISO via torrent only after that manifest check passes
+// - verify the local ISO content and write a local trust marker
+//
 // Optional env:
 // - FEDORA_FORCE_REFRESH=1 (remove existing ISO and download again)
 
 let ctx = #{
-    checksum_url: FEDORA_CHECKSUM_URL,
+    checksum_url: "https://download.fedoraproject.org/pub/fedora/linux/releases/43/Server/x86_64/iso/Fedora-Server-43-1.6-x86_64-CHECKSUM",
     description: "Canonical Fedora Server 43 x86_64 DVD preseed",
-    iso_name: FEDORA_ISO_NAME,
-    iso_path: FEDORA_PRESEED_ISO,
+    iso_name: "Fedora-Server-dvd-x86_64-43-1.6.iso",
+    iso_path: join_path(BUILD_DIR, "Fedora-Server-dvd-x86_64-43-1.6.iso"),
     name: "fedora-preseed-iso",
-    sha256: FEDORA_SHA256,
-    torrent_url: FEDORA_TORRENT_URL,
-    trust_dir: FEDORA_TRUST_DIR,
+    sha256: "aca06983bef83da9b43144c1a2ff4c8483e4745167c17f53725c16a16742e643",
+    torrent_url: "https://torrent.fedoraproject.org/torrents/Fedora-Server-dvd-x86_64-43.torrent",
+    trust_dir: BUILD_DIR,
 };
 
 fn _verify_marker_path(trust_dir) {
@@ -82,6 +79,20 @@ fn _normalize_torrent_output(path, iso_name) {
     resolved
 }
 
+fn _expected_checksum_line(ctx) {
+    "SHA256 (" + ctx.iso_name + ") = " + ctx.sha256
+}
+
+fn _verify_published_checksum(ctx) {
+    log("Validating pinned SHA256 against published CHECKSUM manifest...");
+    let manifest = http_get(ctx.checksum_url);
+    let needle = _expected_checksum_line(ctx);
+    if !manifest.contains(needle) {
+        throw "Published CHECKSUM manifest at '" + ctx.checksum_url + "' does not contain expected line:\n" +
+              needle;
+    }
+}
+
 fn is_acquired(ctx) {
     if _refresh_requested() {
         throw "forced refresh";
@@ -104,6 +115,8 @@ fn acquire(ctx) {
         log("FEDORA_FORCE_REFRESH=1: removing existing Fedora ISO before trusted acquisition");
         rm(ctx.iso_path);
     }
+
+    _verify_published_checksum(ctx);
 
     if !is_file(ctx.iso_path) {
         let target_dir = dirname(ctx.iso_path);

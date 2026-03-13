@@ -2,16 +2,8 @@
 //
 // Rule boundary (strict):
 // - This recipe never downloads/re-downloads the Fedora Server DVD in stage builds.
-// - It requires a preseeded ISO at BUILD_DIR/FEDORA_ISO_NAME.
+// - It requires a preseeded ISO in the canonical sibling downloads cache.
 // - It requires a trust marker; no repeated checksum in normal iterations.
-//
-// Required defines:
-// - FEDORA_ISO_NAME
-// - FEDORA_SHA256
-// - FEDORA_CHECKSUM_URL
-// - FEDORA_TORRENT_URL
-// - FEDORA_PRESEED_ISO
-// - FEDORA_TRUST_DIR
 //
 // Current implementation note:
 // - This recipe intentionally reuses `rocky-deps` because that owner currently
@@ -20,17 +12,31 @@
 
 let deps = ["rocky-deps"];
 
+fn _work_root(build_dir) {
+    dirname(dirname(build_dir))
+}
+
+fn _downloads_dir(build_dir) {
+    let parent = dirname(build_dir);
+    if basename(parent) == "stage01-rootfs-provider" {
+        return join_path(dirname(parent), "downloads");
+    }
+    join_path(parent, "downloads")
+}
+
 let ctx = #{
     checksum_url: "https://download.fedoraproject.org/pub/fedora/linux/releases/43/Server/x86_64/iso/Fedora-Server-43-1.6-x86_64-CHECKSUM",
     description: "Fedora Server 43 Stage 01 rootfs producer",
-    iso_contents_path: "/data/vince/LevitateOS/.artifacts/work/levitate/stage01-rootfs-provider/fedora/iso-contents",
+    iso_contents_path: join_path(BUILD_DIR, "iso-contents"),
     iso_name: "Fedora-Server-dvd-x86_64-43-1.6.iso",
-    iso_path: "/data/vince/LevitateOS/.artifacts/work/levitate/stage01-rootfs-provider/fedora/Fedora-Server-dvd-x86_64-43-1.6.iso",
+    iso_path: join_path(BUILD_DIR, "Fedora-Server-dvd-x86_64-43-1.6.iso"),
     name: "fedora-stage01-rootfs",
-    rootfs_path: "/data/vince/LevitateOS/.artifacts/work/levitate/stage01-rootfs-provider/fedora/rootfs-minimal",
+    preseed_iso_path: join_path(_downloads_dir(BUILD_DIR), "Fedora-Server-dvd-x86_64-43-1.6.iso"),
+    rootfs_path: join_path(BUILD_DIR, "rootfs-minimal"),
     rootfs_recipe_version: "fedora-stage01-v1",
     sha256: "aca06983bef83da9b43144c1a2ff4c8483e4745167c17f53725c16a16742e643",
     torrent_url: "https://torrent.fedoraproject.org/torrents/Fedora-Server-dvd-x86_64-43.torrent",
+    trust_dir: _downloads_dir(BUILD_DIR),
 };
 
 fn _verify_marker_path(trust_dir) {
@@ -117,8 +123,8 @@ fn _extract_rpm_into_rootfs(rootfs, rpm_path) {
 
 fn is_acquired(ctx) {
     let iso = join_path(BUILD_DIR, ctx.iso_name);
-    _require_preseeded_iso(iso, FEDORA_PRESEED_ISO);
-    _ensure_trusted_iso(BUILD_DIR, iso, FEDORA_SHA256, FEDORA_TRUST_DIR, FEDORA_PRESEED_ISO);
+    _require_preseeded_iso(iso, ctx.preseed_iso_path);
+    _ensure_trusted_iso(BUILD_DIR, iso, ctx.sha256, ctx.trust_dir, ctx.preseed_iso_path);
 
     ctx.iso_path = iso;
     ctx.iso_contents_path = join_path(BUILD_DIR, "iso-contents");
@@ -129,8 +135,8 @@ fn is_acquired(ctx) {
 fn acquire(ctx) {
     mkdir(BUILD_DIR);
     let iso = join_path(BUILD_DIR, ctx.iso_name);
-    _require_preseeded_iso(iso, FEDORA_PRESEED_ISO);
-    _ensure_trusted_iso(BUILD_DIR, iso, FEDORA_SHA256, FEDORA_TRUST_DIR, FEDORA_PRESEED_ISO);
+    _require_preseeded_iso(iso, ctx.preseed_iso_path);
+    _ensure_trusted_iso(BUILD_DIR, iso, ctx.sha256, ctx.trust_dir, ctx.preseed_iso_path);
 
     ctx.iso_path = iso;
     ctx.iso_contents_path = join_path(BUILD_DIR, "iso-contents");
@@ -211,8 +217,8 @@ fn build(ctx) {
     let iso_contents = join_path(BUILD_DIR, "iso-contents");
     let rootfs = join_path(BUILD_DIR, "rootfs-minimal");
 
-    _require_preseeded_iso(iso, FEDORA_PRESEED_ISO);
-    _ensure_trusted_iso(BUILD_DIR, iso, FEDORA_SHA256, FEDORA_TRUST_DIR, FEDORA_PRESEED_ISO);
+    _require_preseeded_iso(iso, ctx.preseed_iso_path);
+    _ensure_trusted_iso(BUILD_DIR, iso, ctx.sha256, ctx.trust_dir, ctx.preseed_iso_path);
 
     if !is_dir(join_path(iso_contents, "Packages")) && !is_dir(join_path(iso_contents, "os/Packages")) {
         log("Extracting Fedora ISO contents...");

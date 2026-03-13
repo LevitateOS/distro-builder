@@ -1,28 +1,26 @@
 // Canonical Rocky ISO preseed recipe for Stage 01 source producer flows.
 //
 // This recipe performs explicit trusted acquisition into the canonical cache:
-//   .artifacts/work/<distro>/downloads/Rocky-10.1-x86_64-dvd1.iso
+//   BUILD_DIR/Rocky-10.1-x86_64-dvd1.iso
 //
-// Required defines:
-// - ROCKY_ISO_NAME
-// - ROCKY_SHA256
-// - ROCKY_SHA256_URL
-// - ROCKY_TORRENT_URL
-// - ROCKY_PRESEED_ISO
-// - ROCKY_TRUST_DIR
+// Canonical artifact:
+// - Rocky-10.1-x86_64-dvd1.iso
+// - SHA256: 55f96d45a052c0ed4f06309480155cb66281a008691eb7f3f359957205b1849a
+// - CHECKSUM: https://download.rockylinux.org/pub/rocky/10/isos/x86_64/CHECKSUM
+// - Torrent: https://download.rockylinux.org/pub/rocky/10/isos/x86_64/Rocky-10.1-x86_64-dvd1.torrent
 //
 // Optional env:
 // - ROCKY_FORCE_REFRESH=1 (remove existing ISO and download again)
 
 let ctx = #{
     description: "Canonical Rocky ISO preseed",
-    iso_name: ROCKY_ISO_NAME,
-    iso_path: ROCKY_PRESEED_ISO,
+    iso_name: "Rocky-10.1-x86_64-dvd1.iso",
+    iso_path: join_path(BUILD_DIR, "Rocky-10.1-x86_64-dvd1.iso"),
     name: "rocky-preseed-iso",
-    sha256: ROCKY_SHA256,
-    sha256_url: ROCKY_SHA256_URL,
-    torrent_url: ROCKY_TORRENT_URL,
-    trust_dir: ROCKY_TRUST_DIR,
+    sha256: "55f96d45a052c0ed4f06309480155cb66281a008691eb7f3f359957205b1849a",
+    sha256_url: "https://download.rockylinux.org/pub/rocky/10/isos/x86_64/CHECKSUM",
+    torrent_url: "https://download.rockylinux.org/pub/rocky/10/isos/x86_64/Rocky-10.1-x86_64-dvd1.torrent",
+    trust_dir: BUILD_DIR,
 };
 
 fn _verify_marker_path(trust_dir) {

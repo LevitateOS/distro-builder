@@ -2,30 +2,36 @@
 //
 // Rule boundary (strict):
 // - This recipe never downloads/re-downloads the Rocky DVD in stage builds.
-// - It requires a preseeded ISO at BUILD_DIR/ROCKY_ISO_NAME.
+// - It requires a preseeded ISO in the canonical sibling downloads cache.
 // - It requires a trust marker; no repeated checksum in normal iterations.
-//
-// Required defines:
-// - ROCKY_ISO_NAME
-// - ROCKY_SHA256
-// - ROCKY_SHA256_URL
-// - ROCKY_TORRENT_URL
-// - ROCKY_PRESEED_ISO
-// - ROCKY_TRUST_DIR
 
 let deps = ["rocky-deps"];
 
+fn _work_root(build_dir) {
+    dirname(dirname(build_dir))
+}
+
+fn _downloads_dir(build_dir) {
+    let parent = dirname(build_dir);
+    if basename(parent) == "stage01-rootfs-provider" {
+        return join_path(dirname(parent), "downloads");
+    }
+    join_path(parent, "downloads")
+}
+
 let ctx = #{
     description: "Rocky rootfs producer for Levitate Stage 01",
-    iso_contents_path: "/data/vince/LevitateOS/.artifacts/work/levitate/stage01-rootfs-provider/rocky/iso-contents",
+    iso_contents_path: join_path(BUILD_DIR, "iso-contents"),
     iso_name: "Rocky-10.1-x86_64-dvd1.iso",
-    iso_path: "/data/vince/LevitateOS/.artifacts/work/levitate/stage01-rootfs-provider/rocky/Rocky-10.1-x86_64-dvd1.iso",
+    iso_path: join_path(BUILD_DIR, "Rocky-10.1-x86_64-dvd1.iso"),
     name: "rocky-stage01-rootfs",
-    rootfs_path: "/data/vince/LevitateOS/.artifacts/work/levitate/stage01-rootfs-provider/rocky/rootfs-minimal",
+    preseed_iso_path: join_path(_downloads_dir(BUILD_DIR), "Rocky-10.1-x86_64-dvd1.iso"),
+    rootfs_path: join_path(BUILD_DIR, "rootfs-minimal"),
     rootfs_recipe_version: "s01-minimal-v22",
     sha256: "55f96d45a052c0ed4f06309480155cb66281a008691eb7f3f359957205b1849a",
     sha256_url: "https://download.rockylinux.org/pub/rocky/10/isos/x86_64/CHECKSUM",
     torrent_url: "https://download.rockylinux.org/pub/rocky/10/isos/x86_64/Rocky-10.1-x86_64-dvd1.torrent",
+    trust_dir: _downloads_dir(BUILD_DIR),
 };
 
 fn _verify_marker_path(trust_dir) {
@@ -143,8 +149,8 @@ fn _extract_rpm_into_rootfs(rootfs, rpm_path) {
 
 fn is_acquired(ctx) {
     let iso = join_path(BUILD_DIR, ctx.iso_name);
-    _require_preseeded_iso(iso, ROCKY_PRESEED_ISO);
-    _ensure_trusted_iso(BUILD_DIR, iso, ROCKY_SHA256, ROCKY_TRUST_DIR, ROCKY_PRESEED_ISO);
+    _require_preseeded_iso(iso, ctx.preseed_iso_path);
+    _ensure_trusted_iso(BUILD_DIR, iso, ctx.sha256, ctx.trust_dir, ctx.preseed_iso_path);
 
     ctx.iso_path = iso;
     ctx.iso_contents_path = join_path(BUILD_DIR, "iso-contents");
@@ -155,8 +161,8 @@ fn is_acquired(ctx) {
 fn acquire(ctx) {
     mkdir(BUILD_DIR);
     let iso = join_path(BUILD_DIR, ctx.iso_name);
-    _require_preseeded_iso(iso, ROCKY_PRESEED_ISO);
-    _ensure_trusted_iso(BUILD_DIR, iso, ROCKY_SHA256, ROCKY_TRUST_DIR, ROCKY_PRESEED_ISO);
+    _require_preseeded_iso(iso, ctx.preseed_iso_path);
+    _ensure_trusted_iso(BUILD_DIR, iso, ctx.sha256, ctx.trust_dir, ctx.preseed_iso_path);
 
     ctx.iso_path = iso;
     ctx.iso_contents_path = join_path(BUILD_DIR, "iso-contents");
@@ -237,8 +243,8 @@ fn build(ctx) {
     let iso_contents = join_path(BUILD_DIR, "iso-contents");
     let rootfs = join_path(BUILD_DIR, "rootfs-minimal");
 
-    _require_preseeded_iso(iso, ROCKY_PRESEED_ISO);
-    _ensure_trusted_iso(BUILD_DIR, iso, ROCKY_SHA256, ROCKY_TRUST_DIR, ROCKY_PRESEED_ISO);
+    _require_preseeded_iso(iso, ctx.preseed_iso_path);
+    _ensure_trusted_iso(BUILD_DIR, iso, ctx.sha256, ctx.trust_dir, ctx.preseed_iso_path);
 
     if !is_dir(join_path(iso_contents, "BaseOS/Packages")) || !is_dir(join_path(iso_contents, "AppStream/Packages")) {
         log("Extracting Rocky ISO contents...");

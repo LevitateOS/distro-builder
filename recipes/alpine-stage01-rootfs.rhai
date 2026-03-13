@@ -3,37 +3,46 @@
 // Produces:
 // - BUILD_DIR/rootfs
 //
-// Required defines:
-// - ALPINE_RELEASE_BRANCH (example: v3.23)
-// - ALPINE_EXTENDED_VERSION (example: 3.23.2)
-// - ALPINE_EXTENDED_SHA256
-// - ALPINE_APK_TOOLS_VERSION (example: 3.0.4-r0)
-// - ALPINE_APK_TOOLS_SHA256
-// - ALPINE_STAGE01_PROFILE (example: iuppiter|acorn)
-// - ALPINE_PRESEED_ISO
-// - ALPINE_PRESEED_APK_TOOLS
-// - ALPINE_TRUST_DIR
-//
 // This recipe intentionally keeps all outputs under BUILD_DIR so Stage 01 can
 // consume it through non-legacy rootfs_source wiring.
 // Stage builds never download/redownload Alpine assets.
 
+fn _work_root(build_dir) {
+    dirname(dirname(build_dir))
+}
+
+fn _downloads_dir(build_dir) {
+    let parent = dirname(build_dir);
+    if basename(parent) == "stage01-rootfs-provider" {
+        return join_path(dirname(parent), "downloads");
+    }
+    join_path(parent, "downloads")
+}
+
+fn _default_profile(build_dir) {
+    let distro = basename(_work_root(build_dir)).to_lower();
+    if distro == "acorn" {
+        return "acorn";
+    }
+    "iuppiter"
+}
+
 let ctx = #{
-    alpine_version: ALPINE_EXTENDED_VERSION,
+    alpine_version: "3.23.2",
     apk_static_path: "",
-    apk_tools_preseed_path: ALPINE_PRESEED_APK_TOOLS,
-    apk_tools_sha256: ALPINE_APK_TOOLS_SHA256,
-    apk_tools_version: ALPINE_APK_TOOLS_VERSION,
+    apk_tools_preseed_path: join_path(_downloads_dir(BUILD_DIR), "apk-tools-static-3.0.5-r0.apk"),
+    apk_tools_sha256: "6e832468b4efebd6ab7245e4989ca38b6e4589a9772d52a03b58c690a7aeacbe",
+    apk_tools_version: "3.0.5-r0",
     description: "Alpine Stage 01 rootfs source producer",
     iso_path: "",
-    iso_preseed_path: ALPINE_PRESEED_ISO,
-    iso_sha256: ALPINE_EXTENDED_SHA256,
+    iso_preseed_path: join_path(_downloads_dir(BUILD_DIR), "alpine-extended-3.23.2-x86_64.iso"),
+    iso_sha256: "8d50854936dba58e7616ac3bfa07ad67dac0347305fec1cba6d288cf5df1577d",
     name: "alpine-stage01-rootfs",
-    profile: ALPINE_STAGE01_PROFILE,
-    release_branch: ALPINE_RELEASE_BRANCH,
+    profile: _default_profile(BUILD_DIR),
+    release_branch: "v3.23",
     rootfs_path: "",
     rootfs_recipe_version: "alpine-stage01-v5",
-    trust_dir: ALPINE_TRUST_DIR,
+    trust_dir: _downloads_dir(BUILD_DIR),
 };
 
 fn _iso_name(ctx) {

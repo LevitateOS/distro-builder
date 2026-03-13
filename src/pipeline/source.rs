@@ -6,12 +6,8 @@ use std::path::{Path, PathBuf};
 
 use crate::pipeline::paths::{normalize_distro_id, resolve_repo_path};
 use crate::pipeline::plan::ensure_non_legacy_rootfs_source;
-use crate::recipe::alpine_stage01::{
-    augment_defines_with_preseed_paths, is_alpine_stage01_recipe, preseed_spec_from_defines,
-};
 use crate::recipe::rocky_stage01::{
-    materialize_rootfs, materialize_rootfs_from_recipe, RockyStage01RecipeSpec,
-    Stage01RootfsRecipeSpec,
+    materialize_rootfs_from_recipe, Stage01RootfsRecipeSpec,
 };
 
 #[derive(Debug, Clone)]
@@ -106,32 +102,20 @@ pub(crate) fn materialize_source_rootfs(
     source_policy: &Option<S01RootfsSourcePolicy>,
 ) -> Result<PathBuf> {
     match source_policy {
-        Some(S01RootfsSourcePolicy::RecipeRocky {
-            recipe_script,
-            iso_name,
-            sha256,
-            sha256_url,
-            torrent_url,
-        }) => {
+        Some(S01RootfsSourcePolicy::RecipeRocky { recipe_script, .. }) => {
             let build_dir = rootfs_provider_work_dir(repo_root, distro_id)?.join("rocky");
-            let work_downloads_dir = downloads_work_dir(repo_root, distro_id)?;
             fs::create_dir_all(&build_dir).with_context(|| {
                 format!(
                     "creating Stage 01 Rocky source provider directory '{}'",
                     build_dir.display()
                 )
             })?;
-            let source_rootfs_dir = materialize_rootfs(
+            let source_rootfs_dir = materialize_rootfs_from_recipe(
                 repo_root,
                 &build_dir,
-                &RockyStage01RecipeSpec {
+                &Stage01RootfsRecipeSpec {
                     recipe_script: recipe_script.clone(),
-                    iso_name: iso_name.clone(),
-                    sha256: sha256.clone(),
-                    sha256_url: sha256_url.clone(),
-                    torrent_url: torrent_url.clone(),
-                    preseed_iso_path: work_downloads_dir.join(iso_name),
-                    trust_dir: work_downloads_dir,
+                    defines: BTreeMap::new(),
                 },
             )
             .with_context(|| {
@@ -154,19 +138,12 @@ pub(crate) fn materialize_source_rootfs(
                     build_dir.display()
                 )
             })?;
-            let recipe_defines = if is_alpine_stage01_recipe(recipe_script) {
-                let preseed_spec = preseed_spec_from_defines(repo_root, distro_id, defines)?;
-                augment_defines_with_preseed_paths(defines, &preseed_spec)
-            } else {
-                defines.clone()
-            };
-
             let source_rootfs_dir = materialize_rootfs_from_recipe(
                 repo_root,
                 &build_dir,
                 &Stage01RootfsRecipeSpec {
                     recipe_script: recipe_script.clone(),
-                    defines: recipe_defines,
+                    defines: defines.clone(),
                 },
             )
             .with_context(|| {
@@ -209,6 +186,7 @@ fn rootfs_provider_work_dir(repo_root: &Path, distro_id: &str) -> Result<PathBuf
     Ok(provider_dir)
 }
 
+#[cfg(test)]
 fn downloads_work_dir(repo_root: &Path, distro_id: &str) -> Result<PathBuf> {
     let normalized = normalize_distro_id(distro_id, "work downloads directory")?;
     let downloads = repo_root

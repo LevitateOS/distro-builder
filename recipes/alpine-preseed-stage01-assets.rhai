@@ -1,34 +1,31 @@
 // Canonical Alpine Stage 01 preseed recipe.
 //
 // This recipe performs explicit trusted acquisition into the canonical cache:
-//   .artifacts/work/<distro>/downloads/
+//   BUILD_DIR/
 //     alpine-extended-<version>-x86_64.iso
 //     apk-tools-static-<version>.apk
 //
-// Required defines:
-// - ALPINE_RELEASE_BRANCH
-// - ALPINE_EXTENDED_VERSION
-// - ALPINE_EXTENDED_SHA256
-// - ALPINE_APK_TOOLS_VERSION
-// - ALPINE_APK_TOOLS_SHA256
-// - ALPINE_PRESEED_ISO
-// - ALPINE_PRESEED_APK_TOOLS
-// - ALPINE_TRUST_DIR
+// Current canonical assets:
+// - release branch: v3.23
+// - alpine-extended-3.23.2-x86_64.iso
+// - ISO SHA256: 8d50854936dba58e7616ac3bfa07ad67dac0347305fec1cba6d288cf5df1577d
+// - apk-tools-static-3.0.5-r0.apk
+// - apk-tools SHA256: 6e832468b4efebd6ab7245e4989ca38b6e4589a9772d52a03b58c690a7aeacbe
 //
 // Optional env:
 // - ALPINE_FORCE_REFRESH=1 (remove existing assets and download again)
 
 let ctx = #{
-    apk_tools_path: ALPINE_PRESEED_APK_TOOLS,
-    apk_tools_sha256: ALPINE_APK_TOOLS_SHA256,
-    apk_tools_version: ALPINE_APK_TOOLS_VERSION,
+    apk_tools_path: join_path(BUILD_DIR, "apk-tools-static-3.0.5-r0.apk"),
+    apk_tools_sha256: "6e832468b4efebd6ab7245e4989ca38b6e4589a9772d52a03b58c690a7aeacbe",
+    apk_tools_version: "3.0.5-r0",
     description: "Canonical Alpine Stage 01 preseed",
-    iso_path: ALPINE_PRESEED_ISO,
-    iso_sha256: ALPINE_EXTENDED_SHA256,
-    iso_version: ALPINE_EXTENDED_VERSION,
+    iso_path: join_path(BUILD_DIR, "alpine-extended-3.23.2-x86_64.iso"),
+    iso_sha256: "8d50854936dba58e7616ac3bfa07ad67dac0347305fec1cba6d288cf5df1577d",
+    iso_version: "3.23.2",
     name: "alpine-preseed-stage01-assets",
-    release_branch: ALPINE_RELEASE_BRANCH,
-    trust_dir: ALPINE_TRUST_DIR,
+    release_branch: "v3.23",
+    trust_dir: BUILD_DIR,
 };
 
 fn _iso_name(ctx) {

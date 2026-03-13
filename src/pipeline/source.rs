@@ -6,14 +6,13 @@ use std::path::{Path, PathBuf};
 
 use crate::pipeline::paths::{normalize_distro_id, resolve_repo_path};
 use crate::pipeline::plan::ensure_non_legacy_rootfs_source;
-use crate::recipe::rocky_stage01::{
-    materialize_rootfs_from_recipe, Stage01RootfsRecipeSpec,
-};
+use crate::recipe::stage01_source::{materialize_rootfs_from_recipe, Stage01RootfsRecipeSpec};
 
 #[derive(Debug, Clone)]
 pub(crate) enum S01RootfsSourcePolicy {
-    RecipeRocky {
+    RecipeRpmDvd {
         recipe_script: PathBuf,
+        preseed_recipe_script: PathBuf,
     },
     RecipeCustom {
         recipe_script: PathBuf,
@@ -26,6 +25,7 @@ pub(crate) enum S01RootfsSourcePolicy {
 pub(crate) struct S01RootfsSourceToml {
     kind: String,
     recipe_script: String,
+    preseed_recipe_script: Option<String>,
     #[serde(rename = "iso_name")]
     _legacy_iso_name: Option<String>,
     #[serde(rename = "sha256")]
@@ -47,10 +47,21 @@ pub(crate) fn parse_rootfs_source_policy(
     };
 
     match source.kind.trim().to_ascii_lowercase().as_str() {
-        "recipe_rocky" => {
+        "recipe_rpm_dvd" | "recipe_rocky" => {
             let recipe_script = resolve_repo_path(repo_root, source.recipe_script.trim());
-            Ok(Some(S01RootfsSourcePolicy::RecipeRocky {
+            let preseed_recipe_script = match source.preseed_recipe_script {
+                Some(script) => resolve_repo_path(repo_root, script.trim()),
+                None if source.kind.trim().eq_ignore_ascii_case("recipe_rocky") => {
+                    resolve_repo_path(repo_root, "distro-builder/recipes/rocky-preseed-iso.rhai")
+                }
+                None => bail!(
+                    "invalid Stage 01 config '{}': rootfs_source.preseed_recipe_script is required for kind='recipe_rpm_dvd'",
+                    config_path.display()
+                ),
+            };
+            Ok(Some(S01RootfsSourcePolicy::RecipeRpmDvd {
                 recipe_script,
+                preseed_recipe_script,
             }))
         }
         "recipe_custom" => {
@@ -74,7 +85,7 @@ pub(crate) fn materialize_source_rootfs(
     source_policy: &Option<S01RootfsSourcePolicy>,
 ) -> Result<PathBuf> {
     match source_policy {
-        Some(S01RootfsSourcePolicy::RecipeRocky { recipe_script, .. }) => {
+        Some(S01RootfsSourcePolicy::RecipeRpmDvd { recipe_script, .. }) => {
             let build_dir = rootfs_provider_recipe_work_dir(repo_root, distro_id, recipe_script)?;
             fs::create_dir_all(&build_dir).with_context(|| {
                 format!(
@@ -196,6 +207,7 @@ mod tests {
         let source = S01RootfsSourceToml {
             kind: "recipe_custom".to_string(),
             recipe_script: "distro-builder/recipes/custom-stage01-rootfs.rhai".to_string(),
+            preseed_recipe_script: None,
             _legacy_iso_name: None,
             _legacy_sha256: None,
             _legacy_sha256_url: None,
@@ -219,10 +231,11 @@ mod tests {
     }
 
     #[test]
-    fn rootfs_source_policy_accepts_rocky_recipe_without_metadata_fields() {
+    fn rootfs_source_policy_accepts_legacy_recipe_rocky_without_metadata_fields() {
         let source = S01RootfsSourceToml {
             kind: "recipe_rocky".to_string(),
             recipe_script: "distro-builder/recipes/rocky-stage01-rootfs.rhai".to_string(),
+            preseed_recipe_script: None,
             _legacy_iso_name: None,
             _legacy_sha256: None,
             _legacy_sha256_url: None,
@@ -238,7 +251,34 @@ mod tests {
 
         assert!(matches!(
             policy,
-            Some(S01RootfsSourcePolicy::RecipeRocky { .. })
+            Some(S01RootfsSourcePolicy::RecipeRpmDvd { .. })
+        ));
+    }
+
+    #[test]
+    fn rootfs_source_policy_accepts_neutral_rpm_dvd_kind() {
+        let source = S01RootfsSourceToml {
+            kind: "recipe_rpm_dvd".to_string(),
+            recipe_script: "distro-builder/recipes/fedora-stage01-rootfs.rhai".to_string(),
+            preseed_recipe_script: Some(
+                "distro-builder/recipes/fedora-preseed-iso.rhai".to_string(),
+            ),
+            _legacy_iso_name: None,
+            _legacy_sha256: None,
+            _legacy_sha256_url: None,
+            _legacy_torrent_url: None,
+            defines: None,
+        };
+        let policy = parse_rootfs_source_policy(
+            Path::new("."),
+            &PathBuf::from("distro-variants/levitate/01Boot.toml"),
+            Some(source),
+        )
+        .expect("parsing recipe_rpm_dvd must succeed");
+
+        assert!(matches!(
+            policy,
+            Some(S01RootfsSourcePolicy::RecipeRpmDvd { .. })
         ));
     }
 

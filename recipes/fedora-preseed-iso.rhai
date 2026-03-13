@@ -15,6 +15,7 @@
 // - verify the local ISO content and write a local trust marker
 //
 // Optional env:
+// - STAGE01_SOURCE_FORCE_REFRESH=1 (generic Stage 01 source refresh request)
 // - FEDORA_FORCE_REFRESH=1 (remove existing ISO and download again)
 
 let ctx = #{
@@ -54,7 +55,7 @@ fn _write_verify_marker(trust_dir, iso_path, sha256) {
 }
 
 fn _refresh_requested() {
-    trim(shell_output("printf '%s' \"${FEDORA_FORCE_REFRESH:-0}\"")) == "1"
+    trim(shell_output("printf '%s' \"${STAGE01_SOURCE_FORCE_REFRESH:-${FEDORA_FORCE_REFRESH:-0}}\"")) == "1"
 }
 
 fn _ensure_parent_dir(path) {
@@ -112,7 +113,7 @@ fn acquire(ctx) {
     mkdir(ctx.trust_dir);
 
     if _refresh_requested() && is_file(ctx.iso_path) {
-        log("FEDORA_FORCE_REFRESH=1: removing existing Fedora ISO before trusted acquisition");
+        log("Stage 01 source refresh requested: removing existing Fedora ISO before trusted acquisition");
         rm(ctx.iso_path);
     }
 

@@ -65,11 +65,22 @@ impl S01BootInputSpec {
         &self.required_services
     }
 
-    pub fn uses_rocky_rootfs_source(&self) -> bool {
+    pub fn uses_rpm_dvd_rootfs_source(&self) -> bool {
         matches!(
             self.rootfs_source_policy,
-            Some(S01RootfsSourcePolicy::RecipeRocky { .. })
+            Some(S01RootfsSourcePolicy::RecipeRpmDvd { .. })
         )
+    }
+
+    pub fn rpm_dvd_preseed_recipe_script(&self) -> Option<&Path> {
+        let Some(S01RootfsSourcePolicy::RecipeRpmDvd {
+            preseed_recipe_script,
+            ..
+        }) = &self.rootfs_source_policy
+        else {
+            return None;
+        };
+        Some(preseed_recipe_script.as_path())
     }
 
     pub fn uses_alpine_stage01_rootfs_source(&self) -> bool {

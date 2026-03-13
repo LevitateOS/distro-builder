@@ -3,7 +3,7 @@ use std::{fs, path::PathBuf};
 
 use anyhow::{bail, Context, Result};
 use distro_builder::recipe::alpine_stage01::preseed_alpine_stage01_assets;
-use distro_builder::recipe::rocky_stage01::preseed_rocky_iso;
+use distro_builder::recipe::stage01_source::preseed_stage01_dvd;
 use distro_builder::stages::s01_boot_inputs::{
     load_s00_build_input_spec, load_s01_boot_input_spec,
     prepare_s00_build_inputs as prepare_s00_build_inputs_for_distro,
@@ -217,8 +217,13 @@ pub(crate) fn preseed_stage01_source_cmd(distro_id: &str, refresh: bool) -> Resu
     let s01_spec = load_s01_boot_input_spec(&bundle.repo_root, &bundle.variant_dir, distro_id)
         .with_context(|| format!("loading 01Boot config for '{}'", distro_id))?;
 
-    if s01_spec.uses_rocky_rootfs_source() {
-        let iso_path = preseed_rocky_iso(&bundle.repo_root, distro_id, refresh)
+    if let Some(preseed_recipe_script) = s01_spec.rpm_dvd_preseed_recipe_script() {
+        let iso_path = preseed_stage01_dvd(
+            &bundle.repo_root,
+            distro_id,
+            preseed_recipe_script,
+            refresh,
+        )
             .with_context(|| format!("preseeding Stage 01 source for '{}'", distro_id))?;
         let trust_dir = iso_path
             .parent()

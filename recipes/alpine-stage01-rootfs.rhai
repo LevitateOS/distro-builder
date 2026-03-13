@@ -259,7 +259,7 @@ fn _ensure_openrc_stage01_completeness(rootfs) {
 }
 
 fn is_acquired(ctx) {
-    let remediation = "Run 'cargo run -p distro-builder --bin distro-builder -- artifact preseed-alpine-stage01-assets " + ctx.profile + " --refresh'";
+    let remediation = "Run 'cargo run -p distro-builder --bin distro-builder -- artifact preseed-stage01-source " + ctx.profile + " --refresh'";
     let iso_path = join_path(BUILD_DIR, _iso_name(ctx));
     _require_preseeded_asset(iso_path, ctx.iso_preseed_path, "Alpine ISO", remediation);
     _require_trusted_preseed_assets(ctx, remediation);
@@ -283,7 +283,7 @@ fn is_acquired(ctx) {
 }
 
 fn acquire(ctx) {
-    let remediation = "Run 'cargo run -p distro-builder --bin distro-builder -- artifact preseed-alpine-stage01-assets " + ctx.profile + " --refresh'";
+    let remediation = "Run 'cargo run -p distro-builder --bin distro-builder -- artifact preseed-stage01-source " + ctx.profile + " --refresh'";
     mkdir(BUILD_DIR);
     let iso_dest = join_path(BUILD_DIR, _iso_name(ctx));
     _require_preseeded_asset(iso_dest, ctx.iso_preseed_path, "Alpine ISO", remediation);

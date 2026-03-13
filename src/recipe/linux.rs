@@ -27,12 +27,12 @@ impl LinuxPaths {
 ///
 /// # Arguments
 /// * `base_dir` - distro crate root (e.g., `/path/to/AcornOS`)
-/// * `kernel_source` - Kernel spec from distro-spec (version, sha256, localversion)
-/// * `module_install_path` - module install path from distro-spec (e.g. /lib/modules or /usr/lib/modules)
+/// * `_kernel_source` - Legacy compatibility parameter; canonical kernel facts live in recipe
+/// * `_module_install_path` - Legacy compatibility parameter; canonical module layout lives in recipe
 pub fn linux(
     base_dir: &Path,
-    kernel_source: &KernelSource,
-    module_install_path: &str,
+    _kernel_source: &KernelSource,
+    _module_install_path: &str,
 ) -> Result<LinuxPaths> {
     let monorepo_dir = base_dir
         .parent()
@@ -66,16 +66,10 @@ pub fn linux(
     }
     let recipe_path = shared_recipe;
 
-    // Inject kernel spec from distro-spec SSOT
     let kconfig_path = base_dir.join("kconfig").to_string_lossy().to_string();
     let defines: Vec<(&str, &str)> = vec![
-        ("KERNEL_VERSION", kernel_source.version),
-        ("KERNEL_SHA256", kernel_source.sha256),
-        ("KERNEL_LOCALVERSION", kernel_source.localversion),
         ("KERNEL_KCONFIG_PATH", &kconfig_path),
         ("KERNEL_ARTIFACT_ROOT", &kernel_artifact_root),
-        ("KERNEL_FORCE_REBUILD", "0"),
-        ("MODULE_INSTALL_PATH", module_install_path),
     ];
 
     // Find and run recipe, parse JSON output
@@ -95,10 +89,7 @@ pub fn linux(
     let source = ctx["source_path"]
         .as_str()
         .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            // Fallback: use SSOT version from distro-spec
-            downloads_dir.join(kernel_source.source_dir_name())
-        });
+        .unwrap_or_else(|| discover_linux_source_dir(&downloads_dir));
 
     let version = ctx["kernel_version"]
         .as_str()
@@ -112,6 +103,22 @@ pub fn linux(
         vmlinuz,
         version,
     })
+}
+
+fn discover_linux_source_dir(downloads_dir: &Path) -> PathBuf {
+    if let Ok(entries) = std::fs::read_dir(downloads_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let name = entry.file_name();
+            if let Some(name_str) = name.to_str() {
+                if name_str.starts_with("linux-") && path.join("Makefile").exists() {
+                    return path;
+                }
+            }
+        }
+    }
+
+    downloads_dir.join("linux-source")
 }
 
 /// Check if Linux source is available (without running the full recipe).

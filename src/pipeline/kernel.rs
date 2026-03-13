@@ -8,10 +8,6 @@ use crate::pipeline::paths::normalize_distro_id;
 pub struct KernelSpec {
     pub recipe_kernel_script: String,
     pub kernel_kconfig_path: String,
-    pub kernel_version: String,
-    pub kernel_sha256: String,
-    pub kernel_localversion: String,
-    pub module_install_path: String,
 }
 
 #[derive(Debug, Clone)]
@@ -54,7 +50,7 @@ pub fn check_kernel_installed_with_recipe(
     let recipe_bin = crate::recipe::find_recipe(repo_root)
         .context("Resolving recipe binary for build kernel")?;
     let kernel_artifact_root = kernel_output_dir.to_string_lossy().to_string();
-    let defines = kernel_recipe_defines(spec, &kernel_kconfig_path, &kernel_artifact_root);
+    let defines = kernel_recipe_defines(&kernel_kconfig_path, &kernel_artifact_root);
     crate::recipe::run_recipe_phase_json_with_defines(
         &recipe_bin.path,
         "isinstalled",
@@ -151,17 +147,49 @@ fn work_dir_for_distro(repo_root: &Path, distro_id: &str) -> Result<PathBuf> {
 }
 
 fn kernel_recipe_defines<'a>(
-    spec: &'a KernelSpec,
     kernel_kconfig_path: &'a str,
     kernel_artifact_root: &'a str,
 ) -> Vec<(&'a str, &'a str)> {
     vec![
-        ("KERNEL_VERSION", spec.kernel_version.as_str()),
-        ("KERNEL_SHA256", spec.kernel_sha256.as_str()),
-        ("KERNEL_LOCALVERSION", spec.kernel_localversion.as_str()),
         ("KERNEL_KCONFIG_PATH", kernel_kconfig_path),
         ("KERNEL_ARTIFACT_ROOT", kernel_artifact_root),
-        ("KERNEL_FORCE_REBUILD", "0"),
-        ("MODULE_INSTALL_PATH", spec.module_install_path.as_str()),
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn kernel_recipe_defines_exclude_kernel_source_metadata() {
+        let defines = kernel_recipe_defines("distro-variants/levitate/kconfig", "/tmp/kernel");
+        assert_eq!(
+            defines,
+            vec![
+                ("KERNEL_KCONFIG_PATH", "distro-variants/levitate/kconfig"),
+                ("KERNEL_ARTIFACT_ROOT", "/tmp/kernel"),
+            ]
+        );
+    }
+
+    #[test]
+    fn work_dir_for_distro_normalizes_legacy_aliases() {
+        let unique = format!(
+            "levitateos-kernel-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        );
+        let repo_root = std::env::temp_dir().join(unique);
+        fs::create_dir_all(&repo_root).expect("create temp repo root");
+
+        let work_dir = work_dir_for_distro(&repo_root, "leviso").expect("resolve alias work dir");
+        assert!(
+            work_dir.ends_with(".artifacts/work/levitate/downloads"),
+            "expected normalized levitate kernel work dir, got {}",
+            work_dir.display()
+        );
+    }
 }

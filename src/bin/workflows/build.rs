@@ -113,20 +113,6 @@ pub(crate) fn build_one(distro_id: &str, stage: BuildStage) -> Result<()> {
             .stage_00_build
             .kernel_kconfig_path
             .clone(),
-        kernel_version: bundle.contract.stages.stage_00_build.kernel_version.clone(),
-        kernel_sha256: bundle.contract.stages.stage_00_build.kernel_sha256.clone(),
-        kernel_localversion: bundle
-            .contract
-            .stages
-            .stage_00_build
-            .kernel_localversion
-            .clone(),
-        module_install_path: bundle
-            .contract
-            .stages
-            .stage_00_build
-            .module_install_path
-            .clone(),
     };
 
     let created_at_utc = now_utc_compact()?;

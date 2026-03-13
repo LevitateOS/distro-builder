@@ -3,12 +3,11 @@
 // Linux kernel - single SSOT recipe for all distros
 //
 // This recipe intentionally contains the *shared* logic so all distros stay in parity.
-// Differences are injected via --define (from distro-spec):
-// - KERNEL_VERSION, KERNEL_SHA256, KERNEL_LOCALVERSION
-// - MODULE_INSTALL_PATH: "/lib/modules" (Alpine) or "/usr/lib/modules" (UsrMerge)
+// Kernel source facts are resolved inside the recipe from the canonical target
+// mapping in linux-base.rhai. Orchestrators provide only:
+// - KERNEL_KCONFIG_PATH: variant-owned kconfig path
 // - KERNEL_ARTIFACT_ROOT: canonical kernel artifact root directory
-//
-// Distro-specific knobs live in distro-spec + each distro's `kconfig`.
+// - KERNEL_FORCE_REBUILD: explicit rebuild policy
 
 // AUTOFIX_PROMPT: This recipe is the SSOT for all kernel builds. Keep distros in parity.
 // Only edit files under `distro-builder/recipes/` to fix the failure.
@@ -131,13 +130,8 @@ fn _apply_kconfig(src, build_dir, kconfig, kernel_localversion) {
             apply_one.call(f);
         }
 
-        // Enforce localversion from distro-spec (single SSOT).
-        // Kconfig may also set CONFIG_LOCALVERSION, but this wins.
-        //
-        // NOTE: recipe defines are injected as scope constants by the executor. In Rhai,
-        // scope constants are visible to the top-level phase functions, but not to helper
-        // functions called by those phase functions. So pass the define value in from
-        // `build(ctx)` rather than referencing it here.
+        // Enforce localversion from the canonical recipe spec. Kconfig may also
+        // set CONFIG_LOCALVERSION, but this wins.
         shell(src + "/scripts/config --file " + config_file + " --set-str CONFIG_LOCALVERSION " + kernel_localversion);
 
         log("Resolving config dependencies...");
@@ -196,14 +190,20 @@ fn _kernel_release_or_throw(build_dir, expected_version, expected_localversion) 
     rel
 }
 
+fn _kernel_force_rebuild_requested() {
+    trim(shell_output("printf '%s' \"${KERNEL_FORCE_REBUILD:-0}\"")) == "1"
+}
+
 // === OVERRIDES (explicit kernel root + usrmerge-aware install detection) ===
 
 fn is_built(ctx) {
+    ctx = _apply_kernel_spec(ctx, BUILD_DIR, KERNEL_KCONFIG_PATH);
+    let spec = _kernel_spec_or_throw(BUILD_DIR, KERNEL_KCONFIG_PATH);
     let kernel_root = _kernel_artifact_root_or_throw(KERNEL_ARTIFACT_ROOT);
     let build_dir = join_path(kernel_root, "kernel-build");
     let bzimage = join_path(build_dir, "arch/x86/boot/bzImage");
 
-    if KERNEL_FORCE_REBUILD == "1" {
+    if _kernel_force_rebuild_requested() {
         throw "force rebuild requested";
     }
 
@@ -211,14 +211,15 @@ fn is_built(ctx) {
         throw "kernel not built";
     }
 
-    // Ensure the build we found matches the distro-spec SSOT.
-    let rel = _kernel_release_or_throw(build_dir, KERNEL_VERSION, KERNEL_LOCALVERSION);
+    let rel = _kernel_release_or_throw(build_dir, spec.version, spec.localversion);
     ctx.kernel_version = rel;
     ctx.build_dir = build_dir;
     ctx
 }
 
 fn build(ctx) {
+    ctx = _apply_kernel_spec(ctx, BUILD_DIR, KERNEL_KCONFIG_PATH);
+    let spec = _kernel_spec_or_throw(BUILD_DIR, KERNEL_KCONFIG_PATH);
     let kconfig = if KERNEL_KCONFIG_PATH == "" {
         throw "KERNEL_KCONFIG_PATH is required";
     } else {
@@ -242,7 +243,7 @@ fn build(ctx) {
     log("  Output: " + build_dir);
 
     try {
-        _apply_kconfig(ctx.source_path, build_dir_tmp, kconfig, KERNEL_LOCALVERSION);
+        _apply_kconfig(ctx.source_path, build_dir_tmp, kconfig, spec.localversion);
 
         let jobs = trim(shell_output("nproc"));
         shell(_kernel_make_env_prefix() + "make -C " + ctx.source_path + " O=" + build_dir_tmp + " -j" + jobs);
@@ -262,17 +263,19 @@ fn build(ctx) {
 }
 
 fn is_installed(ctx) {
+    ctx = _apply_kernel_spec(ctx, BUILD_DIR, KERNEL_KCONFIG_PATH);
+    let spec = _kernel_spec_or_throw(BUILD_DIR, KERNEL_KCONFIG_PATH);
     let kernel_root = _kernel_artifact_root_or_throw(KERNEL_ARTIFACT_ROOT);
     let staging = join_path(kernel_root, "staging");
     let vmlinuz = join_path(staging, "boot/vmlinuz");
     let build_dir = join_path(kernel_root, "kernel-build");
-    let rel = _kernel_release_or_throw(build_dir, KERNEL_VERSION, KERNEL_LOCALVERSION);
+    let rel = _kernel_release_or_throw(build_dir, spec.version, spec.localversion);
 
-    if KERNEL_FORCE_REBUILD == "1" {
+    if _kernel_force_rebuild_requested() {
         throw "force rebuild requested";
     }
 
-    let modules = if MODULE_INSTALL_PATH == "/usr/lib/modules" {
+    let modules = if spec.module_install_path == "/usr/lib/modules" {
         join_path(staging, "usr/lib/modules/" + rel)
     } else {
         join_path(staging, "lib/modules/" + rel)
@@ -289,6 +292,8 @@ fn is_installed(ctx) {
 }
 
 fn install(ctx) {
+    ctx = _apply_kernel_spec(ctx, BUILD_DIR, KERNEL_KCONFIG_PATH);
+    let spec = _kernel_spec_or_throw(BUILD_DIR, KERNEL_KCONFIG_PATH);
     let kernel_root = _kernel_artifact_root_or_throw(KERNEL_ARTIFACT_ROOT);
     let staging = join_path(kernel_root, "staging");
     let staging_tmp = join_path(kernel_root, "staging.tmp");
@@ -319,7 +324,7 @@ fn install(ctx) {
 
         // Install modules via hookable helper
         log("  Installing modules...");
-        _install_modules(staging_tmp, source_path, build_dir, MODULE_INSTALL_PATH);
+        _install_modules(staging_tmp, source_path, build_dir, spec.module_install_path);
 
         // Get kernel version for cleanup
         let release_file = join_path(build_dir, "include/config/kernel.release");
@@ -329,7 +334,7 @@ fn install(ctx) {
         }
 
         // Post-install cleanup via hookable helper
-        _cleanup_modules(staging_tmp, version, MODULE_INSTALL_PATH);
+        _cleanup_modules(staging_tmp, version, spec.module_install_path);
         log("  Modules installed");
     } catch (e) {
         // Best-effort cleanup of temp outputs.

@@ -75,10 +75,10 @@ pub(crate) fn materialize_source_rootfs(
 ) -> Result<PathBuf> {
     match source_policy {
         Some(S01RootfsSourcePolicy::RecipeRocky { recipe_script, .. }) => {
-            let build_dir = rootfs_provider_work_dir(repo_root, distro_id)?.join("rocky");
+            let build_dir = rootfs_provider_recipe_work_dir(repo_root, distro_id, recipe_script)?;
             fs::create_dir_all(&build_dir).with_context(|| {
                 format!(
-                    "creating Stage 01 Rocky source provider directory '{}'",
+                    "creating Stage 01 recipe source provider directory '{}'",
                     build_dir.display()
                 )
             })?;
@@ -92,7 +92,7 @@ pub(crate) fn materialize_source_rootfs(
             )
             .with_context(|| {
                 format!(
-                    "materializing Stage 01 Rocky source rootfs for '{}'",
+                    "materializing Stage 01 recipe source rootfs for '{}'",
                     distro_id
                 )
             })?;
@@ -103,10 +103,10 @@ pub(crate) fn materialize_source_rootfs(
             recipe_script,
             defines,
         }) => {
-            let build_dir = rootfs_provider_work_dir(repo_root, distro_id)?.join("custom");
+            let build_dir = rootfs_provider_recipe_work_dir(repo_root, distro_id, recipe_script)?;
             fs::create_dir_all(&build_dir).with_context(|| {
                 format!(
-                    "creating Stage 01 custom source provider directory '{}'",
+                    "creating Stage 01 recipe source provider directory '{}'",
                     build_dir.display()
                 )
             })?;
@@ -120,7 +120,7 @@ pub(crate) fn materialize_source_rootfs(
             )
             .with_context(|| {
                 format!(
-                    "materializing Stage 01 custom source rootfs for '{}'",
+                    "materializing Stage 01 recipe source rootfs for '{}'",
                     distro_id
                 )
             })?;
@@ -156,6 +156,19 @@ fn rootfs_provider_work_dir(repo_root: &Path, distro_id: &str) -> Result<PathBuf
         )
     })?;
     Ok(provider_dir)
+}
+
+fn rootfs_provider_recipe_work_dir(
+    repo_root: &Path,
+    distro_id: &str,
+    recipe_script: &Path,
+) -> Result<PathBuf> {
+    let recipe_dir_name = recipe_script
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .filter(|stem| !stem.is_empty())
+        .unwrap_or("recipe");
+    Ok(rootfs_provider_work_dir(repo_root, distro_id)?.join(recipe_dir_name))
 }
 
 #[cfg(test)]

@@ -78,29 +78,41 @@ pub(crate) fn dispatch_non_iso_command(args: &[String]) -> Result<()> {
                 Path::new(output_dir),
             )
         }
+        [artifact, preseed_stage01, distro]
+            if artifact == "artifact" && preseed_stage01 == "preseed-stage01-source" =>
+        {
+            crate::workflows::preseed_stage01_source_cmd(distro, false)
+        }
+        [artifact, preseed_stage01, distro, refresh]
+            if artifact == "artifact"
+                && preseed_stage01 == "preseed-stage01-source"
+                && refresh == "--refresh" =>
+        {
+            crate::workflows::preseed_stage01_source_cmd(distro, true)
+        }
         [artifact, preseed_rocky, distro]
             if artifact == "artifact" && preseed_rocky == "preseed-rocky-iso" =>
         {
-            crate::workflows::preseed_rocky_iso_cmd(distro, false)
+            crate::workflows::preseed_stage01_source_cmd(distro, false)
         }
         [artifact, preseed_rocky, distro, refresh]
             if artifact == "artifact"
                 && preseed_rocky == "preseed-rocky-iso"
                 && refresh == "--refresh" =>
         {
-            crate::workflows::preseed_rocky_iso_cmd(distro, true)
+            crate::workflows::preseed_stage01_source_cmd(distro, true)
         }
         [artifact, preseed_alpine, distro]
             if artifact == "artifact" && preseed_alpine == "preseed-alpine-stage01-assets" =>
         {
-            crate::workflows::preseed_alpine_stage01_assets_cmd(distro, false)
+            crate::workflows::preseed_stage01_source_cmd(distro, false)
         }
         [artifact, preseed_alpine, distro, refresh]
             if artifact == "artifact"
                 && preseed_alpine == "preseed-alpine-stage01-assets"
                 && refresh == "--refresh" =>
         {
-            crate::workflows::preseed_alpine_stage01_assets_cmd(distro, true)
+            crate::workflows::preseed_stage01_source_cmd(distro, true)
         }
         _ => bail!(crate::usage()),
     };

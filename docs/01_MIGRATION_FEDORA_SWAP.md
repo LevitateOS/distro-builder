@@ -130,22 +130,24 @@ Exit criteria:
 
 ## Phase 3: Remove Rocky-Specific CLI and Diagnostics
 
-- [ ] Replace `preseed-rocky-iso` command names in:
+- [x] Replace the default public Stage 01 preseed command with `artifact preseed-stage01-source <distro> [--refresh]`.
+- [x] Replace `preseed-rocky-iso` command names in:
   - `distro-builder/src/bin/workflows/commands.rs`
   - `distro-builder/src/bin/workflows/mod.rs`
   - `distro-builder/src/bin/workflows/artifacts.rs`
   - `distro-builder/src/bin/distro-builder.rs`
-- [ ] Replace Rocky-only help text and error messages in the builder CLI.
-- [ ] Replace Rocky-only wording in Stage 01 diagnostics emitted during source preparation and preseed execution.
-- [ ] Audit any remaining `Rocky`-named user-facing output in the default builder path.
+- [x] Replace Rocky-only help text in the default builder CLI usage surface.
+- [x] Replace Rocky-only wording in default Stage 01 preseed diagnostics emitted by the builder path.
+- [x] Audit the default builder path so operators are not taught Rocky/Alpine-specific preseed commands.
+- [ ] Decide whether the explicit `preseed-rocky-iso` and `preseed-alpine-stage01-assets` aliases should be retained temporarily as compatibility commands or removed entirely in the next cleanup pass.
 
 Recommended command target:
 
-- use a neutral command such as `artifact preseed-stage01-dvd` or `artifact prepare-stage01-source`
+- use a neutral command such as `artifact preseed-stage01-source <distro>`
 
 Exit criteria:
 
-- a user can operate the Fedora-backed path without invoking Rocky-branded commands or reading Rocky-branded errors
+- a user can operate the Stage 01 source path through `artifact preseed-stage01-source <distro>` without invoking Rocky-branded commands
 
 ## Phase 4: Cleanup and Audit
 

@@ -11,30 +11,113 @@
 // - _install_modules(staging, source_path, build_dir) — how modules are installed
 // - _cleanup_modules(staging, version) — post-install module cleanup
 //
-// Requires --define: KERNEL_VERSION, KERNEL_SHA256, KERNEL_LOCALVERSION
+// Canonical kernel source metadata lives here in recipe space. Orchestrators
+// provide build topology like BUILD_DIR and kconfig/artifact paths, but they do
+// not own kernel version/SHA/localversion/module layout facts.
 
 let build_deps = ["linux-deps"];
 
 let ctx = #{
-    build_dir: "/data/vince/LevitateOS/.artifacts/kernel/levitate/current/kernel-build",
-    description: "Linux kernel (6.12.71)",
-    kernel_version: "6.12.71",
+    build_dir: "",
+    description: "Linux kernel",
+    kernel_version: "?",
     name: "linux",
-    source_dir_name: "linux-6.12.71",
-    source_path: "/data/vince/LevitateOS/.artifacts/work/levitate/downloads/linux-6.12.71",
-    tarball_filename: "linux-6.12.71.tar.xz",
-    tarball_url: "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.12.71.tar.xz",
+    kernel_localversion: "",
+    module_install_path: "/usr/lib/modules",
+    source_dir_name: "",
+    source_path: "",
+    tarball_filename: "",
+    tarball_url: "",
 };
 
-// This recipe is parameterized via `--define` and shared across multiple distros.
-// The executor persists `ctx` into the recipe file, so always re-derive define-dependent
-// fields on load and clear run-specific paths to avoid cross-distro contamination.
-let major = KERNEL_VERSION.split(".")[0];
-ctx.description = "Linux kernel (" + KERNEL_VERSION + ")";
-ctx.tarball_url = "https://cdn.kernel.org/pub/linux/kernel/v" + major + ".x/linux-" + KERNEL_VERSION + ".tar.xz";
-ctx.tarball_filename = "linux-" + KERNEL_VERSION + ".tar.xz";
-ctx.source_dir_name = "linux-" + KERNEL_VERSION;
-ctx.kernel_version = KERNEL_VERSION;
+fn _normalize_kernel_target(target) {
+    let normalized = target.to_lower();
+    if normalized == "levitate" || normalized == "leviso" {
+        return "levitate";
+    }
+    if normalized == "acorn" || normalized == "acornos" {
+        return "acorn";
+    }
+    if normalized == "iuppiter" || normalized == "iuppiteros" {
+        return "iuppiter";
+    }
+    if normalized == "ralph" || normalized == "ralphos" {
+        return "ralph";
+    }
+    ""
+}
+
+fn _kernel_target_or_throw(build_dir, kconfig_path) {
+    let build_target = _normalize_kernel_target(basename(dirname(build_dir)));
+    if build_target != "" {
+        return build_target;
+    }
+
+    if kconfig_path != "" {
+        let kconfig_target = _normalize_kernel_target(basename(dirname(kconfig_path)));
+        if kconfig_target != "" {
+            return kconfig_target;
+        }
+    }
+
+    throw "Cannot determine kernel target from build dir '" + build_dir + "'";
+}
+
+fn _kernel_spec_or_throw(build_dir, kconfig_path) {
+    let target = _kernel_target_or_throw(build_dir, kconfig_path);
+
+    if target == "levitate" {
+        return #{
+            version: "6.12.71",
+            sha256: "143e8bc76cc41f831b51aa5e75819bed55bed41f299d35922820f1d2d2b02600",
+            localversion: "-levitate",
+            module_install_path: "/usr/lib/modules",
+        };
+    }
+    if target == "acorn" {
+        return #{
+            version: "6.19",
+            sha256: "303079a8250b8f381f82b03f90463d12ac98d4f6b149b761ea75af1323521357",
+            localversion: "-acorn",
+            module_install_path: "/usr/lib/modules",
+        };
+    }
+    if target == "iuppiter" {
+        return #{
+            version: "6.12.71",
+            sha256: "143e8bc76cc41f831b51aa5e75819bed55bed41f299d35922820f1d2d2b02600",
+            localversion: "-iuppiter",
+            module_install_path: "/usr/lib/modules",
+        };
+    }
+    if target == "ralph" {
+        return #{
+            version: "6.12.71",
+            sha256: "143e8bc76cc41f831b51aa5e75819bed55bed41f299d35922820f1d2d2b02600",
+            localversion: "-ralph",
+            module_install_path: "/usr/lib/modules",
+        };
+    }
+
+    throw "No kernel recipe spec registered for target '" + target + "'";
+}
+
+fn _apply_kernel_spec(ctx, build_dir, kconfig_path) {
+    let spec = _kernel_spec_or_throw(build_dir, kconfig_path);
+    let major = spec.version.split(".")[0];
+    ctx.description = "Linux kernel (" + spec.version + ")";
+    ctx.kernel_localversion = spec.localversion;
+    ctx.kernel_version = spec.version;
+    ctx.module_install_path = spec.module_install_path;
+    ctx.source_dir_name = "linux-" + spec.version;
+    ctx.tarball_filename = "linux-" + spec.version + ".tar.xz";
+    ctx.tarball_url = "https://cdn.kernel.org/pub/linux/kernel/v" + major + ".x/linux-" + spec.version + ".tar.xz";
+    ctx
+}
+
+// The executor persists `ctx` into the recipe file. Clear run-specific paths on
+// load; canonical kernel metadata is re-derived inside each phase where
+// BUILD_DIR is available.
 ctx.source_path = "";
 ctx.build_dir = "";
 
@@ -84,6 +167,7 @@ fn _cleanup_modules(staging, version) {
 // === ACQUIRE ===
 
 fn is_acquired(ctx) {
+    ctx = _apply_kernel_spec(ctx, BUILD_DIR, KERNEL_KCONFIG_PATH);
     let tarball_source = join_path(BUILD_DIR, ctx.source_dir_name);
     if is_file(join_path(tarball_source, "Makefile")) {
         ctx.source_path = tarball_source;
@@ -93,7 +177,9 @@ fn is_acquired(ctx) {
 }
 
 fn acquire(ctx) {
+    ctx = _apply_kernel_spec(ctx, BUILD_DIR, KERNEL_KCONFIG_PATH);
     mkdir(BUILD_DIR);
+    let spec = _kernel_spec_or_throw(BUILD_DIR, KERNEL_KCONFIG_PATH);
 
     let tarball_path = join_path(BUILD_DIR, ctx.tarball_filename);
     let tarball_source = join_path(BUILD_DIR, ctx.source_dir_name);
@@ -105,7 +191,7 @@ fn acquire(ctx) {
         }
 
         log("Verifying SHA256...");
-        verify_sha256(tarball_path, KERNEL_SHA256);
+        verify_sha256(tarball_path, spec.sha256);
 
         log("Extracting kernel source...");
         shell("tar xf " + tarball_path + " -C " + BUILD_DIR);
@@ -123,6 +209,7 @@ fn acquire(ctx) {
 // === BUILD ===
 
 fn is_built(ctx) {
+    ctx = _apply_kernel_spec(ctx, BUILD_DIR, KERNEL_KCONFIG_PATH);
     let distro_dir = dirname(BUILD_DIR);
     let build_dir = join_path(distro_dir, "output/kernel-build");
     let bzimage = join_path(build_dir, "arch/x86/boot/bzImage");
@@ -136,6 +223,7 @@ fn is_built(ctx) {
 }
 
 fn build(ctx) {
+    ctx = _apply_kernel_spec(ctx, BUILD_DIR, KERNEL_KCONFIG_PATH);
     let distro_dir = dirname(BUILD_DIR);
     let kconfig = join_path(distro_dir, "kconfig");
     let build_dir = join_path(distro_dir, "output/kernel-build");
@@ -164,6 +252,7 @@ fn build(ctx) {
 // === INSTALL ===
 
 fn is_installed(ctx) {
+    ctx = _apply_kernel_spec(ctx, BUILD_DIR, KERNEL_KCONFIG_PATH);
     let distro_dir = dirname(BUILD_DIR);
     let staging = join_path(distro_dir, "output/staging");
     let vmlinuz = join_path(staging, "boot/vmlinuz");
@@ -180,6 +269,7 @@ fn is_installed(ctx) {
 }
 
 fn install(ctx) {
+    ctx = _apply_kernel_spec(ctx, BUILD_DIR, KERNEL_KCONFIG_PATH);
     let distro_dir = dirname(BUILD_DIR);
     let staging = join_path(distro_dir, "output/staging");
     let build_dir = ctx.build_dir;

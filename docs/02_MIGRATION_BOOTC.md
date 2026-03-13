@@ -1,39 +1,43 @@
 # 02 bootc Migration
 
-Status: stopped
+Status: cancelled
 
-## Purpose
+## X
 
-This document slot is reserved for the future migration from the current install/runtime/update assumptions toward a `bootc`-oriented model.
+X X X X X X X X X X X X X X X X X X X X X X X X X X X X X X X X X X X X X
+X                                                                         X
+X  THIS TRACK IS CANCELLED.                                               X
+X                                                                         X
+X  The repository is keeping the current A/B model instead of migrating   X
+X  LevitateOS/RalphOS/AcornOS/IuppiterOS to `bootc`.                      X
+X                                                                         X
+X  Do not start new `bootc` implementation work from this document.       X
+X                                                                         X
+X X X X X X X X X X X X X X X X X X X X X X X X X X X X X X X X X X X X X
 
-## Why It Is Stopped
+## Decision
 
-- The Fedora swap has landed, so the Stage 01 source path is no longer Rocky-specific.
-- The current repo still routes important install/runtime decisions through stage-numbered tests and legacy mutability compatibility paths.
-- Starting `bootc` now would risk mixing runtime-policy work with source-media migration and stage-model cleanup.
+The repo will keep its current A/B runtime/update model as the canonical direction.
 
-## What This Track Will Eventually Cover
+Reason:
 
-- replacing `ImmutableAb`-style install assumptions with a `bootc` runtime/update contract
-- moving Levitate/Ralph runtime policy away from legacy `rootfs_mutability` inference
-- auditing `bootctl` assumptions in install tests and distro boot specs
-- defining the release/product model needed for `bootc` outputs
+- `bootc` may fit the Levitate/Ralph family, but it is not justified as the universal backend for all variants.
+- AcornOS and IuppiterOS are Alpine/OpenRC/musl/EROFS-shaped and should not be forced into a Fedora/systemd-shaped migration by default.
+- A repo-wide runtime/update model matters more than switching to `bootc` for only part of the variant set.
 
-## Current Canonical Owners
+## What This Means
 
-- `distro-contract/src/schema.rs`
-- `distro-spec/src/conformance.rs`
-- `testing/install-tests/src/stages/mod.rs`
-- `testing/install-tests/src/steps/phase5_boot.rs`
-- `testing/install-tests/src/distro/levitate.rs`
-- `testing/install-tests/src/distro/ralph.rs`
-- `distro-spec/src/shared/boot.rs`
+- keep the current A/B implementation as the foundation
+- improve and harden the existing A/B contract/install/test model instead of replacing it with `bootc`
+- do not treat `bootc` as the default future path in migration planning
 
-## Entry Criteria
+## Follow-up Direction
 
-- Fedora swap is complete enough that the default source-media path is no longer Rocky-specific.
-- The repo is ready to make runtime/update policy explicit instead of inferring it from legacy mutability fields.
+If runtime/update work resumes, it should happen under an A/B-focused track, not under `bootc`.
 
-## Start Point When Resumed
+That future work should focus on:
 
-When this track resumes, the first concrete action should be to replace install-layout inference in `testing/install-tests/src/stages/mod.rs` with an explicit runtime/update contract field.
+- making the runtime/update contract explicit
+- removing legacy mutability inference
+- cleaning up installer/backend ownership
+- preserving one coherent model across all variants

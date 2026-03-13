@@ -9,8 +9,8 @@ This directory tracks the current high-level distro-builder migration work as nu
    Scope: replace the current Rocky Stage 01 DVD/rootfs source path with Fedora Server DVD sourcing for the Levitate/Ralph family.
 
 2. [02_MIGRATION_BOOTC.md](02_MIGRATION_BOOTC.md)
-   Status: stopped
-   Scope: future runtime/update migration to `bootc`.
+   Status: cancelled
+   Scope: cancelled; the repo is keeping the current A/B runtime/update model instead of migrating to `bootc`.
 
 3. [03_MIGRATION_STAGELESS.md](03_MIGRATION_STAGELESS.md)
    Status: stopped
@@ -18,11 +18,11 @@ This directory tracks the current high-level distro-builder migration work as nu
 
 ## Recommended Order
 
-1. Start `bootc` only after the Fedora source path is no longer Rocky-specific.
-2. Start the stageless/product-model migration only when the repo is ready to replace stage-numbered contracts and tests.
+1. Keep the current A/B runtime/update model and improve its contract/install/test ownership.
+2. Start the stageless/product-model migration only after the existing A/B/runtime contract is explicit enough that it will not just reintroduce old implicit behavior through a new surface.
 
 ## Why This Split Exists
 
 - The Fedora swap was the concrete near-term migration that unblocked the later tracks.
-- The `bootc` work is real, but should not start from stale Rocky- or A/B-framed assumptions.
+- The `bootc` track was evaluated and cancelled in favor of keeping the current A/B model.
 - The stageless/product-model migration is the largest architecture change and should not be half-started while Fedora source plumbing is still in flux.

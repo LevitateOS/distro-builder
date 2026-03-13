@@ -81,7 +81,7 @@ This crate is currently a **structural skeleton**. The abstractions are defined 
 - [docs/00_MIGRATION_INDEX.md](docs/00_MIGRATION_INDEX.md) - migration index for numbered distro-builder migration tracks
 - [docs/01_MIGRATION_FEDORA_SWAP.md](docs/01_MIGRATION_FEDORA_SWAP.md) - active Fedora Server DVD swap plan for the Levitate/Ralph Stage 01 source path
 - [docs/02_MIGRATION_BOOTC.md](docs/02_MIGRATION_BOOTC.md) - cancelled track; the repo is keeping the current A/B model instead of migrating to `bootc`
-- [docs/03_MIGRATION_STAGELESS.md](docs/03_MIGRATION_STAGELESS.md) - stopped placeholder for the future stageless/product-model migration
+- [docs/03_MIGRATION_STAGELESS.md](docs/03_MIGRATION_STAGELESS.md) - active migration plan for replacing stage-numbered composition with product-oriented ownership
 
 ## License
 

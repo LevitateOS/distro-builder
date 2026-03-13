@@ -13,16 +13,16 @@ This directory tracks the current high-level distro-builder migration work as nu
    Scope: cancelled; the repo is keeping the current A/B runtime/update model instead of migrating to `bootc`.
 
 3. [03_MIGRATION_STAGELESS.md](03_MIGRATION_STAGELESS.md)
-   Status: stopped
-   Scope: future removal of the current stage-numbered build model in favor of direct filesystem products and release engineering outputs.
+   Status: ready
+   Scope: active filesystem-first migration away from stage-numbered composition toward explicit products, artifact transforms, and release-engineering outputs.
 
 ## Recommended Order
 
-1. Keep the current A/B runtime/update model and improve its contract/install/test ownership.
-2. Start the stageless/product-model migration only after the existing A/B/runtime contract is explicit enough that it will not just reintroduce old implicit behavior through a new surface.
+1. Keep the current A/B runtime/update model and improve its contract/install/test ownership as part of the product-model transition.
+2. Start the filesystem-first migration from `distro-contract`, then move builder/test routing after product ownership is real.
 
 ## Why This Split Exists
 
 - The Fedora swap was the concrete near-term migration that unblocked the later tracks.
 - The `bootc` track was evaluated and cancelled in favor of keeping the current A/B model.
-- The stageless/product-model migration is the largest architecture change and should not be half-started while Fedora source plumbing is still in flux.
+- The filesystem-first/product-model migration is now the primary architecture track and should start at contract ownership instead of surface-level CLI renames.

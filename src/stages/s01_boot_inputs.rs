@@ -12,7 +12,6 @@ use crate::pipeline::overlay::{
     ensure_systemd_default_target, ensure_systemd_locale_completeness, ensure_systemd_sshd_dirs,
     S01OverlayPolicy,
 };
-use crate::pipeline::paths::normalize_distro_id;
 #[cfg(test)]
 use crate::pipeline::plan::ensure_non_legacy_rootfs_source;
 use crate::pipeline::plan::{
@@ -23,10 +22,7 @@ use crate::pipeline::scripts::install_stage_test_scripts;
 use crate::pipeline::source::{
     cleanup_legacy_provider_dir, materialize_source_rootfs, S01RootfsSourcePolicy,
 };
-use crate::recipe::alpine_stage01::{
-    is_alpine_stage01_recipe, preseed_spec_from_defines, AlpineStage01PreseedSpec,
-};
-use crate::recipe::rocky_stage01::RockyIsoPreseedSpec;
+use crate::recipe::alpine_stage01::is_alpine_stage01_recipe;
 
 const STAGE00_ARTIFACT_TAG: &str = "s00";
 const STAGE01_ARTIFACT_TAG: &str = "s01";
@@ -69,50 +65,22 @@ impl S01BootInputSpec {
         &self.required_services
     }
 
-    pub fn rocky_iso_preseed_spec(&self) -> Result<Option<RockyIsoPreseedSpec>> {
-        let Some(S01RootfsSourcePolicy::RecipeRocky {
-            iso_name,
-            sha256,
-            sha256_url,
-            torrent_url,
+    pub fn uses_rocky_rootfs_source(&self) -> bool {
+        matches!(
+            self.rootfs_source_policy,
+            Some(S01RootfsSourcePolicy::RecipeRocky { .. })
+        )
+    }
+
+    pub fn uses_alpine_stage01_rootfs_source(&self) -> bool {
+        let Some(S01RootfsSourcePolicy::RecipeCustom {
+            recipe_script,
             ..
         }) = &self.rootfs_source_policy
         else {
-            return Ok(None);
+            return false;
         };
-
-        let normalized = normalize_distro_id(&self.distro_id, "Stage 01 Rocky preseed")?;
-        let trust_dir = self
-            .repo_root
-            .join(".artifacts/work")
-            .join(normalized)
-            .join("downloads");
-
-        Ok(Some(RockyIsoPreseedSpec {
-            iso_name: iso_name.clone(),
-            sha256: sha256.clone(),
-            sha256_url: sha256_url.clone(),
-            torrent_url: torrent_url.clone(),
-            preseed_iso_path: trust_dir.join(iso_name),
-            trust_dir,
-        }))
-    }
-
-    pub fn alpine_stage01_preseed_spec(&self) -> Result<Option<AlpineStage01PreseedSpec>> {
-        let Some(S01RootfsSourcePolicy::RecipeCustom {
-            recipe_script,
-            defines,
-        }) = &self.rootfs_source_policy
-        else {
-            return Ok(None);
-        };
-
-        if !is_alpine_stage01_recipe(recipe_script) {
-            return Ok(None);
-        }
-
-        let spec = preseed_spec_from_defines(&self.repo_root, &self.distro_id, defines)?;
-        Ok(Some(spec))
+        is_alpine_stage01_recipe(recipe_script)
     }
 }
 

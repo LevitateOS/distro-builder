@@ -290,6 +290,26 @@ pub fn run_recipe_phase_json_with_defines(
     defines: &[(&str, &str)],
     recipes_path: Option<&Path>,
 ) -> Result<serde_json::Value> {
+    run_recipe_phase_json_with_defines_and_env(
+        recipe_bin,
+        phase,
+        recipe_path,
+        build_dir,
+        defines,
+        &[],
+        recipes_path,
+    )
+}
+
+pub fn run_recipe_phase_json_with_defines_and_env(
+    recipe_bin: &Path,
+    phase: &str,
+    recipe_path: &Path,
+    build_dir: &Path,
+    defines: &[(&str, &str)],
+    envs: &[(&str, &str)],
+    recipes_path: Option<&Path>,
+) -> Result<serde_json::Value> {
     eprintln!("  Running recipe: {}", recipe_path.display());
     eprintln!("    Phase: {}", phase);
     eprintln!("    Build dir: {}", build_dir.display());
@@ -311,6 +331,10 @@ pub fn run_recipe_phase_json_with_defines(
 
     for (key, value) in defines {
         cmd.arg("--define").arg(format!("{}={}", key, value));
+    }
+
+    for (key, value) in envs {
+        cmd.env(key, value);
     }
 
     #[cfg(unix)]

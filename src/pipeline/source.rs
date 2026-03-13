@@ -14,10 +14,6 @@ use crate::recipe::rocky_stage01::{
 pub(crate) enum S01RootfsSourcePolicy {
     RecipeRocky {
         recipe_script: PathBuf,
-        iso_name: String,
-        sha256: String,
-        sha256_url: String,
-        torrent_url: String,
     },
     RecipeCustom {
         recipe_script: PathBuf,
@@ -30,10 +26,14 @@ pub(crate) enum S01RootfsSourcePolicy {
 pub(crate) struct S01RootfsSourceToml {
     kind: String,
     recipe_script: String,
-    iso_name: Option<String>,
-    sha256: Option<String>,
-    sha256_url: Option<String>,
-    torrent_url: Option<String>,
+    #[serde(rename = "iso_name")]
+    _legacy_iso_name: Option<String>,
+    #[serde(rename = "sha256")]
+    _legacy_sha256: Option<String>,
+    #[serde(rename = "sha256_url")]
+    _legacy_sha256_url: Option<String>,
+    #[serde(rename = "torrent_url")]
+    _legacy_torrent_url: Option<String>,
     defines: Option<BTreeMap<String, String>>,
 }
 
@@ -49,36 +49,8 @@ pub(crate) fn parse_rootfs_source_policy(
     match source.kind.trim().to_ascii_lowercase().as_str() {
         "recipe_rocky" => {
             let recipe_script = resolve_repo_path(repo_root, source.recipe_script.trim());
-            let iso_name = source.iso_name.as_deref().ok_or_else(|| {
-                anyhow::anyhow!(
-                    "invalid Stage 01 config '{}': rootfs_source.iso_name is required for kind='recipe_rocky'",
-                    config_path.display()
-                )
-            })?;
-            let sha256 = source.sha256.as_deref().ok_or_else(|| {
-                anyhow::anyhow!(
-                    "invalid Stage 01 config '{}': rootfs_source.sha256 is required for kind='recipe_rocky'",
-                    config_path.display()
-                )
-            })?;
-            let sha256_url = source.sha256_url.as_deref().ok_or_else(|| {
-                anyhow::anyhow!(
-                    "invalid Stage 01 config '{}': rootfs_source.sha256_url is required for kind='recipe_rocky'",
-                    config_path.display()
-                )
-            })?;
-            let torrent_url = source.torrent_url.as_deref().ok_or_else(|| {
-                anyhow::anyhow!(
-                    "invalid Stage 01 config '{}': rootfs_source.torrent_url is required for kind='recipe_rocky'",
-                    config_path.display()
-                )
-            })?;
             Ok(Some(S01RootfsSourcePolicy::RecipeRocky {
                 recipe_script,
-                iso_name: iso_name.trim().to_string(),
-                sha256: sha256.trim().to_string(),
-                sha256_url: sha256_url.trim().to_string(),
-                torrent_url: torrent_url.trim().to_string(),
             }))
         }
         "recipe_custom" => {
@@ -211,10 +183,10 @@ mod tests {
         let source = S01RootfsSourceToml {
             kind: "recipe_custom".to_string(),
             recipe_script: "distro-builder/recipes/custom-stage01-rootfs.rhai".to_string(),
-            iso_name: None,
-            sha256: None,
-            sha256_url: None,
-            torrent_url: None,
+            _legacy_iso_name: None,
+            _legacy_sha256: None,
+            _legacy_sha256_url: None,
+            _legacy_torrent_url: None,
             defines: Some(BTreeMap::from([(
                 "CUSTOM_ROOTFS_DIR".to_string(),
                 "/tmp/rootfs".to_string(),
@@ -230,6 +202,30 @@ mod tests {
         assert!(matches!(
             policy,
             Some(S01RootfsSourcePolicy::RecipeCustom { .. })
+        ));
+    }
+
+    #[test]
+    fn rootfs_source_policy_accepts_rocky_recipe_without_metadata_fields() {
+        let source = S01RootfsSourceToml {
+            kind: "recipe_rocky".to_string(),
+            recipe_script: "distro-builder/recipes/rocky-stage01-rootfs.rhai".to_string(),
+            _legacy_iso_name: None,
+            _legacy_sha256: None,
+            _legacy_sha256_url: None,
+            _legacy_torrent_url: None,
+            defines: None,
+        };
+        let policy = parse_rootfs_source_policy(
+            Path::new("."),
+            &PathBuf::from("distro-variants/levitate/01Boot.toml"),
+            Some(source),
+        )
+        .expect("parsing recipe_rocky without metadata must succeed");
+
+        assert!(matches!(
+            policy,
+            Some(S01RootfsSourcePolicy::RecipeRocky { .. })
         ));
     }
 

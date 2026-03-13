@@ -216,29 +216,24 @@ pub(crate) fn preseed_rocky_iso_cmd(distro_id: &str, refresh: bool) -> Result<()
         .with_context(|| format!("loading 00Build contract for '{}'", distro_id))?;
     let s01_spec = load_s01_boot_input_spec(&bundle.repo_root, &bundle.variant_dir, distro_id)
         .with_context(|| format!("loading 01Boot config for '{}'", distro_id))?;
-    let rocky_spec = s01_spec
-        .rocky_iso_preseed_spec()
-        .with_context(|| format!("resolving Stage 01 Rocky preseed spec for '{}'", distro_id))?;
-    let Some(rocky_spec) = rocky_spec else {
+    if !s01_spec.uses_rocky_rootfs_source() {
         bail!(
             "Stage 01 for '{}' does not use kind='recipe_rocky'; no Rocky ISO preseed recipe is configured in '{}'",
             distro_id,
             bundle.variant_dir.join("01Boot.toml").display()
         );
-    };
+    }
 
-    let iso_path =
-        preseed_rocky_iso(&bundle.repo_root, &rocky_spec, refresh).with_context(|| {
-            format!(
-                "preseeding Stage 01 Rocky ISO for '{}' in '{}'",
-                distro_id,
-                rocky_spec.trust_dir.display()
-            )
-        })?;
+    let iso_path = preseed_rocky_iso(&bundle.repo_root, distro_id, refresh)
+        .with_context(|| format!("preseeding Stage 01 Rocky ISO for '{}'", distro_id))?;
+    let trust_dir = iso_path
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| bundle.repo_root.join(".artifacts/work").join(distro_id).join("downloads"));
 
     println!("Rocky ISO preseed ready for {}:", distro_id);
     println!("  ISO:   {}", iso_path.display());
-    println!("  Trust: {}", rocky_spec.trust_dir.display());
+    println!("  Trust: {}", trust_dir.display());
     Ok(())
 }
 
@@ -248,29 +243,27 @@ pub(crate) fn preseed_alpine_stage01_assets_cmd(distro_id: &str, refresh: bool) 
         .with_context(|| format!("loading 00Build contract for '{}'", distro_id))?;
     let s01_spec = load_s01_boot_input_spec(&bundle.repo_root, &bundle.variant_dir, distro_id)
         .with_context(|| format!("loading 01Boot config for '{}'", distro_id))?;
-    let alpine_spec = s01_spec
-        .alpine_stage01_preseed_spec()
-        .with_context(|| format!("resolving Stage 01 Alpine preseed spec for '{}'", distro_id))?;
-    let Some(alpine_spec) = alpine_spec else {
+    if !s01_spec.uses_alpine_stage01_rootfs_source() {
         bail!(
             "Stage 01 for '{}' does not use the canonical Alpine Stage 01 recipe; no Alpine preseed recipe is configured in '{}'",
             distro_id,
             bundle.variant_dir.join("01Boot.toml").display()
         );
-    };
+    }
 
-    let output = preseed_alpine_stage01_assets(&bundle.repo_root, &alpine_spec, refresh)
+    let output = preseed_alpine_stage01_assets(&bundle.repo_root, distro_id, refresh)
         .with_context(|| {
-            format!(
-                "preseeding Stage 01 Alpine assets for '{}' in '{}'",
-                distro_id,
-                alpine_spec.trust_dir.display()
-            )
+            format!("preseeding Stage 01 Alpine assets for '{}'", distro_id)
         })?;
+    let trust_dir = output
+        .iso_path
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| bundle.repo_root.join(".artifacts/work").join(distro_id).join("downloads"));
 
     println!("Alpine Stage 01 preseed ready for {}:", distro_id);
     println!("  ISO:        {}", output.iso_path.display());
     println!("  apk-tools:  {}", output.apk_tools_path.display());
-    println!("  Trust:      {}", alpine_spec.trust_dir.display());
+    println!("  Trust:      {}", trust_dir.display());
     Ok(())
 }

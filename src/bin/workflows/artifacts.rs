@@ -5,15 +5,15 @@ use anyhow::{bail, Context, Result};
 use distro_builder::recipe::alpine_stage01::preseed_alpine_stage01_assets;
 use distro_builder::recipe::stage01_source::preseed_stage01_dvd;
 use distro_builder::stages::s01_boot_inputs::{
-    load_s00_build_input_spec, load_s01_boot_input_spec, materialize_s01_source_rootfs,
-    prepare_s00_build_inputs as prepare_s00_build_inputs_for_distro,
-    prepare_s01_boot_inputs as prepare_s01_boot_inputs_for_distro,
+    load_s01_boot_input_spec, materialize_s01_source_rootfs,
 };
-use distro_builder::stages::s02_live_tools_inputs::{
-    load_s02_live_tools_input_spec,
-    prepare_s02_live_tools_inputs as prepare_s02_live_tools_inputs_for_distro,
-};
+use distro_builder::stages::s02_live_tools_inputs::load_s02_live_tools_input_spec;
 use distro_builder::{build_erofs_default, build_overlayfs_default};
+use distro_builder::{
+    load_base_rootfs_product_spec, load_live_boot_product_spec, load_live_tools_product_spec,
+    prepare_base_rootfs_product, prepare_live_boot_product, prepare_live_tools_product,
+    BaseProductLayout, DerivedProductLayout, OverlayLayout, ParentRootfsInput,
+};
 use distro_contract::load_stage_00_contract_bundle_for_distro_from;
 use serde::{Deserialize, Serialize};
 
@@ -21,17 +21,28 @@ use serde::{Deserialize, Serialize};
 struct PreparedProductInputs {
     rootfs_source_dir: PathBuf,
     live_overlay_dir: PathBuf,
-    compatibility_stage: crate::BuildStage,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 struct PreparedProductManifest {
     product: String,
     distro_id: String,
-    compatibility_stage_name: String,
-    compatibility_stage_slug: String,
     rootfs_source_dir: String,
     live_overlay_dir: String,
+    rootfs_source_pointer_filename: String,
+    rootfs_erofs_filename: String,
+    overlay_erofs_filename: String,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum PreparationMode {
+    Canonical,
+    CompatibilityStage(crate::BuildStage),
+}
+
+#[derive(Debug, Clone)]
+struct PreparedOutputNames {
+    rootfs_source_pointer_filename: String,
     rootfs_erofs_filename: String,
     overlay_erofs_filename: String,
 }
@@ -56,13 +67,87 @@ pub(crate) fn build_overlayfs_erofs(source_dir: &Path, output: &Path) -> Result<
     })
 }
 
-fn stage_artifact_tag_for_slug(stage_slug: &str) -> &'static str {
-    match stage_slug {
-        crate::STAGE00_SLUG => crate::STAGE00_ARTIFACT_TAG,
-        crate::STAGE01_SLUG => crate::STAGE01_ARTIFACT_TAG,
-        crate::STAGE02_SLUG => crate::STAGE02_ARTIFACT_TAG,
-        _ => unreachable!("validated in parse_stage"),
+fn canonical_base_product_layout(product: crate::BuildProduct) -> BaseProductLayout {
+    BaseProductLayout {
+        rootfs_source_dir: PathBuf::from("rootfs-source"),
+        live_overlay_dir_name: product.live_overlay_dir_name.to_string(),
     }
+}
+
+fn canonical_derived_product_layout(
+    product: crate::BuildProduct,
+    parent_product: crate::BuildProduct,
+) -> DerivedProductLayout {
+    DerivedProductLayout {
+        rootfs_source_dir: PathBuf::from("rootfs-source"),
+        parent_rootfs: ParentRootfsInput {
+            release_dir_name: parent_product.release_dir_name.to_string(),
+            producer_label: parent_product.canonical.to_string(),
+            rootfs_filename: parent_product.rootfs_erofs_filename.to_string(),
+        },
+        live_overlay: OverlayLayout {
+            issue_banner_label: product.issue_banner_label.to_string(),
+            dir_name: product.live_overlay_dir_name.to_string(),
+        },
+    }
+}
+
+fn prepared_output_names(
+    product: crate::BuildProduct,
+    mode: PreparationMode,
+) -> PreparedOutputNames {
+    match mode {
+        PreparationMode::Canonical => PreparedOutputNames {
+            rootfs_source_pointer_filename: product.rootfs_source_pointer_filename.to_string(),
+            rootfs_erofs_filename: product.rootfs_erofs_filename.to_string(),
+            overlay_erofs_filename: product.overlay_erofs_filename.to_string(),
+        },
+        PreparationMode::CompatibilityStage(stage) => PreparedOutputNames {
+            rootfs_source_pointer_filename: format!(
+                ".{}-live-rootfs-source.path",
+                stage.artifact_tag
+            ),
+            rootfs_erofs_filename: format!("{}-filesystem.erofs", stage.artifact_tag),
+            overlay_erofs_filename: format!("{}-overlayfs.erofs", stage.artifact_tag),
+        },
+    }
+}
+
+fn write_prepared_product_outputs(
+    output_dir: &Path,
+    product: crate::BuildProduct,
+    distro_id: &str,
+    prepared: &PreparedProductInputs,
+    output_names: &PreparedOutputNames,
+) -> Result<PathBuf> {
+    let rootfs_source = format!("{}\n", prepared.rootfs_source_dir.display());
+    let source_path_file = output_dir.join(&output_names.rootfs_source_pointer_filename);
+    fs::write(&source_path_file, &rootfs_source).with_context(|| {
+        format!(
+            "writing product '{}' rootfs source path file '{}'",
+            product.canonical,
+            source_path_file.display()
+        )
+    })?;
+    write_prepared_product_manifest(
+        output_dir,
+        &PreparedProductManifest {
+            product: product.canonical.to_string(),
+            distro_id: distro_id.to_string(),
+            rootfs_source_dir: relative_prepared_product_path(
+                output_dir,
+                &prepared.rootfs_source_dir,
+            )?,
+            live_overlay_dir: relative_prepared_product_path(
+                output_dir,
+                &prepared.live_overlay_dir,
+            )?,
+            rootfs_source_pointer_filename: output_names.rootfs_source_pointer_filename.clone(),
+            rootfs_erofs_filename: output_names.rootfs_erofs_filename.clone(),
+            overlay_erofs_filename: output_names.overlay_erofs_filename.clone(),
+        },
+    )?;
+    Ok(source_path_file)
 }
 
 pub(crate) fn build_stage_erofs_cmd(stage: &str, distro_id: &str) -> Result<()> {
@@ -144,10 +229,6 @@ pub(crate) fn build_prepared_product_erofs_cmd(prepared_dir: &Path) -> Result<()
         "product '{}' EROFS artifacts built for {}:",
         manifest.product, manifest.distro_id
     );
-    println!(
-        "  compatibility stage: {}",
-        manifest.compatibility_stage_name
-    );
     println!("  prepared dir: {}", prepared_dir.display());
     println!("  rootfs source: {}", rootfs_source_dir.display());
     println!("  overlay source: {}", live_overlay_dir.display());
@@ -163,50 +244,38 @@ pub(crate) fn prepare_stage_inputs_cmd(
 ) -> Result<()> {
     let stage = crate::workflows::parse_stage(Some(stage))?;
     let product = crate::workflows::parse::product_for_stage(stage);
-    prepare_product_cmd(product.canonical, distro_id, output_dir)
+    let prepared = prepare_product_inputs(
+        product,
+        distro_id,
+        output_dir,
+        PreparationMode::CompatibilityStage(stage),
+    )?;
+    let output_names = prepared_output_names(product, PreparationMode::CompatibilityStage(stage));
+    let source_path_file =
+        write_prepared_product_outputs(output_dir, product, distro_id, &prepared, &output_names)?;
+
+    println!(
+        "compatibility inputs prepared for {} {}:",
+        stage.canonical, distro_id
+    );
+    println!("  product:       {}", product.canonical);
+    println!("  rootfs source: {}", prepared.rootfs_source_dir.display());
+    println!("  live overlay:  {}", prepared.live_overlay_dir.display());
+    println!("  source path:   {}", source_path_file.display());
+    Ok(())
 }
 
 pub(crate) fn prepare_product_cmd(product: &str, distro_id: &str, output_dir: &Path) -> Result<()> {
     let product = crate::workflows::parse_product(Some(product))?;
-    let prepared = prepare_product_inputs(product, distro_id, output_dir)?;
-    let stage_artifact_tag = stage_artifact_tag_for_slug(prepared.compatibility_stage.slug);
-    let rootfs_source = format!("{}\n", prepared.rootfs_source_dir.display());
+    let prepared =
+        prepare_product_inputs(product, distro_id, output_dir, PreparationMode::Canonical)?;
+    let output_names = prepared_output_names(product, PreparationMode::Canonical);
     let source_path_file =
-        output_dir.join(format!(".{}-live-rootfs-source.path", stage_artifact_tag));
-    std::fs::write(&source_path_file, &rootfs_source).with_context(|| {
-        format!(
-            "writing product '{}' rootfs source path file '{}'",
-            product.canonical,
-            source_path_file.display()
-        )
-    })?;
-    write_prepared_product_manifest(
-        output_dir,
-        &PreparedProductManifest {
-            product: product.canonical.to_string(),
-            distro_id: distro_id.to_string(),
-            compatibility_stage_name: prepared.compatibility_stage.canonical.to_string(),
-            compatibility_stage_slug: prepared.compatibility_stage.slug.to_string(),
-            rootfs_source_dir: relative_prepared_product_path(
-                output_dir,
-                &prepared.rootfs_source_dir,
-            )?,
-            live_overlay_dir: relative_prepared_product_path(
-                output_dir,
-                &prepared.live_overlay_dir,
-            )?,
-            rootfs_erofs_filename: format!("{stage_artifact_tag}-filesystem.erofs"),
-            overlay_erofs_filename: format!("{stage_artifact_tag}-overlayfs.erofs"),
-        },
-    )?;
+        write_prepared_product_outputs(output_dir, product, distro_id, &prepared, &output_names)?;
 
     println!(
         "product '{}' inputs prepared for {}:",
         product.canonical, distro_id
-    );
-    println!(
-        "  compatibility stage: {}",
-        prepared.compatibility_stage.canonical
     );
     println!("  rootfs source: {}", prepared.rootfs_source_dir.display());
     println!("  live overlay:  {}", prepared.live_overlay_dir.display());
@@ -218,16 +287,36 @@ fn prepare_product_inputs(
     product: crate::BuildProduct,
     distro_id: &str,
     output_dir: &Path,
+    mode: PreparationMode,
 ) -> Result<PreparedProductInputs> {
     let cwd = std::env::current_dir().context("resolving current directory")?;
     let bundle = load_stage_00_contract_bundle_for_distro_from(&cwd, distro_id)
         .with_context(|| format!("loading 00Build contract for '{}'", distro_id))?;
 
-    let stage = product.compatibility_stage;
-    match stage.slug {
-        crate::STAGE00_SLUG => {
+    match (product.canonical, mode) {
+        (crate::PRODUCT_BASE_ROOTFS, PreparationMode::Canonical) => {
             let output_root = crate::stage_paths::output_dir_for(&bundle.repo_root, distro_id);
-            let s00_spec = load_s00_build_input_spec(
+            let spec = load_base_rootfs_product_spec(
+                distro_id,
+                &bundle.contract.identity.os_name,
+                &bundle.contract.identity.os_id,
+                &output_root,
+                canonical_base_product_layout(product),
+            )
+            .with_context(|| {
+                format!("loading {} baseline for '{}'", product.canonical, distro_id)
+            })?;
+            let prepared = prepare_base_rootfs_product(&spec, output_dir).with_context(|| {
+                format!("preparing {} inputs for '{}'", product.canonical, distro_id)
+            })?;
+            Ok(PreparedProductInputs {
+                rootfs_source_dir: prepared.rootfs_source_dir,
+                live_overlay_dir: prepared.live_overlay_dir,
+            })
+        }
+        (crate::PRODUCT_BASE_ROOTFS, PreparationMode::CompatibilityStage(_)) => {
+            let output_root = crate::stage_paths::output_dir_for(&bundle.repo_root, distro_id);
+            let spec = distro_builder::stages::s01_boot_inputs::load_s00_build_input_spec(
                 distro_id,
                 &bundle.contract.identity.os_name,
                 &bundle.contract.identity.os_id,
@@ -236,49 +325,90 @@ fn prepare_product_inputs(
             .with_context(|| {
                 format!("loading {} baseline for '{}'", product.canonical, distro_id)
             })?;
-            let prepared = prepare_s00_build_inputs_for_distro(&s00_spec, output_dir)
+            let prepared = distro_builder::stages::s01_boot_inputs::prepare_s00_build_inputs(
+                &spec, output_dir,
+            )
+            .with_context(|| {
+                format!("preparing {} inputs for '{}'", product.canonical, distro_id)
+            })?;
+            Ok(PreparedProductInputs {
+                rootfs_source_dir: prepared.rootfs_source_dir,
+                live_overlay_dir: prepared.live_overlay_dir,
+            })
+        }
+        (crate::PRODUCT_LIVE_BOOT, PreparationMode::Canonical) => {
+            let layout = canonical_derived_product_layout(
+                product,
+                crate::workflows::parse_product(Some(crate::PRODUCT_BASE_ROOTFS))?,
+            );
+            let spec = load_live_boot_product_spec(
+                &bundle.repo_root,
+                &bundle.variant_dir,
+                distro_id,
+                layout,
+            )
+            .with_context(|| format!("loading {} config for '{}'", product.canonical, distro_id))?;
+            let prepared = prepare_live_boot_product(&spec, output_dir).with_context(|| {
+                format!("preparing {} inputs for '{}'", product.canonical, distro_id)
+            })?;
+            Ok(PreparedProductInputs {
+                rootfs_source_dir: prepared.rootfs_source_dir,
+                live_overlay_dir: prepared.live_overlay_dir,
+            })
+        }
+        (crate::PRODUCT_LIVE_BOOT, PreparationMode::CompatibilityStage(_)) => {
+            let spec = load_s01_boot_input_spec(&bundle.repo_root, &bundle.variant_dir, distro_id)
                 .with_context(|| {
-                    format!("preparing {} inputs for '{}'", product.canonical, distro_id)
+                    format!("loading {} config for '{}'", product.canonical, distro_id)
                 })?;
-            Ok(PreparedProductInputs {
-                rootfs_source_dir: prepared.rootfs_source_dir,
-                live_overlay_dir: prepared.live_overlay_dir,
-                compatibility_stage: stage,
-            })
-        }
-        crate::STAGE01_SLUG => {
-            let s01_spec =
-                load_s01_boot_input_spec(&bundle.repo_root, &bundle.variant_dir, distro_id)
-                    .with_context(|| {
-                        format!("loading {} config for '{}'", product.canonical, distro_id)
-                    })?;
             let prepared =
-                prepare_s01_boot_inputs_for_distro(&s01_spec, output_dir).with_context(|| {
-                    format!("preparing {} inputs for '{}'", product.canonical, distro_id)
-                })?;
+                distro_builder::stages::s01_boot_inputs::prepare_s01_boot_inputs(&spec, output_dir)
+                    .with_context(|| {
+                        format!("preparing {} inputs for '{}'", product.canonical, distro_id)
+                    })?;
             Ok(PreparedProductInputs {
                 rootfs_source_dir: prepared.rootfs_source_dir,
                 live_overlay_dir: prepared.live_overlay_dir,
-                compatibility_stage: stage,
             })
         }
-        crate::STAGE02_SLUG => {
-            let s02_spec =
+        (crate::PRODUCT_LIVE_TOOLS, PreparationMode::Canonical) => {
+            let live_boot_product =
+                crate::workflows::parse_product(Some(crate::PRODUCT_LIVE_BOOT))?;
+            let layout = canonical_derived_product_layout(product, live_boot_product);
+            let spec = load_live_tools_product_spec(
+                &bundle.repo_root,
+                &bundle.variant_dir,
+                distro_id,
+                layout,
+            )
+            .with_context(|| format!("loading {} config for '{}'", product.canonical, distro_id))?;
+            let prepared = prepare_live_tools_product(&spec, output_dir).with_context(|| {
+                format!("preparing {} inputs for '{}'", product.canonical, distro_id)
+            })?;
+            Ok(PreparedProductInputs {
+                rootfs_source_dir: prepared.rootfs_source_dir,
+                live_overlay_dir: prepared.live_overlay_dir,
+            })
+        }
+        (crate::PRODUCT_LIVE_TOOLS, PreparationMode::CompatibilityStage(_)) => {
+            let spec =
                 load_s02_live_tools_input_spec(&bundle.repo_root, &bundle.variant_dir, distro_id)
                     .with_context(|| {
                     format!("loading {} config for '{}'", product.canonical, distro_id)
                 })?;
-            let prepared = prepare_s02_live_tools_inputs_for_distro(&s02_spec, output_dir)
+            let prepared =
+                distro_builder::stages::s02_live_tools_inputs::prepare_s02_live_tools_inputs(
+                    &spec, output_dir,
+                )
                 .with_context(|| {
                     format!("preparing {} inputs for '{}'", product.canonical, distro_id)
                 })?;
             Ok(PreparedProductInputs {
                 rootfs_source_dir: prepared.rootfs_source_dir,
                 live_overlay_dir: prepared.live_overlay_dir,
-                compatibility_stage: stage,
             })
         }
-        _ => unreachable!("validated in parse_stage"),
+        _ => unreachable!("validated in parse_product"),
     }
 }
 
@@ -406,4 +536,35 @@ pub(crate) fn materialize_stage01_source_rootfs_cmd(distro_id: &str) -> Result<(
     println!("Stage 01 source rootfs ready for {}:", distro_id);
     println!("  rootfs source: {}", source_rootfs_dir.display());
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn canonical_prepared_output_names_are_product_native() {
+        let product = crate::workflows::parse_product(Some(crate::PRODUCT_LIVE_BOOT))
+            .expect("parse live-boot");
+        let names = prepared_output_names(product, PreparationMode::Canonical);
+        assert_eq!(
+            names.rootfs_source_pointer_filename,
+            ".live-rootfs-source.path"
+        );
+        assert_eq!(names.rootfs_erofs_filename, "filesystem.erofs");
+        assert_eq!(names.overlay_erofs_filename, "overlayfs.erofs");
+    }
+
+    #[test]
+    fn compatibility_prepared_output_names_preserve_stage_artifacts() {
+        let stage = crate::workflows::parse_stage(Some("01Boot")).expect("parse stage");
+        let product = crate::workflows::parse::product_for_stage(stage);
+        let names = prepared_output_names(product, PreparationMode::CompatibilityStage(stage));
+        assert_eq!(
+            names.rootfs_source_pointer_filename,
+            ".s01-live-rootfs-source.path"
+        );
+        assert_eq!(names.rootfs_erofs_filename, "s01-filesystem.erofs");
+        assert_eq!(names.overlay_erofs_filename, "s01-overlayfs.erofs");
+    }
 }

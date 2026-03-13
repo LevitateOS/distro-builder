@@ -2,6 +2,22 @@ use anyhow::{bail, Context, Result};
 use std::fs;
 use std::path::Path;
 
+const STAGE00_CANONICAL: &str = "00Build";
+const STAGE00_SLUG: &str = "s00_build";
+const STAGE00_DIRNAME: &str = "s00-build";
+const STAGE00_ARTIFACT_TAG: &str = "s00";
+const STAGE00_NATIVE_BUILD_SCRIPT: &str = "00Build-build.sh";
+const STAGE01_CANONICAL: &str = "01Boot";
+const STAGE01_SLUG: &str = "s01_boot";
+const STAGE01_DIRNAME: &str = "s01-boot";
+const STAGE01_ARTIFACT_TAG: &str = "s01";
+const STAGE01_NATIVE_BUILD_SCRIPT: &str = "01Boot-build.sh";
+const STAGE02_CANONICAL: &str = "02LiveTools";
+const STAGE02_SLUG: &str = "s02_live_tools";
+const STAGE02_DIRNAME: &str = "s02-live-tools";
+const STAGE02_ARTIFACT_TAG: &str = "s02";
+const STAGE02_NATIVE_BUILD_SCRIPT: &str = "02LiveTools-build.sh";
+
 pub(crate) fn parse_release_build_command(
     args: Vec<&String>,
     repo_root: &Path,
@@ -75,13 +91,13 @@ pub(crate) fn parse_distro_id(value: &str, known_distros: &[String]) -> Result<S
 
 pub(crate) fn parse_product(value: Option<&str>) -> Result<crate::BuildProduct> {
     match value.unwrap_or(crate::PRODUCT_BASE_ROOTFS) {
-        crate::PRODUCT_BASE_ROOTFS | crate::STAGE00_CANONICAL | "0" | "00" => {
+        crate::PRODUCT_BASE_ROOTFS | STAGE00_CANONICAL | "0" | "00" => {
             Ok(product_base_rootfs())
         }
-        crate::PRODUCT_LIVE_BOOT | crate::STAGE01_CANONICAL | "1" | "01" => {
+        crate::PRODUCT_LIVE_BOOT | STAGE01_CANONICAL | "1" | "01" => {
             Ok(product_live_boot())
         }
-        crate::PRODUCT_LIVE_TOOLS | crate::STAGE02_CANONICAL | "2" | "02" => {
+        crate::PRODUCT_LIVE_TOOLS | STAGE02_CANONICAL | "2" | "02" => {
             Ok(product_live_tools())
         }
         other => bail!(
@@ -96,9 +112,9 @@ pub(crate) fn parse_product(value: Option<&str>) -> Result<crate::BuildProduct> 
 
 pub(crate) fn product_for_stage(stage: crate::BuildStage) -> crate::BuildProduct {
     match stage.slug {
-        crate::STAGE00_SLUG => product_base_rootfs(),
-        crate::STAGE01_SLUG => product_live_boot(),
-        crate::STAGE02_SLUG => product_live_tools(),
+        STAGE00_SLUG => product_base_rootfs(),
+        STAGE01_SLUG => product_live_boot(),
+        STAGE02_SLUG => product_live_tools(),
         _ => unreachable!("validated in parse_stage"),
     }
 }
@@ -110,10 +126,20 @@ pub(crate) fn parse_stage(value: Option<&str>) -> Result<crate::BuildStage> {
 fn product_base_rootfs() -> crate::BuildProduct {
     crate::BuildProduct {
         canonical: crate::PRODUCT_BASE_ROOTFS,
+        release_dir_name: crate::PRODUCT_BASE_ROOTFS,
+        iso_suffix: "base-rootfs",
+        rootfs_erofs_filename: "filesystem.erofs",
+        overlay_erofs_filename: "overlayfs.erofs",
+        initramfs_live_filename: "initramfs-live.cpio.gz",
+        live_overlay_dir_name: "live-overlay",
+        rootfs_source_pointer_filename: ".live-rootfs-source.path",
+        issue_banner_label: "Base Rootfs",
         compatibility_stage: crate::BuildStage {
-            canonical: crate::STAGE00_CANONICAL,
-            slug: crate::STAGE00_SLUG,
-            dir_name: crate::STAGE00_DIRNAME,
+            canonical: STAGE00_CANONICAL,
+            slug: STAGE00_SLUG,
+            dir_name: STAGE00_DIRNAME,
+            artifact_tag: STAGE00_ARTIFACT_TAG,
+            native_build_script: STAGE00_NATIVE_BUILD_SCRIPT,
         },
     }
 }
@@ -121,10 +147,20 @@ fn product_base_rootfs() -> crate::BuildProduct {
 fn product_live_boot() -> crate::BuildProduct {
     crate::BuildProduct {
         canonical: crate::PRODUCT_LIVE_BOOT,
+        release_dir_name: crate::PRODUCT_LIVE_BOOT,
+        iso_suffix: "live-boot",
+        rootfs_erofs_filename: "filesystem.erofs",
+        overlay_erofs_filename: "overlayfs.erofs",
+        initramfs_live_filename: "initramfs-live.cpio.gz",
+        live_overlay_dir_name: "live-overlay",
+        rootfs_source_pointer_filename: ".live-rootfs-source.path",
+        issue_banner_label: "Live Boot",
         compatibility_stage: crate::BuildStage {
-            canonical: crate::STAGE01_CANONICAL,
-            slug: crate::STAGE01_SLUG,
-            dir_name: crate::STAGE01_DIRNAME,
+            canonical: STAGE01_CANONICAL,
+            slug: STAGE01_SLUG,
+            dir_name: STAGE01_DIRNAME,
+            artifact_tag: STAGE01_ARTIFACT_TAG,
+            native_build_script: STAGE01_NATIVE_BUILD_SCRIPT,
         },
     }
 }
@@ -132,10 +168,20 @@ fn product_live_boot() -> crate::BuildProduct {
 fn product_live_tools() -> crate::BuildProduct {
     crate::BuildProduct {
         canonical: crate::PRODUCT_LIVE_TOOLS,
+        release_dir_name: crate::PRODUCT_LIVE_TOOLS,
+        iso_suffix: "live-tools",
+        rootfs_erofs_filename: "filesystem.erofs",
+        overlay_erofs_filename: "overlayfs.erofs",
+        initramfs_live_filename: "initramfs-live.cpio.gz",
+        live_overlay_dir_name: "live-overlay",
+        rootfs_source_pointer_filename: ".live-rootfs-source.path",
+        issue_banner_label: "Live Tools",
         compatibility_stage: crate::BuildStage {
-            canonical: crate::STAGE02_CANONICAL,
-            slug: crate::STAGE02_SLUG,
-            dir_name: crate::STAGE02_DIRNAME,
+            canonical: STAGE02_CANONICAL,
+            slug: STAGE02_SLUG,
+            dir_name: STAGE02_DIRNAME,
+            artifact_tag: STAGE02_ARTIFACT_TAG,
+            native_build_script: STAGE02_NATIVE_BUILD_SCRIPT,
         },
     }
 }
@@ -208,7 +254,7 @@ mod tests {
     #[test]
     fn product_parser_accepts_stage_aliases() {
         assert_eq!(
-            parse_product(Some(crate::STAGE01_CANONICAL))
+            parse_product(Some(STAGE01_CANONICAL))
                 .expect("parse stage alias")
                 .canonical,
             crate::PRODUCT_LIVE_BOOT
@@ -218,6 +264,18 @@ mod tests {
                 .expect("parse numeric stage alias")
                 .canonical,
             crate::PRODUCT_LIVE_TOOLS
+        );
+    }
+
+    #[test]
+    fn product_parser_maps_stage_alias_and_canonical_name_to_same_product() {
+        assert_eq!(
+            parse_product(Some(STAGE01_CANONICAL)).expect("parse stage alias"),
+            parse_product(Some(crate::PRODUCT_LIVE_BOOT)).expect("parse canonical product")
+        );
+        assert_eq!(
+            parse_product(Some(STAGE02_CANONICAL)).expect("parse stage alias"),
+            parse_product(Some(crate::PRODUCT_LIVE_TOOLS)).expect("parse canonical product")
         );
     }
 }

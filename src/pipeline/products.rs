@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use crate::pipeline::config::load_boot_config;
 use crate::pipeline::io::{
     create_empty_overlay_dir, create_unique_output_dir, extract_erofs_rootfs,
-    resolve_parent_stage_rootfs_image_for_distro,
+    resolve_parent_product_rootfs_image_for_distro,
 };
 use crate::pipeline::live_tools::{add_required_tools, Stage02InstallExperience};
 use crate::pipeline::overlay::{
@@ -50,31 +50,31 @@ pub struct BaseRootfsProductSpec {
     pub os_name: String,
     pub os_id: String,
     pub rootfs_source_dir: PathBuf,
-    overlay_artifact_tag: String,
+    live_overlay_dir_name: String,
     plan: ProducerPlan,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct BaseProductLayout {
+pub struct BaseProductLayout {
     pub rootfs_source_dir: PathBuf,
-    pub overlay_artifact_tag: String,
+    pub live_overlay_dir_name: String,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct ParentRootfsInput {
-    pub run_dir_name: String,
+pub struct ParentRootfsInput {
+    pub release_dir_name: String,
     pub producer_label: String,
     pub rootfs_filename: String,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct OverlayLayout {
+pub struct OverlayLayout {
     pub issue_banner_label: String,
-    pub artifact_tag: String,
+    pub dir_name: String,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct DerivedProductLayout {
+pub struct DerivedProductLayout {
     pub rootfs_source_dir: PathBuf,
     pub parent_rootfs: ParentRootfsInput,
     pub live_overlay: OverlayLayout,
@@ -171,7 +171,7 @@ pub fn load_base_rootfs_product_spec(
         os_name: os_name.to_string(),
         os_id: os_id.to_string(),
         rootfs_source_dir: layout.rootfs_source_dir,
-        overlay_artifact_tag: layout.overlay_artifact_tag,
+        live_overlay_dir_name: layout.live_overlay_dir_name,
         plan: ProducerPlan {
             source_rootfs_dir: None,
             producers: build_baseline_producers(distro_id, os_name, os_id),
@@ -194,7 +194,7 @@ pub fn prepare_base_rootfs_product(
     apply_producer_plan(&spec.plan, &rootfs_source_dir)
         .with_context(|| format!("materializing base rootfs for '{}'", spec.distro_id))?;
 
-    let live_overlay_dir = create_empty_overlay_dir(output_dir, &spec.overlay_artifact_tag)
+    let live_overlay_dir = create_empty_overlay_dir(output_dir, &spec.live_overlay_dir_name)
         .with_context(|| format!("creating empty overlay for {}", spec.distro_id))?;
 
     Ok(BaseRootfsProduct {
@@ -254,10 +254,10 @@ pub fn prepare_live_boot_product(
             output_dir.display()
         )
     })?;
-    let parent_rootfs = resolve_parent_stage_rootfs_image_for_distro(
+    let parent_rootfs = resolve_parent_product_rootfs_image_for_distro(
         &spec.repo_root,
         &spec.distro_id,
-        &spec.parent_rootfs.run_dir_name,
+        &spec.parent_rootfs.release_dir_name,
         &spec.parent_rootfs.producer_label,
         &spec.parent_rootfs.rootfs_filename,
     )?;
@@ -331,7 +331,7 @@ pub fn prepare_live_boot_product(
         &spec.distro_id,
         &spec.os_name,
         &spec.live_overlay.issue_banner_label,
-        &spec.live_overlay.artifact_tag,
+        &spec.live_overlay.dir_name,
         &spec.overlay,
     )?;
 
@@ -407,10 +407,10 @@ pub fn prepare_live_tools_product(
     })?;
 
     let rootfs_source_dir = create_unique_output_dir(output_dir, &spec.rootfs_source_dir)?;
-    let parent_rootfs = resolve_parent_stage_rootfs_image_for_distro(
+    let parent_rootfs = resolve_parent_product_rootfs_image_for_distro(
         &spec.repo_root,
         &spec.distro_id,
-        &spec.parent_rootfs.run_dir_name,
+        &spec.parent_rootfs.release_dir_name,
         &spec.parent_rootfs.producer_label,
         &spec.parent_rootfs.rootfs_filename,
     )?;
@@ -441,7 +441,7 @@ pub fn prepare_live_tools_product(
         &spec.distro_id,
         &spec.os_name,
         &spec.live_overlay.issue_banner_label,
-        &spec.live_overlay.artifact_tag,
+        &spec.live_overlay.dir_name,
         &spec.overlay,
     )?;
 

@@ -94,6 +94,11 @@ pub use artifact::live_overlay::{
 };
 pub use artifact::overlayfs::{build_overlayfs_default, create_overlayfs_erofs};
 pub use artifact::rootfs::{build_erofs_default, create_erofs};
+pub use pipeline::products::{
+    load_base_rootfs_product_spec, load_live_boot_product_spec, load_live_tools_product_spec,
+    prepare_base_rootfs_product, prepare_live_boot_product, prepare_live_tools_product,
+    BaseProductLayout, DerivedProductLayout, OverlayLayout, ParentRootfsInput,
+};
 
 // Re-export process utilities
 pub use process::{ensure_exists, find_first_existing, Cmd, CommandResult};

@@ -13,13 +13,13 @@ fn s02_live_tools_layout() -> DerivedProductLayout {
     DerivedProductLayout {
         rootfs_source_dir: PathBuf::from("s02-rootfs-source"),
         parent_rootfs: ParentRootfsInput {
-            run_dir_name: "s01-boot".to_string(),
-            producer_label: "Stage 01".to_string(),
-            rootfs_filename: "s01-filesystem.erofs".to_string(),
+            release_dir_name: "live-boot".to_string(),
+            producer_label: "live-boot".to_string(),
+            rootfs_filename: "filesystem.erofs".to_string(),
         },
         live_overlay: OverlayLayout {
             issue_banner_label: "S02 Live Tools".to_string(),
-            artifact_tag: "s02".to_string(),
+            dir_name: "s02-live-overlay".to_string(),
         },
     }
 }
@@ -47,10 +47,10 @@ mod tests {
     fn s02_wrapper_owns_stage_compat_layout() {
         let layout = s02_live_tools_layout();
         assert_eq!(layout.rootfs_source_dir, PathBuf::from("s02-rootfs-source"));
-        assert_eq!(layout.parent_rootfs.run_dir_name, "s01-boot");
-        assert_eq!(layout.parent_rootfs.producer_label, "Stage 01");
-        assert_eq!(layout.parent_rootfs.rootfs_filename, "s01-filesystem.erofs");
+        assert_eq!(layout.parent_rootfs.release_dir_name, "live-boot");
+        assert_eq!(layout.parent_rootfs.producer_label, "live-boot");
+        assert_eq!(layout.parent_rootfs.rootfs_filename, "filesystem.erofs");
         assert_eq!(layout.live_overlay.issue_banner_label, "S02 Live Tools");
-        assert_eq!(layout.live_overlay.artifact_tag, "s02");
+        assert_eq!(layout.live_overlay.dir_name, "s02-live-overlay");
     }
 }

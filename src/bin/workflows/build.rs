@@ -11,33 +11,28 @@ use distro_contract::{
 };
 use time::OffsetDateTime;
 
-use crate::{BuildProduct, BuildStage, StageOutputLayout};
+use crate::{BuildOutputLayout, BuildProduct, BuildStage};
 
 pub(crate) fn preflight_iso_build(
     repo_root: &Path,
     distro_id: &str,
     product: BuildProduct,
 ) -> Result<()> {
-    let stage = product.compatibility_stage;
-    match stage.slug {
-        crate::STAGE00_SLUG => {}
-        crate::STAGE01_SLUG => require_parent_stage_rootfs(
+    match product.canonical {
+        crate::PRODUCT_BASE_ROOTFS => {}
+        crate::PRODUCT_LIVE_BOOT => require_parent_product_rootfs(
             repo_root,
             distro_id,
             product.canonical,
-            crate::STAGE00_CANONICAL,
-            crate::STAGE00_DIRNAME,
-            "s00-filesystem.erofs",
             crate::PRODUCT_BASE_ROOTFS,
+            "filesystem.erofs",
         )?,
-        crate::STAGE02_SLUG => require_parent_stage_rootfs(
+        crate::PRODUCT_LIVE_TOOLS => require_parent_product_rootfs(
             repo_root,
             distro_id,
             product.canonical,
-            crate::STAGE01_CANONICAL,
-            crate::STAGE01_DIRNAME,
-            "s01-filesystem.erofs",
             crate::PRODUCT_LIVE_BOOT,
+            "filesystem.erofs",
         )?,
         _ => unreachable!("validated in parse_stage"),
     }
@@ -45,42 +40,40 @@ pub(crate) fn preflight_iso_build(
     Ok(())
 }
 
-fn require_parent_stage_rootfs(
+fn require_parent_product_rootfs(
     repo_root: &Path,
     distro_id: &str,
     product_name: &str,
-    parent_stage_name: &str,
-    parent_stage_dir: &str,
+    parent_product_name: &str,
     parent_rootfs_filename: &str,
-    remediation_product: &str,
 ) -> Result<()> {
     let parent_root =
-        crate::stage_paths::stage_output_dir_for(repo_root, distro_id, parent_stage_dir);
+        crate::stage_paths::product_release_dir_for(repo_root, distro_id, parent_product_name);
     let run_id = crate::stage_runs::latest_successful_stage_run_id(&parent_root)?.ok_or_else(|| {
         anyhow::anyhow!(
-            "preflight failed for '{}' release product '{}': no successful {} runs found under '{}'.\n\
+            "preflight failed for '{}' release product '{}': no successful parent product '{}' runs found under '{}'.\n\
              Build the '{}' release first: `cargo run -p distro-builder --bin distro-builder -- release build iso {} {}`",
             distro_id,
             product_name,
-            parent_stage_name,
+            parent_product_name,
             parent_root.display(),
-            remediation_product,
+            parent_product_name,
             distro_id,
-            remediation_product
+            parent_product_name
         )
     })?;
     let parent_rootfs = parent_root.join(&run_id).join(parent_rootfs_filename);
     if !parent_rootfs.is_file() {
         bail!(
-            "preflight failed for '{}' release product '{}': missing {} rootfs image '{}'.\n\
+            "preflight failed for '{}' release product '{}': missing parent product '{}' rootfs image '{}'.\n\
              Build the '{}' release first: `cargo run -p distro-builder --bin distro-builder -- release build iso {} {}`",
             distro_id,
             product_name,
-            parent_stage_name,
+            parent_product_name,
             parent_rootfs.display(),
-            remediation_product,
+            parent_product_name,
             distro_id,
-            remediation_product
+            parent_product_name
         );
     }
     Ok(())
@@ -134,9 +127,9 @@ pub(crate) fn build_one(distro_id: &str, product: BuildProduct) -> Result<()> {
         )
     })?;
     let stage = product.compatibility_stage;
-    let stage_layout = stage_output_layout_for(&bundle.repo_root, distro_id, stage)?;
+    let build_layout = product_release_output_layout_for(&bundle.repo_root, distro_id, product)?;
 
-    let stage_output_dir = stage_layout.stage_output_dir.clone();
+    let output_dir = build_layout.output_dir.clone();
 
     let kernel_spec = S00BuildKernelSpec {
         recipe_kernel_script: bundle
@@ -154,25 +147,27 @@ pub(crate) fn build_one(distro_id: &str, product: BuildProduct) -> Result<()> {
     };
 
     let created_at_utc = now_utc_compact()?;
-    let iso_path = stage_output_dir.join(iso_filename_for_stage(
+    let iso_path = output_dir.join(iso_filename_for_product(
         &bundle.contract.artifacts.iso_filename,
-        stage,
+        product,
     ));
 
-    if let Some(run_id) = stage_layout.run_id.as_deref() {
-        let metadata_path = crate::stage_runs::manifest_path(&stage_output_dir);
+    if let Some(run_id) = build_layout.run_id.as_deref() {
+        let metadata_path = crate::stage_runs::manifest_path(&output_dir);
         crate::stage_run_manifest::write_stage_run_metadata(
             &metadata_path,
-            &crate::StageRunMetadata {
+            &crate::BuildRunMetadata {
                 run_id: run_id.to_string(),
                 distro_id: distro_id.to_string(),
-                stage_name: stage.canonical.to_string(),
-                stage_slug: stage.slug.to_string(),
+                target_kind: "release-product".to_string(),
+                target_name: product.canonical.to_string(),
+                compatibility_stage_name: stage.canonical.to_string(),
+                compatibility_stage_slug: stage.slug.to_string(),
                 status: "building".to_string(),
                 created_at_utc: created_at_utc.clone(),
                 finished_at_utc: None,
-                stage_root_dir: stage_layout.stage_root_dir.display().to_string(),
-                stage_output_dir: stage_output_dir.display().to_string(),
+                root_dir: build_layout.root_dir.display().to_string(),
+                output_dir: output_dir.display().to_string(),
                 iso_path: iso_path.display().to_string(),
             },
         )?;
@@ -199,7 +194,7 @@ pub(crate) fn build_one(distro_id: &str, product: BuildProduct) -> Result<()> {
             &bundle,
             distro_id,
             &kernel_output_dir,
-            &stage_layout,
+            &build_layout,
             product,
             stage,
         )?;
@@ -231,34 +226,37 @@ pub(crate) fn build_one(distro_id: &str, product: BuildProduct) -> Result<()> {
                 .stage_00_build
                 .kernel_image_path
                 .clone(),
-            iso_filename: iso_filename_for_stage(&bundle.contract.artifacts.iso_filename, stage),
+            iso_filename: iso_filename_for_product(
+                &bundle.contract.artifacts.iso_filename,
+                product,
+            ),
         };
 
         run_00build_evidence_script(
             &bundle.repo_root,
             &bundle.variant_dir,
             &kernel_output_dir,
-            &stage_output_dir,
+            &output_dir,
             &evidence_spec,
         )
         .with_context(|| format!("running 00Build evidence for '{distro_id}'"))?;
 
         println!(
-            "[release:iso:{}:{distro_id}] compatibility stage {} passed; ISO at {}",
+            "[release:iso:{}:{distro_id}] built via compatibility stage {} at {}",
             product.canonical,
             stage.canonical,
-            stage_output_dir
-                .join(iso_filename_for_stage(
+            output_dir
+                .join(iso_filename_for_product(
                     &bundle.contract.artifacts.iso_filename,
-                    stage
+                    product
                 ))
                 .display()
         );
         Ok(())
     })();
 
-    if let Some(run_id) = stage_layout.run_id.as_deref() {
-        let metadata_path = crate::stage_runs::manifest_path(&stage_output_dir);
+    if let Some(run_id) = build_layout.run_id.as_deref() {
+        let metadata_path = crate::stage_runs::manifest_path(&output_dir);
         let finished_at_utc = Some(now_utc_compact()?);
         let status = if build_result.is_ok() {
             "success".to_string()
@@ -267,16 +265,18 @@ pub(crate) fn build_one(distro_id: &str, product: BuildProduct) -> Result<()> {
         };
         let metadata_result = crate::stage_run_manifest::write_stage_run_metadata(
             &metadata_path,
-            &crate::StageRunMetadata {
+            &crate::BuildRunMetadata {
                 run_id: run_id.to_string(),
                 distro_id: distro_id.to_string(),
-                stage_name: stage.canonical.to_string(),
-                stage_slug: stage.slug.to_string(),
+                target_kind: "release-product".to_string(),
+                target_name: product.canonical.to_string(),
+                compatibility_stage_name: stage.canonical.to_string(),
+                compatibility_stage_slug: stage.slug.to_string(),
                 status,
                 created_at_utc,
                 finished_at_utc,
-                stage_root_dir: stage_layout.stage_root_dir.display().to_string(),
-                stage_output_dir: stage_output_dir.display().to_string(),
+                root_dir: build_layout.root_dir.display().to_string(),
+                output_dir: output_dir.display().to_string(),
                 iso_path: iso_path.display().to_string(),
             },
         );
@@ -292,7 +292,7 @@ pub(crate) fn build_one(distro_id: &str, product: BuildProduct) -> Result<()> {
 
         if build_result.is_ok() {
             crate::stage_runs::prune_old_stage_runs(
-                &stage_layout.stage_root_dir,
+                &build_layout.root_dir,
                 crate::S00_RUN_RETENTION_COUNT,
             )?;
         }
@@ -305,14 +305,16 @@ fn ensure_iso_exists(
     bundle: &LoadedVariantContract,
     distro_id: &str,
     kernel_output_dir: &Path,
-    stage_layout: &StageOutputLayout,
+    build_layout: &BuildOutputLayout,
     product: BuildProduct,
     stage: BuildStage,
 ) -> Result<()> {
-    let stage_output_dir = &stage_layout.stage_output_dir;
-    let iso_filename = iso_filename_for_stage(&bundle.contract.artifacts.iso_filename, stage);
-    let iso_path = stage_output_dir.join(&iso_filename);
-    let native_build = bundle.variant_dir.join(native_build_script_filename(stage));
+    let output_dir = &build_layout.output_dir;
+    let iso_filename = iso_filename_for_product(&bundle.contract.artifacts.iso_filename, product);
+    let iso_path = output_dir.join(&iso_filename);
+    let native_build = bundle
+        .variant_dir
+        .join(product.compatibility_stage.native_build_script);
     if !native_build.is_file() {
         bail!(
             "missing variant-native {} build hook for '{}': {}\n\
@@ -321,7 +323,7 @@ fn ensure_iso_exists(
             stage.canonical,
             distro_id,
             native_build.display(),
-            native_build_script_filename(stage),
+            product.compatibility_stage.native_build_script,
             bundle.variant_dir.display()
         );
     }
@@ -334,9 +336,9 @@ fn ensure_iso_exists(
     // Builds always target a freshly allocated per-run output directory.
     // "missing ISO" in that directory is expected and not a cache miss.
     println!(
-        "[release:iso:{}:{distro_id}] building compatibility run {} via {} (output: {})",
+        "[release:iso:{}:{distro_id}] building release run {} via {} (output: {})",
         product.canonical,
-        stage_layout.run_id.as_deref().unwrap_or("adhoc"),
+        build_layout.run_id.as_deref().unwrap_or("adhoc"),
         native_build.display(),
         iso_path.display()
     );
@@ -392,18 +394,32 @@ fn ensure_iso_exists(
         .env("KERNEL_IMAGE_PATH", &kernel_image_path)
         .env("ISO_PATH", &iso_path)
         .env("ISO_FILENAME", &iso_filename)
+        .env("PRODUCT_NAME", product.canonical)
+        .env("BUILD_TARGET_LABEL", product.issue_banner_label)
+        .env("ROOTFS_FILENAME", product.rootfs_erofs_filename)
+        .env("INITRAMFS_LIVE_FILENAME", product.initramfs_live_filename)
+        .env("LIVE_OVERLAY_DIRNAME", product.live_overlay_dir_name)
+        .env(
+            "LIVE_OVERLAY_IMAGE_FILENAME",
+            product.overlay_erofs_filename,
+        )
+        .env(
+            "ROOTFS_SOURCE_POINTER_FILENAME",
+            product.rootfs_source_pointer_filename,
+        )
         .env("BUILD_STAGE_NAME", stage.canonical)
         .env("BUILD_STAGE_SLUG", stage.slug)
         .env("BUILD_STAGE_DIRNAME", stage.dir_name)
-        .env("STAGE_ROOT_DIR", &stage_layout.stage_root_dir)
-        .env("STAGE_RUN_DIR", stage_output_dir)
+        .env("STAGE_ARTIFACT_TAG", stage.artifact_tag)
+        .env("STAGE_ROOT_DIR", &build_layout.root_dir)
+        .env("STAGE_RUN_DIR", output_dir)
         .env(
             "STAGE_REQUIRED_KERNEL_CMDLINE",
             stage_required_kernel_cmdline(bundle, stage),
         )
         .env("KERNEL_OUTPUT_DIR", kernel_output_dir)
-        .env("STAGE_OUTPUT_DIR", stage_output_dir)
-        .env("BUILD_RUN_ID", stage_layout.run_id.as_deref().unwrap_or(""))
+        .env("STAGE_OUTPUT_DIR", output_dir)
+        .env("BUILD_RUN_ID", build_layout.run_id.as_deref().unwrap_or(""))
         .env("DISTRO_BUILDER_BIN", &distro_builder_bin)
         .status()
         .with_context(|| {
@@ -433,7 +449,7 @@ fn ensure_iso_exists(
 
 fn stage_required_kernel_cmdline(bundle: &LoadedVariantContract, stage: BuildStage) -> String {
     match stage.slug {
-        crate::STAGE01_SLUG | crate::STAGE02_SLUG => bundle
+        "s01_boot" | "s02_live_tools" => bundle
             .contract
             .stages
             .stage_01_live_boot
@@ -443,53 +459,55 @@ fn stage_required_kernel_cmdline(bundle: &LoadedVariantContract, stage: BuildSta
     }
 }
 
-fn native_build_script_filename(stage: BuildStage) -> &'static str {
-    match stage.slug {
-        crate::STAGE00_SLUG => crate::STAGE00_NATIVE_BUILD_SCRIPT,
-        crate::STAGE01_SLUG => crate::STAGE01_NATIVE_BUILD_SCRIPT,
-        crate::STAGE02_SLUG => crate::STAGE02_NATIVE_BUILD_SCRIPT,
-        _ => unreachable!("validated in parse_stage"),
-    }
-}
-
-pub(crate) fn iso_filename_for_stage(stage00_iso_filename: &str, stage: BuildStage) -> String {
-    match stage.slug {
-        crate::STAGE00_SLUG => stage00_iso_filename.to_string(),
-        crate::STAGE01_SLUG | crate::STAGE02_SLUG => {
-            derive_stage_iso_filename(stage00_iso_filename, stage.slug)
+pub(crate) fn iso_filename_for_product(
+    stage00_iso_filename: &str,
+    product: BuildProduct,
+) -> String {
+    match product.canonical {
+        crate::PRODUCT_BASE_ROOTFS => {
+            derive_product_iso_filename(stage00_iso_filename, product.iso_suffix)
         }
-        _ => unreachable!("validated in parse_stage"),
+        crate::PRODUCT_LIVE_BOOT | crate::PRODUCT_LIVE_TOOLS => {
+            derive_product_iso_filename(stage00_iso_filename, product.iso_suffix)
+        }
+        _ => unreachable!("validated in parse_product"),
     }
 }
 
-pub(crate) fn derive_stage_iso_filename(stage00_iso_filename: &str, stage_slug: &str) -> String {
-    if stage00_iso_filename.contains(crate::STAGE00_SLUG) {
-        return stage00_iso_filename.replacen(crate::STAGE00_SLUG, stage_slug, 1);
+pub(crate) fn derive_product_iso_filename(
+    stage00_iso_filename: &str,
+    product_suffix: &str,
+) -> String {
+    if stage00_iso_filename.contains("s00_build") {
+        return stage00_iso_filename.replacen("s00_build", product_suffix, 1);
+    }
+    if stage00_iso_filename.contains("s00-build") {
+        return stage00_iso_filename.replacen("s00-build", product_suffix, 1);
     }
     if let Some(base) = stage00_iso_filename.strip_suffix(".iso") {
-        return format!("{base}-{stage_slug}.iso");
+        return format!("{base}-{product_suffix}.iso");
     }
-    format!("{stage00_iso_filename}-{stage_slug}.iso")
+    format!("{stage00_iso_filename}-{product_suffix}.iso")
 }
 
-pub(crate) fn stage_output_layout_for(
+pub(crate) fn product_release_output_layout_for(
     repo_root: &Path,
     distro_id: &str,
-    stage: BuildStage,
-) -> Result<StageOutputLayout> {
-    let stage_root_dir =
-        crate::stage_paths::stage_output_dir_for(repo_root, distro_id, stage.dir_name);
-    std::fs::create_dir_all(&stage_root_dir).with_context(|| {
+    product: BuildProduct,
+) -> Result<BuildOutputLayout> {
+    let root_dir =
+        crate::stage_paths::product_release_dir_for(repo_root, distro_id, product.release_dir_name);
+    std::fs::create_dir_all(&root_dir).with_context(|| {
         format!(
-            "creating stage output root directory '{}'",
-            stage_root_dir.display()
+            "creating product release root directory '{}'",
+            root_dir.display()
         )
     })?;
-    let (run_id, run_root) = crate::stage_runs::allocate_stage_run_dir(&stage_root_dir)?;
+    let (run_id, run_root) = crate::stage_runs::allocate_stage_run_dir(&root_dir)?;
 
-    Ok(StageOutputLayout {
-        stage_root_dir,
-        stage_output_dir: run_root,
+    Ok(BuildOutputLayout {
+        root_dir,
+        output_dir: run_root,
         run_id: Some(run_id),
     })
 }
@@ -505,4 +523,39 @@ pub(crate) fn now_utc_compact() -> Result<String> {
         now.minute(),
         now.second()
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn product_iso_filename_is_product_native() {
+        let product = crate::workflows::parse_product(Some(crate::PRODUCT_LIVE_BOOT))
+            .expect("parse live-boot");
+        assert_eq!(
+            derive_product_iso_filename("levitateos-x86_64-s00_build.iso", product.iso_suffix),
+            "levitateos-x86_64-live-boot.iso"
+        );
+    }
+
+    #[test]
+    fn product_release_output_layout_uses_release_root() {
+        let repo_root = tempfile::tempdir().expect("repo tempdir");
+        let product = crate::workflows::parse_product(Some(crate::PRODUCT_LIVE_TOOLS))
+            .expect("parse live-tools");
+        let layout = product_release_output_layout_for(repo_root.path(), "levitate", product)
+            .expect("allocate product release layout");
+        assert!(
+            layout.root_dir.ends_with("levitate/releases/live-tools"),
+            "unexpected release root '{}'",
+            layout.root_dir.display()
+        );
+        assert!(
+            layout.output_dir.starts_with(&layout.root_dir),
+            "run dir '{}' must live under release root '{}'",
+            layout.output_dir.display(),
+            layout.root_dir.display()
+        );
+    }
 }

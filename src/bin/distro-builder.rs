@@ -6,58 +6,55 @@ mod stage_run_manifest;
 mod stage_runs;
 mod workflows;
 
-const STAGE00_NATIVE_BUILD_SCRIPT: &str = "00Build-build.sh";
-const STAGE01_NATIVE_BUILD_SCRIPT: &str = "01Boot-build.sh";
-const STAGE02_NATIVE_BUILD_SCRIPT: &str = "02LiveTools-build.sh";
-const STAGE00_CANONICAL: &str = "00Build";
-const STAGE00_SLUG: &str = "s00_build";
-const STAGE00_DIRNAME: &str = "s00-build";
-const STAGE00_ARTIFACT_TAG: &str = "s00";
-const STAGE01_CANONICAL: &str = "01Boot";
-const STAGE01_SLUG: &str = "s01_boot";
-const STAGE01_DIRNAME: &str = "s01-boot";
-const STAGE01_ARTIFACT_TAG: &str = "s01";
-const STAGE02_CANONICAL: &str = "02LiveTools";
-const STAGE02_SLUG: &str = "s02_live_tools";
-const STAGE02_DIRNAME: &str = "s02-live-tools";
-const STAGE02_ARTIFACT_TAG: &str = "s02";
 const PRODUCT_BASE_ROOTFS: &str = "base-rootfs";
 const PRODUCT_LIVE_BOOT: &str = "live-boot";
 const PRODUCT_LIVE_TOOLS: &str = "live-tools";
 const DEFAULT_DISTRO_ID: &str = "levitate";
 const S00_RUN_RETENTION_COUNT: usize = 5;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct BuildStage {
     canonical: &'static str,
     slug: &'static str,
     dir_name: &'static str,
+    artifact_tag: &'static str,
+    native_build_script: &'static str,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct BuildProduct {
     canonical: &'static str,
+    release_dir_name: &'static str,
+    iso_suffix: &'static str,
+    rootfs_erofs_filename: &'static str,
+    overlay_erofs_filename: &'static str,
+    initramfs_live_filename: &'static str,
+    live_overlay_dir_name: &'static str,
+    rootfs_source_pointer_filename: &'static str,
+    issue_banner_label: &'static str,
     compatibility_stage: BuildStage,
 }
 
 #[derive(Debug, Clone)]
-struct StageOutputLayout {
-    stage_root_dir: std::path::PathBuf,
-    stage_output_dir: std::path::PathBuf,
+struct BuildOutputLayout {
+    root_dir: std::path::PathBuf,
+    output_dir: std::path::PathBuf,
     run_id: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
-struct StageRunMetadata {
+struct BuildRunMetadata {
     run_id: String,
     distro_id: String,
-    stage_name: String,
-    stage_slug: String,
+    target_kind: String,
+    target_name: String,
+    compatibility_stage_name: String,
+    compatibility_stage_slug: String,
     status: String,
     created_at_utc: String,
     finished_at_utc: Option<String>,
-    stage_root_dir: String,
-    stage_output_dir: String,
+    root_dir: String,
+    output_dir: String,
     iso_path: String,
 }
 

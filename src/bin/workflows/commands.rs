@@ -102,29 +102,17 @@ pub(crate) fn dispatch_non_release_command(args: &[String]) -> Result<()> {
         [artifact, prepare_s01, distro, output_dir]
             if artifact == "artifact" && prepare_s01 == "prepare-s01-boot-inputs" =>
         {
-            crate::workflows::prepare_stage_inputs_cmd(
-                crate::STAGE01_CANONICAL,
-                distro,
-                Path::new(output_dir),
-            )
+            crate::workflows::prepare_stage_inputs_cmd("01Boot", distro, Path::new(output_dir))
         }
         [artifact, prepare_s02, distro, output_dir]
             if artifact == "artifact" && prepare_s02 == "prepare-s02-live-tools-inputs" =>
         {
-            crate::workflows::prepare_stage_inputs_cmd(
-                crate::STAGE02_CANONICAL,
-                distro,
-                Path::new(output_dir),
-            )
+            crate::workflows::prepare_stage_inputs_cmd("02LiveTools", distro, Path::new(output_dir))
         }
         [artifact, prepare_s00, distro, output_dir]
             if artifact == "artifact" && prepare_s00 == "prepare-s00-build-inputs" =>
         {
-            crate::workflows::prepare_stage_inputs_cmd(
-                crate::STAGE00_CANONICAL,
-                distro,
-                Path::new(output_dir),
-            )
+            crate::workflows::prepare_stage_inputs_cmd("00Build", distro, Path::new(output_dir))
         }
         [artifact, preseed_stage01, distro]
             if artifact == "artifact" && preseed_stage01 == "preseed-stage01-source" =>

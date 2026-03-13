@@ -22,8 +22,8 @@ pub(crate) fn create_unique_output_dir(output_dir: &Path, logical_name: &Path) -
     Ok(path)
 }
 
-pub(crate) fn create_empty_overlay_dir(output_dir: &Path, artifact_tag: &str) -> Result<PathBuf> {
-    let overlay_dir = output_dir.join(format!("{artifact_tag}-live-overlay"));
+pub(crate) fn create_empty_overlay_dir(output_dir: &Path, dir_name: &str) -> Result<PathBuf> {
+    let overlay_dir = output_dir.join(dir_name);
     if overlay_dir.exists() {
         fs::remove_dir_all(&overlay_dir).with_context(|| {
             format!(
@@ -41,12 +41,12 @@ pub(crate) fn create_empty_overlay_dir(output_dir: &Path, artifact_tag: &str) ->
     Ok(overlay_dir)
 }
 
-pub(crate) fn rename_live_overlay_for_stage(
+pub(crate) fn rename_live_overlay_dir(
     output_dir: &Path,
     source_overlay: &Path,
-    stage_artifact_tag: &str,
+    target_dir_name: &str,
 ) -> Result<PathBuf> {
-    let target_overlay = output_dir.join(format!("{stage_artifact_tag}-live-overlay"));
+    let target_overlay = output_dir.join(target_dir_name);
     if source_overlay == target_overlay {
         return Ok(target_overlay);
     }
@@ -68,30 +68,31 @@ pub(crate) fn rename_live_overlay_for_stage(
     Ok(target_overlay)
 }
 
-pub(crate) fn resolve_parent_stage_rootfs_image_for_distro(
+pub(crate) fn resolve_parent_product_rootfs_image_for_distro(
     repo_root: &Path,
     distro_id: &str,
-    marker_stage_dir: &str,
-    parent_stage_label: &str,
+    product_dir_name: &str,
+    parent_product_label: &str,
     rootfs_filename: &str,
 ) -> Result<PathBuf> {
-    let stage_root = repo_root
+    let product_root = repo_root
         .join(".artifacts")
         .join("out")
         .join(distro_id)
-        .join(marker_stage_dir);
+        .join("releases")
+        .join(product_dir_name);
 
-    let run_id = crate::stage_runs::latest_successful_run_id(&stage_root)?.ok_or_else(|| {
+    let run_id = crate::stage_runs::latest_successful_run_id(&product_root)?.ok_or_else(|| {
         anyhow::anyhow!(
-            "missing successful {} run metadata under '{}'; build parent stage first",
-            parent_stage_label,
-            stage_root.display()
+            "missing successful {} release under '{}'; build parent product first",
+            parent_product_label,
+            product_root.display()
         )
     })?;
-    let path = stage_root.join(run_id).join(rootfs_filename);
+    let path = product_root.join(run_id).join(rootfs_filename);
     if !path.is_file() {
         bail!(
-            "missing parent stage rootfs image '{}'; build parent stage first",
+            "missing parent product rootfs image '{}'; build parent product first",
             path.display()
         );
     }
@@ -142,11 +143,11 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn resolve_parent_stage_rootfs_image_for_distro_uses_repo_layout_not_output_dir_ancestry() {
+    fn resolve_parent_product_rootfs_image_for_distro_uses_repo_layout_not_output_dir_ancestry() {
         let repo_root = tempfile::tempdir().expect("repo tempdir");
         let stage_root = repo_root
             .path()
-            .join(".artifacts/out/levitate/s00-build/run-1");
+            .join(".artifacts/out/levitate/releases/base-rootfs/run-1");
         fs::create_dir_all(&stage_root).expect("create stage root");
         fs::write(
             crate::stage_runs::manifest_path(&stage_root),
@@ -159,17 +160,17 @@ mod tests {
             .expect("serialize manifest"),
         )
         .expect("write run manifest");
-        let rootfs = stage_root.join("s00-filesystem.erofs");
+        let rootfs = stage_root.join("filesystem.erofs");
         fs::write(&rootfs, b"test rootfs").expect("write rootfs file");
 
-        let resolved = resolve_parent_stage_rootfs_image_for_distro(
+        let resolved = resolve_parent_product_rootfs_image_for_distro(
             repo_root.path(),
             "levitate",
-            "s00-build",
-            "Stage 00",
-            "s00-filesystem.erofs",
+            "base-rootfs",
+            "base-rootfs",
+            "filesystem.erofs",
         )
-        .expect("resolve parent rootfs");
+        .expect("resolve parent product rootfs");
 
         assert_eq!(resolved, rootfs);
     }

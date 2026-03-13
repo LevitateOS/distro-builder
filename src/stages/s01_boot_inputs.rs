@@ -16,7 +16,7 @@ pub type S01BootInputSpec = LiveBootProductSpec;
 fn s00_build_layout() -> BaseProductLayout {
     BaseProductLayout {
         rootfs_source_dir: PathBuf::from("s00-rootfs-source"),
-        overlay_artifact_tag: "s00".to_string(),
+        live_overlay_dir_name: "s00-live-overlay".to_string(),
     }
 }
 
@@ -24,13 +24,13 @@ fn s01_boot_layout() -> DerivedProductLayout {
     DerivedProductLayout {
         rootfs_source_dir: PathBuf::from("s01-rootfs-source"),
         parent_rootfs: ParentRootfsInput {
-            run_dir_name: "s00-build".to_string(),
-            producer_label: "Stage 00".to_string(),
-            rootfs_filename: "s00-filesystem.erofs".to_string(),
+            release_dir_name: "base-rootfs".to_string(),
+            producer_label: "base-rootfs".to_string(),
+            rootfs_filename: "filesystem.erofs".to_string(),
         },
         live_overlay: OverlayLayout {
             issue_banner_label: "S01 Boot".to_string(),
-            artifact_tag: "s01".to_string(),
+            dir_name: "s01-live-overlay".to_string(),
         },
     }
 }
@@ -78,17 +78,17 @@ mod tests {
     fn s00_wrapper_owns_stage_compat_layout() {
         let layout = s00_build_layout();
         assert_eq!(layout.rootfs_source_dir, PathBuf::from("s00-rootfs-source"));
-        assert_eq!(layout.overlay_artifact_tag, "s00");
+        assert_eq!(layout.live_overlay_dir_name, "s00-live-overlay");
     }
 
     #[test]
     fn s01_wrapper_owns_stage_compat_layout() {
         let layout = s01_boot_layout();
         assert_eq!(layout.rootfs_source_dir, PathBuf::from("s01-rootfs-source"));
-        assert_eq!(layout.parent_rootfs.run_dir_name, "s00-build");
-        assert_eq!(layout.parent_rootfs.producer_label, "Stage 00");
-        assert_eq!(layout.parent_rootfs.rootfs_filename, "s00-filesystem.erofs");
+        assert_eq!(layout.parent_rootfs.release_dir_name, "base-rootfs");
+        assert_eq!(layout.parent_rootfs.producer_label, "base-rootfs");
+        assert_eq!(layout.parent_rootfs.rootfs_filename, "filesystem.erofs");
         assert_eq!(layout.live_overlay.issue_banner_label, "S01 Boot");
-        assert_eq!(layout.live_overlay.artifact_tag, "s01");
+        assert_eq!(layout.live_overlay.dir_name, "s01-live-overlay");
     }
 }

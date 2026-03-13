@@ -4,7 +4,7 @@ use std::os::unix::fs::symlink;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
-use crate::pipeline::io::rename_live_overlay_for_stage;
+use crate::pipeline::io::rename_live_overlay_dir;
 use crate::{
     create_openrc_live_overlay, create_systemd_live_overlay, InittabVariant, LiveOverlayConfig,
     SystemdLiveOverlayConfig,
@@ -26,11 +26,11 @@ pub(crate) fn create_live_overlay(
     output_dir: &Path,
     distro_id: &str,
     os_name: &str,
-    stage_label: &str,
-    artifact_tag: &str,
+    overlay_label: &str,
+    dir_name: &str,
     overlay: &S01OverlayPolicy,
 ) -> Result<PathBuf> {
-    let stage_issue_banner = stage_issue_banner(os_name, stage_label);
+    let stage_issue_banner = stage_issue_banner(os_name, overlay_label);
     let live_overlay_dir = match overlay {
         S01OverlayPolicy::Systemd { issue_message } => create_systemd_live_overlay(
             output_dir,
@@ -61,10 +61,10 @@ pub(crate) fn create_live_overlay(
         .with_context(|| format!("creating openrc live overlay for {}", distro_id))?,
     };
 
-    rename_live_overlay_for_stage(output_dir, &live_overlay_dir, artifact_tag).with_context(|| {
+    rename_live_overlay_dir(output_dir, &live_overlay_dir, dir_name).with_context(|| {
         format!(
             "renaming {} live overlay directory for '{}'",
-            stage_label, distro_id
+            overlay_label, distro_id
         )
     })
 }

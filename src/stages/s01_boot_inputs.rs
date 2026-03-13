@@ -84,10 +84,8 @@ impl S01BootInputSpec {
     }
 
     pub fn uses_alpine_stage01_rootfs_source(&self) -> bool {
-        let Some(S01RootfsSourcePolicy::RecipeCustom {
-            recipe_script,
-            ..
-        }) = &self.rootfs_source_policy
+        let Some(S01RootfsSourcePolicy::RecipeCustom { recipe_script, .. }) =
+            &self.rootfs_source_policy
         else {
             return false;
         };

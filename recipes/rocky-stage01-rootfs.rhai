@@ -5,7 +5,7 @@
 // - It requires a preseeded ISO in the canonical sibling downloads cache.
 // - It requires a trust marker; no repeated checksum in normal iterations.
 
-let deps = ["rocky-deps"];
+let deps = ["stage01-dvd-deps"];
 
 fn _work_root(build_dir) {
     dirname(dirname(build_dir))

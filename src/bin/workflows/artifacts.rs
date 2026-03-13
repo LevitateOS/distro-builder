@@ -218,13 +218,9 @@ pub(crate) fn preseed_stage01_source_cmd(distro_id: &str, refresh: bool) -> Resu
         .with_context(|| format!("loading 01Boot config for '{}'", distro_id))?;
 
     if let Some(preseed_recipe_script) = s01_spec.rpm_dvd_preseed_recipe_script() {
-        let iso_path = preseed_stage01_dvd(
-            &bundle.repo_root,
-            distro_id,
-            preseed_recipe_script,
-            refresh,
-        )
-            .with_context(|| format!("preseeding Stage 01 source for '{}'", distro_id))?;
+        let iso_path =
+            preseed_stage01_dvd(&bundle.repo_root, distro_id, preseed_recipe_script, refresh)
+                .with_context(|| format!("preseeding Stage 01 source for '{}'", distro_id))?;
         let trust_dir = iso_path
             .parent()
             .map(|p| p.to_path_buf())

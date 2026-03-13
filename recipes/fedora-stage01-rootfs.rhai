@@ -5,12 +5,7 @@
 // - It requires a preseeded ISO in the canonical sibling downloads cache.
 // - It requires a trust marker; no repeated checksum in normal iterations.
 //
-// Current implementation note:
-// - This recipe intentionally reuses `rocky-deps` because that owner currently
-//   provides only the generic host-side `7zz` bootstrap needed to extract the ISO.
-//   The dependency naming should be neutralized later in the migration.
-
-let deps = ["rocky-deps"];
+let deps = ["stage01-dvd-deps"];
 
 fn _work_root(build_dir) {
     dirname(dirname(build_dir))

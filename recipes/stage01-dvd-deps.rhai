@@ -1,4 +1,4 @@
-// Rocky Linux recipe build dependencies
+// Stage 01 RPM/DVD source recipe build dependencies
 //
 // Provides: 7zz (as 7z)
 // All downloaded/built from source by recipe — no system package manager.
@@ -6,8 +6,8 @@
 // - 7zz: static binary from 7-zip.org
 
 let ctx = #{
-    description: "Rocky Linux ISO build dependencies",
-    name: "rocky-deps",
+    description: "Stage 01 RPM/DVD source build dependencies",
+    name: "stage01-dvd-deps",
     sevenz_url: "https://7-zip.org/a/7z2501-linux-x64.tar.xz",
 };
 
@@ -47,7 +47,7 @@ fn install(ctx) {
     let bin_dir = join_path(TOOLS_PREFIX, "bin");
     mkdir(bin_dir);
 
-    // --- 7zz: extract static binary ---
+    // Extract the static 7zz binary and expose the traditional 7z name too.
     if !is_file(join_path(bin_dir, "7zz")) {
         log("Installing 7zz...");
         let extract_dir = join_path(BUILD_DIR, "7z");

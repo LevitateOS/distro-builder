@@ -31,7 +31,7 @@ pub trait DistroConfig: KernelInstallConfig {
 /// Package manager types supported by distro-builder.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PackageManager {
-    /// RPM (used by LevitateOS / Rocky Linux)
+    /// RPM (used by LevitateOS)
     Rpm,
     /// APK (used by AcornOS, IuppiterOS / Alpine Linux)
     Apk,
@@ -59,7 +59,7 @@ impl std::fmt::Display for InitSystem {
 ///
 /// Distro-specific builders implement this to provide paths and configuration.
 pub trait BuildContext {
-    /// Path to the source rootfs (Rocky rootfs, Alpine rootfs, etc.)
+    /// Path to the source rootfs (RPM/DVD rootfs, Alpine rootfs, etc.)
     fn source(&self) -> &Path;
 
     /// Path to the staging directory (where we build the filesystem)

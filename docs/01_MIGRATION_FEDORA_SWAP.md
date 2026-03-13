@@ -1,6 +1,6 @@
 # 01 Fedora Swap Migration Plan
 
-Status: active; abstraction cleanup landed, Fedora flip still pending
+Status: active; Levitate Fedora flip landed, compatibility cleanup still pending
 
 ## Goal
 
@@ -27,11 +27,12 @@ Replace the current Rocky Linux Stage 01 DVD/rootfs source path with Fedora Serv
 - `distro-builder/src/pipeline/config.rs`
 - `distro-builder/src/pipeline/source.rs`
 - `distro-builder/src/stages/s01_boot_inputs.rs`
-- `distro-builder/src/recipe/rocky_stage01.rs`
+- `distro-builder/src/recipe/stage01_source.rs`
 - `distro-builder/src/bin/workflows/artifacts.rs`
 - `distro-builder/src/bin/workflows/commands.rs`
 - `distro-builder/src/bin/workflows/mod.rs`
 - `distro-builder/src/bin/distro-builder.rs`
+- `distro-builder/recipes/stage01-dvd-deps.rhai`
 - `distro-builder/recipes/fedora-stage01-rootfs.rhai`
 - `distro-builder/recipes/fedora-preseed-iso.rhai`
 - `distro-builder/recipes/rocky-stage01-rootfs.rhai`
@@ -39,12 +40,14 @@ Replace the current Rocky Linux Stage 01 DVD/rootfs source path with Fedora Serv
 
 ## Current Repo Reality
 
-- Levitate Stage 01 explicitly uses `kind = "recipe_rocky"` in `distro-variants/levitate/01Boot.toml`.
+- Levitate Stage 01 now uses `kind = "recipe_rpm_dvd"` in `distro-variants/levitate/01Boot.toml`.
+- Levitate now points at the Fedora Stage 01 source recipes in `distro-variants/levitate/01Boot.toml`.
 - Ralph does not currently declare its own `rootfs_source`; it only defines Stage 01 overlay basics in `distro-variants/ralph/01Boot.toml`.
-- The current Stage 01 source parser in `distro-builder/src/pipeline/source.rs` only supports `recipe_rocky` and `recipe_custom`.
+- The current Stage 01 source parser in `distro-builder/src/pipeline/source.rs` supports the neutral `recipe_rpm_dvd` path plus legacy `recipe_rocky` compatibility and `recipe_custom`.
 - The Stage 01 recipe path is now self-contained for the canonical case: the Rocky, Fedora, and Alpine Stage 01 recipes no longer require large injected metadata define maps.
-- The current Stage 01 source adapter in `distro-builder/src/recipe/rocky_stage01.rs` still retains Rocky naming for the Rocky preseed helper, but the generic rootfs materializer path is already neutral.
+- The Stage 01 source adapter now lives in `distro-builder/src/recipe/stage01_source.rs` and exposes neutral rootfs materialization and preseed APIs.
 - The default artifact CLI path is now generic (`artifact preseed-stage01-source <distro>`); the Rocky/Alpine command names remain only as compatibility aliases.
+- The canonical RPM/DVD Stage 01 dependency owner is now `distro-builder/recipes/stage01-dvd-deps.rhai`.
 - There are repo-side Rocky references outside the immediate source-policy path, but they are not all part of this migration. Example: `distro-builder/recipes/qemu-deps.rhai`.
 
 ## Progress Snapshot
@@ -55,12 +58,13 @@ Already landed:
 - The default public Stage 01 preseed command is now `artifact preseed-stage01-source <distro> [--refresh]`.
 - Stage 01 source materialization work dirs are now recipe-derived rather than hardcoded to Rocky-specific subpaths.
 - Kernel source metadata ownership was also corrected in the same cleanup pass, so Rust no longer injects kernel version/SHA/localversion facts into the shared kernel recipe.
+- Levitate now points at the Fedora Stage 01 rootfs and preseed recipes by default.
+- The default RPM/DVD Stage 01 dependency recipe is now neutralized as `stage01-dvd-deps`.
 
 Still blocking the actual Fedora swap:
 
-- Levitate still points at the Rocky Stage 01 source recipe in `distro-variants/levitate/01Boot.toml`.
-- The source kind is still named `recipe_rocky`.
-- The Rocky helper file and Rocky recipe files still exist in the canonical builder path.
+- A real preseeded Fedora ISO run has not been executed yet through the canonical builder path.
+- The legacy `recipe_rocky` parser branch and Rocky compatibility recipes still exist.
 - Ralph is still implicit.
 
 ## Migration Strategy
@@ -86,7 +90,7 @@ This is the current concrete migration target for the first Fedora-backed presee
 
 ## Decision Log To Resolve First
 
-- [ ] Decide the new source kind name.
+- [x] Decide the new source kind name.
   Recommended: `recipe_rpm_dvd`.
 - [ ] Decide whether Ralph becomes explicit in `distro-variants/ralph/01Boot.toml`.
   Recommended: yes, make Ralph explicit once the Fedora path is ready so the source policy is not hidden.
@@ -95,14 +99,14 @@ This is the current concrete migration target for the first Fedora-backed presee
 
 ## Phase 0: Prepare the Abstraction Boundary
 
-- [ ] Replace `S01RootfsSourcePolicy::RecipeRocky` in `distro-builder/src/pipeline/source.rs` with a generic RPM/DVD source variant.
-- [x] Rename or replace `RockyStage01RecipeSpec` in `distro-builder/src/recipe/rocky_stage01.rs` with a neutral Stage 01 DVD/rootfs source spec.
-- [x] Rename or replace `RockyIsoPreseedSpec` in `distro-builder/src/recipe/rocky_stage01.rs` with a neutral DVD preseed/source-preparation spec.
+- [x] Replace `S01RootfsSourcePolicy::RecipeRocky` in `distro-builder/src/pipeline/source.rs` with a generic RPM/DVD source variant.
+- [x] Rename or replace `RockyStage01RecipeSpec` in `distro-builder/src/recipe/stage01_source.rs` with a neutral Stage 01 DVD/rootfs source spec.
+- [x] Rename or replace `RockyIsoPreseedSpec` in `distro-builder/src/recipe/stage01_source.rs` with a neutral DVD preseed/source-preparation spec.
 - [x] Replace `materialize_rootfs(...)` with a neutral materializer API name.
-- [ ] Replace `preseed_rocky_iso(...)` with a neutral preseed/source-preparation API name.
+- [x] Replace `preseed_rocky_iso(...)` with a neutral preseed/source-preparation API name.
 - [x] Remove Rocky-specific metadata define injection from the canonical Rust execution path.
-- [ ] Replace remaining Rocky-specific helper/env names such as `ROCKY_FORCE_REFRESH` if Rocky compatibility remains.
-  Recommended: use neutral `STAGE01_*` or `RPM_DVD_*` names.
+- [x] Replace remaining Rocky-specific helper/env names such as `ROCKY_FORCE_REFRESH` if Rocky compatibility remains.
+  Canonical path now uses neutral `STAGE01_SOURCE_FORCE_REFRESH`; legacy Rocky/Fedora envs still work as compatibility inputs.
 
 Exit criteria:
 
@@ -115,8 +119,10 @@ Exit criteria:
   Current owner: `distro-builder/recipes/fedora-stage01-rootfs.rhai`
 - [x] Create a Fedora-backed ISO/source-preparation recipe to replace `distro-builder/recipes/rocky-preseed-iso.rhai`.
   Current owner: `distro-builder/recipes/fedora-preseed-iso.rhai`
-- [ ] Remove Rocky-only marker naming in the recipe layer such as `.rocky-iso-trust.marker` and `.rocky-iso-verified.marker`.
+- [x] Remove Rocky-only marker naming from the canonical Fedora recipe path.
+  Rocky compatibility recipes still retain their original marker names.
 - [x] Ensure the new recipe names and outputs are not Rocky-branded on disk.
+- [x] Replace the Rocky-named Stage 01 dependency owner in the canonical path with `distro-builder/recipes/stage01-dvd-deps.rhai`.
 - [x] Keep the same reproducibility model: explicit ISO name, checksum, checksum URL, and torrent/download source.
 
 Current known package-name deltas for Fedora Server 43:
@@ -133,10 +139,10 @@ Exit criteria:
 
 ## Phase 2: Flip Variant Metadata
 
-- [ ] Update `distro-variants/levitate/01Boot.toml` from Rocky metadata to Fedora Server DVD metadata.
-- [ ] Replace `kind = "recipe_rocky"` with the new generic source kind.
-- [ ] Replace the Stage 01 recipe script path with the Fedora or generic RPM/DVD recipe path.
-- [ ] Replace the ISO filename, SHA256, checksum URL, and torrent/download metadata with Fedora values.
+- [x] Update `distro-variants/levitate/01Boot.toml` from Rocky ownership to Fedora-backed Stage 01 recipes.
+- [x] Replace `kind = "recipe_rocky"` with the new generic source kind.
+- [x] Replace the Stage 01 recipe script path with the Fedora-backed RPM/DVD recipe path.
+- [x] Move the canonical Fedora ISO filename, SHA256, checksum URL, and torrent/download metadata into the Fedora recipes rather than variant TOML.
 - [ ] Decide whether `distro-variants/ralph/01Boot.toml` should gain its own explicit `rootfs_source` block.
 
 Recommended Ralph decision:
@@ -171,8 +177,8 @@ Exit criteria:
 
 ## Phase 4: Cleanup and Audit
 
-- [ ] Remove or retire `distro-builder/src/recipe/rocky_stage01.rs` once the neutral owner exists.
-- [ ] Remove Rocky-only Stage 01 recipe files from the canonical builder path once they are replaced.
+- [x] Remove or retire `distro-builder/src/recipe/rocky_stage01.rs` once the neutral owner exists.
+- [x] Remove Rocky-only Stage 01 recipe files from the canonical builder path once they are replaced.
 - [x] Audit repo references to `stage01-rootfs-provider/rocky` and either update or explicitly classify them as out of scope.
 - [ ] Audit docs and tests for stale Rocky wording.
 - [ ] Decide whether `distro-builder/recipes/qemu-deps.rhai` is intentionally Rocky-based and separate from this migration.
@@ -185,11 +191,11 @@ Out-of-scope unless explicitly chosen:
 
 ## Validation Checklist
 
-- [ ] `cargo xtask policy audit-legacy-bindings`
-- [ ] Levitate Stage 01 config parses with the new Fedora metadata.
+- [x] `cargo xtask policy audit-legacy-bindings`
+- [x] Levitate Stage 01 config parses with the new Fedora metadata.
 - [ ] Stage 01 source preparation succeeds through the canonical builder command path.
 - [ ] Stage 01 source output is non-legacy and policy-clean.
-- [ ] The builder no longer requires Rocky-branded CLI commands for the default Fedora path.
+- [x] The builder no longer requires Rocky-branded CLI commands for the default Fedora path.
 - [ ] Any Ralph source-path choice is explicit and documented.
 - [x] Docs and migration index point at the new canonical Fedora document.
 
@@ -201,11 +207,10 @@ Out-of-scope unless explicitly chosen:
 
 ## Recommended Execution Order
 
-1. Land the neutral source-policy and adapter rename first.
-2. Land the Fedora-backed recipes second.
-3. Flip Levitate metadata third.
-4. Make Ralph explicit fourth if that remains the chosen policy.
-5. Remove Rocky-specific CLI naming and old adapter leftovers last.
+1. Run a real Fedora preseed/build validation through the canonical builder path.
+2. Make Ralph explicit if that remains the chosen policy.
+3. Decide whether to keep or remove the legacy `recipe_rocky` parser branch and Rocky CLI aliases.
+4. Audit remaining docs/tests for stale Rocky wording.
 
 ## Definition of Done
 

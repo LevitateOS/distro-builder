@@ -622,9 +622,10 @@ Acceptance:
   - remove `BuildStage` and `compatibility_stage` from the canonical model
   - keep stage aliases only in an explicit compatibility parser/adapter module
 
-- [ ] Make release execution fully product-native instead of stage-native under the hood.
+- [x] Make release execution fully product-native instead of stage-native under the hood.
   - owner file:
     - `distro-builder/src/bin/workflows/build.rs`
+    - `distro-builder/src/bin/workflows/compat_release.rs`
   - stop driving release builds through `BUILD_STAGE_*`, `STAGE_*`, and `native_build_script`
   - stop deriving release ISO names from `s00_build` / `s00-build`
   - keep any stage shell hook invocation only behind an explicit compatibility boundary
@@ -707,7 +708,7 @@ Acceptance:
   - replace `usr/lib/stage-manifest.json` with product-native metadata
   - stop branding canonical base product identity as `PRETTY_NAME="... (Stage 00Build)"`
 
-- [ ] Tighten output layout around canonical ownership.
+- [x] Tighten output layout around canonical ownership.
   - owner files:
     - `distro-builder/src/bin/stage_paths.rs`
     - `testing/install-tests/src/stages/mod.rs`
@@ -719,7 +720,7 @@ Acceptance:
     - `.artifacts/out/<distro>/scenarios/...`
   - any remaining `s00-build`, `s01-boot`, `s02-live-tools`, `s03-install` layout must be wrapper-only
 
-- [ ] Update help text, docs, and wrappers last.
+- [x] Update help text, docs, and wrappers last.
   - owner files:
     - `distro-builder/src/bin/distro-builder.rs`
     - `testing/install-tests/src/bin/stages.rs`
@@ -735,11 +736,11 @@ Acceptance:
 
 Acceptance:
 
-- [ ] stage labels are no longer the canonical ownership model anywhere
-- [ ] canonical builder execution no longer stores or routes through stage-native metadata
-- [ ] canonical test/preflight execution no longer consumes stage-native manifests or file names
-- [ ] canonical runtime/live payload names are product/scenario-native
-- [ ] any remaining stage surface is explicit compatibility only
+- [x] stage labels are no longer the canonical ownership model anywhere
+- [x] canonical builder execution no longer stores or routes through stage-native metadata
+- [x] canonical test/preflight execution no longer consumes stage-native manifests or file names
+- [x] canonical runtime/live payload names are product/scenario-native
+- [x] any remaining stage surface is explicit compatibility only
 
 ## What Must Die
 

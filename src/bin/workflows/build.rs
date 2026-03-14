@@ -3,9 +3,7 @@ use distro_builder::stages::s00_build::{
     ensure_kernel_installed_via_recipe, run_00build_evidence_script, S00BuildEvidenceSpec,
     S00BuildKernelEnsureOutcome, S00BuildKernelSpec,
 };
-use distro_contract::{
-    load_stage_00_contract_bundle_for_distro_from, require_valid_contract,
-};
+use distro_contract::{load_stage_00_contract_bundle_for_distro_from, require_valid_contract};
 use std::path::Path;
 use std::process::Command;
 use time::OffsetDateTime;
@@ -293,35 +291,21 @@ pub(crate) fn build_one(distro_id: &str, product: BuildProduct) -> Result<()> {
     build_result
 }
 
-pub(crate) fn iso_filename_for_product(
-    stage00_iso_filename: &str,
-    product: BuildProduct,
-) -> String {
+pub(crate) fn iso_filename_for_product(base_iso_filename: &str, product: BuildProduct) -> String {
     match product.canonical {
-        crate::PRODUCT_BASE_ROOTFS => {
-            derive_product_iso_filename(stage00_iso_filename, product.iso_suffix)
-        }
+        crate::PRODUCT_BASE_ROOTFS => base_iso_filename.to_string(),
         crate::PRODUCT_LIVE_BOOT | crate::PRODUCT_LIVE_TOOLS => {
-            derive_product_iso_filename(stage00_iso_filename, product.iso_suffix)
+            derive_product_iso_filename(base_iso_filename, product.iso_suffix)
         }
         _ => unreachable!("validated in parse_product"),
     }
 }
 
-pub(crate) fn derive_product_iso_filename(
-    stage00_iso_filename: &str,
-    product_suffix: &str,
-) -> String {
-    if stage00_iso_filename.contains("s00_build") {
-        return stage00_iso_filename.replacen("s00_build", product_suffix, 1);
-    }
-    if stage00_iso_filename.contains("s00-build") {
-        return stage00_iso_filename.replacen("s00-build", product_suffix, 1);
-    }
-    if let Some(base) = stage00_iso_filename.strip_suffix(".iso") {
+pub(crate) fn derive_product_iso_filename(base_iso_filename: &str, product_suffix: &str) -> String {
+    if let Some(base) = base_iso_filename.strip_suffix(".iso") {
         return format!("{base}-{product_suffix}.iso");
     }
-    format!("{stage00_iso_filename}-{product_suffix}.iso")
+    format!("{base_iso_filename}-{product_suffix}.iso")
 }
 
 pub(crate) fn product_release_output_layout_for(
@@ -368,8 +352,18 @@ mod tests {
         let product = crate::workflows::parse_product(Some(crate::PRODUCT_LIVE_BOOT))
             .expect("parse live-boot");
         assert_eq!(
-            derive_product_iso_filename("levitateos-x86_64-s00_build.iso", product.iso_suffix),
+            derive_product_iso_filename("levitateos-x86_64.iso", product.iso_suffix),
             "levitateos-x86_64-live-boot.iso"
+        );
+    }
+
+    #[test]
+    fn base_rootfs_iso_filename_stays_base_name() {
+        let product = crate::workflows::parse_product(Some(crate::PRODUCT_BASE_ROOTFS))
+            .expect("parse base-rootfs");
+        assert_eq!(
+            iso_filename_for_product("levitateos-x86_64.iso", product),
+            "levitateos-x86_64.iso"
         );
     }
 

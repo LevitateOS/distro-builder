@@ -124,17 +124,6 @@ pub(crate) fn ensure_release_iso_via_compatibility_hook(
             "COMPAT_STAGE_REQUIRED_KERNEL_CMDLINE",
             stage_required_kernel_cmdline(bundle, compat_stage),
         )
-        .env("BUILD_STAGE_NAME", compat_stage.canonical)
-        .env("BUILD_STAGE_SLUG", compat_stage.slug)
-        .env("BUILD_STAGE_DIRNAME", compat_stage.dir_name)
-        .env("STAGE_ARTIFACT_TAG", compat_stage.artifact_tag)
-        .env("STAGE_ROOT_DIR", &build_layout.root_dir)
-        .env("STAGE_RUN_DIR", output_dir)
-        .env(
-            "STAGE_REQUIRED_KERNEL_CMDLINE",
-            stage_required_kernel_cmdline(bundle, compat_stage),
-        )
-        .env("STAGE_OUTPUT_DIR", output_dir)
         .status()
         .with_context(|| {
             format!(

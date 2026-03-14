@@ -1,6 +1,6 @@
 # 04 Ring-Model Ownership Migration
 
-Status: ready
+Status: in_progress
 
 ## Purpose
 
@@ -146,6 +146,39 @@ Acceptance:
 - new manifest skeletons exist for all owner families
 - no behavior changes are required yet
 
+#### Phase 1 Pilot Census: Levitate
+
+| Current source | Current field | Canonical owner | Pilot target |
+|---|---|---|---|
+| `00Build.toml` | `identity.*` | `identity` | `identity.toml` |
+| `00Build.toml` | `stage_00.required_build_tools` | `build_host` | `build-host.toml` |
+| `00Build.toml` | `stage_00.kernel_*` | `build_host` | `build-host.toml` |
+| `00Build.toml` | `stage_00.evidence.*` | `build_host` | `build-host.toml` |
+| `00Build.toml` | `artifacts.rootfs_name` | `ring1_transforms` | `ring1-transforms.toml` |
+| `00Build.toml` | `artifacts.initramfs_live_output` | `ring1_transforms` | `ring1-transforms.toml` |
+| `00Build.toml` | `artifacts.initramfs_installed_output` | `ring1_transforms` | `ring1-transforms.toml` |
+| `00Build.toml` | `artifacts.installed_uki_outputs` | `ring1_transforms` | `ring1-transforms.toml` |
+| `00Build.toml` | `artifacts.iso_filename` | `ring0_release` | `ring0-release.toml` |
+| `00Build.toml` | `stage_00.iso_assembly.*` | `ring1_transforms` | `ring1-transforms.toml` |
+| `00Build.toml` | `stage_00.non_kernel_inputs.*` | derived compatibility view | not stored canonically |
+| `00Build.toml` | `stage_01.required_kernel_cmdline` | `scenarios` | `scenarios.toml` |
+| `00Build.toml` | `stage_01.required_live_services` | `scenarios` | `scenarios.toml` |
+| `01Boot.toml` | `stage_01.boot_inputs.os_name` | compatibility duplication of `identity` | delete after migration |
+| `01Boot.toml` | `stage_01.boot_inputs.overlay_kind` | `ring2_products` | `ring2-products.toml` |
+| `01Boot.toml` | `stage_01.boot_inputs.required_services` | `scenarios` | `scenarios.toml` |
+| `01Boot.toml` | `stage_01.boot_inputs.rootfs_source.*` | `ring3_sources` | `ring3-sources.toml` |
+| `02LiveTools.toml` | `stage_02.live_tools.os_name` | compatibility duplication of `identity` | delete after migration |
+| `02LiveTools.toml` | `stage_02.live_tools.install_experience` | `scenarios` | `scenarios.toml` |
+
+Notes:
+- the Phase 1 pilot ring family is additive only
+- canonical contract loading still comes from `00Build.toml`
+- the new ring files exist to prove owner-scoped layout and loader scaffolding before any behavior flip
+
+Pilot status:
+- `levitate` now has a complete ring-manifest scaffold
+- `variant.rs` parses the full ring family all-or-none and rejects partial scaffold sets
+
 ### Phase 2. Identity And Build-Host Ownership Migration
 
 Goal:
@@ -164,6 +197,11 @@ Acceptance:
 - no identity fact remains in ring or scenario manifests
 - no build-host fact remains in ring or scenario manifests
 - host/build policy is loadable independently of artifact rings
+
+Pilot status:
+- when a complete ring family is present, `identity` and `build_host` now load canonically from `identity.toml` and `build-host.toml`
+- `00Build.toml` copies of those owners are still validated in parallel and must stay byte-for-byte equivalent at the canonical contract level
+- parity drift is a hard failure during the migration window
 
 ### Phase 3. Ring 3 Source Ownership Migration
 

@@ -17,7 +17,7 @@ This directory tracks the current high-level distro-builder migration work as nu
    Scope: active filesystem-first migration away from stage-numbered composition toward explicit products, artifact transforms, and release-engineering outputs, followed by a final Phase 9 purge of both literal `stage` naming and numbered stage-artifact families like `00Build`, `01Boot`, and `02LiveTools`.
 
 4. [04_MIGRATION_RING_MODEL.md](04_MIGRATION_RING_MODEL.md)
-   Status: ready
+   Status: in_progress
    Scope: replace the remaining mixed stage-era manifest ownership with ring-native ownership across `identity`, `build_host`, `ring3_sources`, `ring2_products`, `ring1_transforms`, `ring0_release`, and `scenarios`, then delete the old stage-era manifest families entirely.
 
 ## Recommended Order

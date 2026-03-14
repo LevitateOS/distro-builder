@@ -7,7 +7,7 @@ use std::path::Path;
 use crate::pipeline::live_tools::{InstallDocsFrontend, InstallExperience, LiveToolsRuntimeAction};
 use crate::pipeline::overlay::S01OverlayPolicy;
 use crate::pipeline::paths::resolve_repo_path;
-use crate::pipeline::plan::{boot_baseline_producers, RootfsProducer};
+use crate::pipeline::plan::RootfsProducer;
 use crate::pipeline::source::{
     load_rootfs_source_policy, S01RootfsSourcePolicy, S01RootfsSourceToml,
 };
@@ -258,25 +258,6 @@ struct S01BootInputsToml {
     issue_message: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct S02LiveToolsToml {
-    stage_02: S02LiveToolsStageToml,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct S02LiveToolsStageToml {
-    live_tools: S02LiveToolsInputsToml,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct S02LiveToolsInputsToml {
-    os_name: String,
-    install_experience: InstallExperience,
-}
-
 pub(crate) fn load_boot_payload_config(
     repo_root: &Path,
     variant_dir: &Path,
@@ -341,17 +322,10 @@ pub(crate) fn load_installed_boot_payload_config(
     Ok(loaded)
 }
 
-pub(crate) fn load_live_tools_config(
-    variant_dir: &Path,
-    distro_id: &str,
-) -> Result<LiveToolsLoadedConfig> {
-    let config_path = variant_dir.join("02LiveTools.toml");
-    let legacy_live_tools = load_legacy_live_tools_inputs(&config_path)?;
-    let os_name = load_live_tools_os_name(variant_dir, legacy_live_tools.as_ref())?;
-    let install_experience =
-        load_live_tools_install_experience(variant_dir, legacy_live_tools.as_ref())?;
-    let runtime_actions =
-        load_live_tools_runtime_actions(variant_dir, distro_id, install_experience)?;
+pub(crate) fn load_live_tools_config(variant_dir: &Path) -> Result<LiveToolsLoadedConfig> {
+    let os_name = load_live_tools_os_name(variant_dir)?;
+    let install_experience = load_live_tools_install_experience(variant_dir)?;
+    let runtime_actions = load_live_tools_runtime_actions(variant_dir, install_experience)?;
 
     Ok(LiveToolsLoadedConfig {
         os_name,
@@ -384,16 +358,17 @@ fn load_ring2_products_manifest(variant_dir: &Path) -> Result<Option<Ring2Produc
 fn load_boot_payload_producers(
     variant_dir: &Path,
     product: BootPayloadProduct,
-    overlay: &S01OverlayPolicy,
+    _overlay: &S01OverlayPolicy,
 ) -> Result<Vec<RootfsProducer>> {
-    let overlay_kind = match overlay {
-        S01OverlayPolicy::Systemd { .. } => "systemd",
-        S01OverlayPolicy::OpenRc { .. } => "openrc",
-    };
-
-    let Some(parsed) = load_ring2_products_manifest(variant_dir)? else {
-        return Ok(boot_baseline_producers(overlay_kind));
-    };
+    let manifest_path = variant_dir.join("ring2-products.toml");
+    let parsed = load_ring2_products_manifest(variant_dir)?.ok_or_else(|| {
+        anyhow::anyhow!(
+            "missing canonical Ring 2 boot payload owner '{}' for '{}': expected '{}'",
+            product.logical_name(),
+            variant_dir.display(),
+            manifest_path.display()
+        )
+    })?;
 
     let decl =
         match product {
@@ -453,15 +428,16 @@ fn load_boot_payload_producers(
 
 fn load_live_tools_runtime_actions(
     variant_dir: &Path,
-    distro_id: &str,
     install_experience: InstallExperience,
 ) -> Result<Vec<LiveToolsRuntimeAction>> {
-    let Some(parsed) = load_ring2_products_manifest(variant_dir)? else {
-        return Ok(legacy_live_tools_runtime_actions(
-            distro_id,
-            install_experience,
-        ));
-    };
+    let manifest_path = variant_dir.join("ring2-products.toml");
+    let parsed = load_ring2_products_manifest(variant_dir)?.ok_or_else(|| {
+        anyhow::anyhow!(
+            "missing canonical Ring 2 live-tools owner for '{}': expected '{}'",
+            variant_dir.display(),
+            manifest_path.display()
+        )
+    })?;
 
     let live_tools = &parsed.ring2_products.live_tools;
     let mut profile_names = live_tools.runtime_profiles.clone().unwrap_or_default();
@@ -480,10 +456,11 @@ fn load_live_tools_runtime_actions(
     }
 
     if profile_names.is_empty() {
-        return Ok(legacy_live_tools_runtime_actions(
-            distro_id,
-            install_experience,
-        ));
+        bail!(
+            "missing canonical Ring 2 runtime profile selection for '{}' in '{}': declare runtime_profiles and runtime_profiles_* on [ring2_products.live_tools]",
+            parsed.ring2_products.live_tools.logical_name,
+            manifest_path.display()
+        );
     }
 
     let profiles = parsed.ring2_runtime_profiles.as_ref().ok_or_else(|| {
@@ -516,92 +493,6 @@ fn load_live_tools_runtime_actions(
     }
 
     Ok(actions)
-}
-
-fn legacy_live_tools_runtime_actions(
-    distro_id: &str,
-    install_experience: InstallExperience,
-) -> Vec<LiveToolsRuntimeAction> {
-    let target = match distro_id {
-        "levitate" | "ralph" => None,
-        "acorn" | "iuppiter" => Some("x86_64-unknown-linux-musl".to_string()),
-        _ => None,
-    };
-
-    let interactive_shell = match distro_id {
-        "levitate" | "ralph" => "/bin/bash",
-        "acorn" | "iuppiter" => "/bin/sh",
-        _ => "/bin/sh",
-    };
-    let ux_docs_frontend = match distro_id {
-        "levitate" => InstallDocsFrontend::BunBundle,
-        _ => InstallDocsFrontend::PlainText,
-    };
-
-    let mut actions = vec![
-        LiveToolsRuntimeAction::ToolPayloadWorkspaceBinary {
-            package: "recstrap".to_string(),
-            binary: None,
-            target: target.clone(),
-        },
-        LiveToolsRuntimeAction::ToolPayloadWorkspaceBinary {
-            package: "recfstab".to_string(),
-            binary: None,
-            target: target.clone(),
-        },
-        LiveToolsRuntimeAction::ToolPayloadWorkspaceBinary {
-            package: "recchroot".to_string(),
-            binary: None,
-            target: target.clone(),
-        },
-        LiveToolsRuntimeAction::InstallModePayload {
-            interactive_shell: interactive_shell.to_string(),
-            ux_docs_frontend,
-        },
-    ];
-
-    match distro_id {
-        "acorn" => actions.push(LiveToolsRuntimeAction::ApkPackages {
-            packages: vec![
-                "curl".to_string(),
-                "pciutils".to_string(),
-                "smartmontools".to_string(),
-                "hdparm".to_string(),
-                "vim".to_string(),
-                "htop".to_string(),
-            ],
-        }),
-        "iuppiter" => {
-            actions.push(LiveToolsRuntimeAction::ApkPackages {
-                packages: vec![
-                    "smartmontools".to_string(),
-                    "hdparm".to_string(),
-                    "sg3_utils".to_string(),
-                ],
-            });
-            actions.push(LiveToolsRuntimeAction::RootfsWorkspaceBinary {
-                package: "recab".to_string(),
-                binary: None,
-                target: target.clone(),
-                destination: "usr/bin/recab".into(),
-            });
-            actions.push(LiveToolsRuntimeAction::IuppiterDarPayload {
-                target: target.clone(),
-            });
-        }
-        _ => {}
-    }
-
-    if install_experience == InstallExperience::Ux {
-        actions.push(LiveToolsRuntimeAction::RootfsWorkspaceBinary {
-            package: "stage02-split-pane".to_string(),
-            binary: Some("levitate-install-docs-split".to_string()),
-            target,
-            destination: "usr/local/bin/levitate-install-docs-split".into(),
-        });
-    }
-
-    actions
 }
 
 fn live_tools_runtime_action_from_toml(
@@ -798,18 +689,6 @@ fn load_legacy_boot_inputs(config_path: &Path) -> Result<Option<S01BootInputsTom
     Ok(Some(parsed.stage_01.boot_inputs))
 }
 
-fn load_legacy_live_tools_inputs(config_path: &Path) -> Result<Option<S02LiveToolsInputsToml>> {
-    if !config_path.is_file() {
-        return Ok(None);
-    }
-
-    let config_bytes = fs::read_to_string(config_path)
-        .with_context(|| format!("reading Stage 02 config '{}'", config_path.display()))?;
-    let parsed: S02LiveToolsToml = toml::from_str(&config_bytes)
-        .with_context(|| format!("parsing Stage 02 config '{}'", config_path.display()))?;
-    Ok(Some(parsed.stage_02.live_tools))
-}
-
 fn load_identity_os_name(
     variant_dir: &Path,
     legacy_boot_inputs: Option<&S01BootInputsToml>,
@@ -846,42 +725,29 @@ fn load_identity_os_name(
         .ok_or_else(|| anyhow::anyhow!("missing canonical os_name for '{}'", variant_dir.display()))
 }
 
-fn load_live_tools_os_name(
-    variant_dir: &Path,
-    legacy_live_tools: Option<&S02LiveToolsInputsToml>,
-) -> Result<String> {
+fn load_live_tools_os_name(variant_dir: &Path) -> Result<String> {
     let identity_path = variant_dir.join("identity.toml");
-    let ring_os_name = if identity_path.is_file() {
-        let config_bytes = fs::read_to_string(&identity_path)
-            .with_context(|| format!("reading identity config '{}'", identity_path.display()))?;
-        let parsed: IdentityToml = toml::from_str(&config_bytes)
-            .with_context(|| format!("parsing identity config '{}'", identity_path.display()))?;
-        Some(parsed.identity.os_name)
-    } else {
-        None
-    };
-
-    let legacy_os_name = legacy_live_tools
-        .map(|inputs| inputs.os_name.trim().to_string())
-        .filter(|value| !value.is_empty());
-
-    if let (Some(ring_os_name), Some(legacy_os_name)) = (&ring_os_name, &legacy_os_name) {
-        if ring_os_name != legacy_os_name {
-            bail!(
-                "identity/live-tools parity mismatch for '{}': legacy 02LiveTools os_name '{}' does not match identity.toml os_name '{}'",
-                variant_dir.display(),
-                legacy_os_name,
-                ring_os_name
-            );
-        }
+    if !identity_path.is_file() {
+        bail!(
+            "missing canonical live-tools identity owner for '{}': expected '{}'",
+            variant_dir.display(),
+            identity_path.display()
+        );
     }
 
-    ring_os_name.or(legacy_os_name).ok_or_else(|| {
-        anyhow::anyhow!(
-            "missing canonical live-tools os_name for '{}'",
-            variant_dir.display()
-        )
-    })
+    let config_bytes = fs::read_to_string(&identity_path)
+        .with_context(|| format!("reading identity config '{}'", identity_path.display()))?;
+    let parsed: IdentityToml = toml::from_str(&config_bytes)
+        .with_context(|| format!("parsing identity config '{}'", identity_path.display()))?;
+    let os_name = parsed.identity.os_name.trim().to_string();
+    if os_name.is_empty() {
+        bail!(
+            "invalid canonical live-tools identity owner '{}': identity.os_name must not be empty",
+            identity_path.display()
+        );
+    }
+
+    Ok(os_name)
 }
 
 fn load_required_services(
@@ -931,45 +797,29 @@ fn load_required_services(
         .unwrap_or_else(|| vec!["sshd".to_string()]))
 }
 
-fn load_live_tools_install_experience(
-    variant_dir: &Path,
-    legacy_live_tools: Option<&S02LiveToolsInputsToml>,
-) -> Result<InstallExperience> {
+fn load_live_tools_install_experience(variant_dir: &Path) -> Result<InstallExperience> {
     let scenarios_path = variant_dir.join("scenarios.toml");
-    let ring_install_experience = if scenarios_path.is_file() {
-        let config_bytes = fs::read_to_string(&scenarios_path)
-            .with_context(|| format!("reading scenarios config '{}'", scenarios_path.display()))?;
-        let parsed: ScenariosToml = toml::from_str(&config_bytes)
-            .with_context(|| format!("parsing scenarios config '{}'", scenarios_path.display()))?;
-        parsed
-            .scenarios
-            .live_tools
-            .map(|tools| tools.install_experience)
-    } else {
-        None
-    };
-
-    let legacy_install_experience = legacy_live_tools.map(|inputs| inputs.install_experience);
-
-    if let (Some(ring_install_experience), Some(legacy_install_experience)) =
-        (&ring_install_experience, &legacy_install_experience)
-    {
-        if ring_install_experience != legacy_install_experience {
-            bail!(
-                "scenario/live-tools parity mismatch for '{}': legacy 02LiveTools install_experience '{}' does not match scenarios.toml install_experience '{}'",
-                variant_dir.display(),
-                legacy_install_experience.as_str(),
-                ring_install_experience.as_str()
-            );
-        }
+    if !scenarios_path.is_file() {
+        bail!(
+            "missing canonical live-tools scenario owner for '{}': expected '{}'",
+            variant_dir.display(),
+            scenarios_path.display()
+        );
     }
 
-    ring_install_experience
-        .or(legacy_install_experience)
+    let config_bytes = fs::read_to_string(&scenarios_path)
+        .with_context(|| format!("reading scenarios config '{}'", scenarios_path.display()))?;
+    let parsed: ScenariosToml = toml::from_str(&config_bytes)
+        .with_context(|| format!("parsing scenarios config '{}'", scenarios_path.display()))?;
+
+    parsed
+        .scenarios
+        .live_tools
+        .map(|tools| tools.install_experience)
         .ok_or_else(|| {
             anyhow::anyhow!(
-                "missing canonical live-tools install_experience for '{}'",
-                variant_dir.display()
+                "missing canonical live-tools scenario owner '[scenarios.live_tools]' in '{}'",
+                scenarios_path.display()
             )
         })
 }
@@ -1392,6 +1242,49 @@ description = "Kernel image and modules staging product"
     }
 
     #[test]
+    fn boot_payload_config_requires_canonical_ring2_owner() {
+        let repo_root = temp_repo_root("boot-payload-needs-ring2");
+        let variant_dir = repo_root.join("distro-variants/levitate");
+        let config_path = variant_dir.join("01Boot.toml");
+        write_file(
+            &variant_dir.join("identity.toml"),
+            r#"schema_version = 6
+
+[identity]
+os_name = "LevitateOS"
+os_id = "levitateos"
+iso_label = "LEVITATE"
+os_version = "0.1.0"
+default_hostname = "levitate"
+"#,
+        );
+        write_file(
+            &variant_dir.join("scenarios.toml"),
+            r#"schema_version = 6
+
+[scenarios.live_environment]
+required_services = ["sshd"]
+"#,
+        );
+        write_file(
+            &config_path,
+            r#"[stage_01.boot_inputs]
+overlay_kind = "systemd"
+"#,
+        );
+
+        let err = load_boot_config(&repo_root, &variant_dir, "levitate")
+            .expect_err("missing ring2 boot payload owner should fail");
+        assert!(
+            err.to_string()
+                .contains("missing canonical Ring 2 boot payload owner"),
+            "unexpected error: {err:#}"
+        );
+
+        fs::remove_dir_all(repo_root).expect("cleanup temp root");
+    }
+
+    #[test]
     fn levitate_boot_config_loads_without_01boot_when_ring_files_exist() {
         let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .parent()
@@ -1545,6 +1438,41 @@ description = "Kernel image and modules staging product"
                 (Some(S01RootfsSourcePolicy::RecipeCustom { .. }), "acorn" | "iuppiter") => {}
                 (other, _) => panic!("unexpected rootfs source policy for {distro_id}: {other:?}"),
             }
+        }
+    }
+
+    #[test]
+    fn workspace_variants_load_live_tools_config_from_canonical_owners() {
+        let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("repo root")
+            .to_path_buf();
+
+        let cases = [
+            ("levitate", "LevitateOS", InstallExperience::Ux, 5usize),
+            ("ralph", "RalphOS", InstallExperience::AutomatedSsh, 4usize),
+            ("acorn", "AcornOS", InstallExperience::Ux, 6usize),
+            (
+                "iuppiter",
+                "IuppiterOS",
+                InstallExperience::AutomatedSsh,
+                7usize,
+            ),
+        ];
+
+        for (distro_id, expected_os_name, expected_install_experience, minimum_actions) in cases {
+            let variant_dir = repo_root.join(format!("distro-variants/{distro_id}"));
+            let loaded = load_live_tools_config(&variant_dir)
+                .unwrap_or_else(|err| panic!("load {distro_id} live-tools config: {err:#}"));
+            assert_eq!(loaded.os_name, expected_os_name, "unexpected os_name");
+            assert_eq!(
+                loaded.install_experience, expected_install_experience,
+                "unexpected install experience for {distro_id}"
+            );
+            assert!(
+                loaded.runtime_actions.len() >= minimum_actions,
+                "expected canonical runtime actions for {distro_id}"
+            );
         }
     }
 

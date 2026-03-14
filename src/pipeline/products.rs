@@ -365,7 +365,7 @@ pub fn load_live_tools_product_spec(
     distro_id: &str,
     layout: DerivedProductLayout,
 ) -> Result<LiveToolsProductSpec> {
-    let loaded = load_live_tools_config(variant_dir, distro_id)
+    let loaded = load_live_tools_config(variant_dir)
         .with_context(|| format!("loading live-tools config for '{}'", distro_id))?;
 
     let live_boot_spec =
@@ -769,8 +769,8 @@ preseed_recipe_script = "distro-builder/recipes/fedora-preseed-iso.rhai"
     }
 
     #[test]
-    fn live_tools_product_spec_loads_without_02livetools_when_ring_files_exist() {
-        let repo_root = temp_repo_root("live-tools-no-stage02");
+    fn live_tools_product_spec_loads_from_canonical_ring_owners() {
+        let repo_root = temp_repo_root("live-tools-canonical-owners");
         let variant_dir = repo_root.join("distro-variants/levitate");
         write_live_tools_ring_scaffold(&variant_dir);
 
@@ -800,23 +800,24 @@ preseed_recipe_script = "distro-builder/recipes/fedora-preseed-iso.rhai"
     }
 
     #[test]
-    fn live_tools_product_spec_rejects_stage02_drift_from_scenarios() {
-        let repo_root = temp_repo_root("live-tools-stage02-drift");
+    fn live_tools_product_spec_requires_canonical_scenarios_live_tools_owner() {
+        let repo_root = temp_repo_root("live-tools-missing-scenarios-owner");
         let variant_dir = repo_root.join("distro-variants/levitate");
         write_live_tools_ring_scaffold(&variant_dir);
         write_file(
-            &variant_dir.join("02LiveTools.toml"),
-            r#"[stage_02.live_tools]
-os_name = "LevitateOS"
-install_experience = "automated_ssh"
+            &variant_dir.join("scenarios.toml"),
+            r#"schema_version = 6
+
+[scenarios.live_environment]
+required_services = ["sshd"]
 "#,
         );
 
         let err =
             load_live_tools_product_spec(&repo_root, &variant_dir, "levitate", live_tools_layout())
-                .expect_err("drifted stage 02 live-tools config should fail");
+                .expect_err("missing canonical scenarios live-tools owner should fail");
         assert!(
-            format!("{err:#}").contains("scenario/live-tools parity mismatch"),
+            format!("{err:#}").contains("missing canonical live-tools scenario owner"),
             "unexpected error: {err:#}"
         );
 

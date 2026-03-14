@@ -52,7 +52,7 @@ Nothing is allowed to remain in a mixed “old stage file” just because the fi
 
 The repo still has a real ownership bug:
 
-- old manifest families such as `00Build.toml`, `01Boot.toml`, and `02LiveTools.toml` are mixed-owner files
+- old manifest families such as `00Build.toml` and `01Boot.toml` are mixed-owner files
 - the contents are still partly grouped by historical stage origin rather than by true owner
 - Phase 9 in Track 03 exposed that a naming purge alone would be a lie
 
@@ -67,9 +67,6 @@ Examples of the current mixed-owner problem:
 - `01Boot.toml` mixes:
   - Ring 3 source ownership
   - scenario runtime requirements
-- `02LiveTools.toml` mixes:
-  - Ring 2 product ownership
-  - scenario/install UX behavior
 
 So the remaining work is not “remove stage words”.
 It is “move each fact to the correct owner”.
@@ -167,8 +164,6 @@ Acceptance:
 | `01Boot.toml` | `stage_01.boot_inputs.overlay_kind` | `ring2_products` | `ring2-products.toml` |
 | `01Boot.toml` | `stage_01.boot_inputs.required_services` | `scenarios` | `scenarios.toml` |
 | `01Boot.toml` | `stage_01.boot_inputs.rootfs_source.*` | `ring3_sources` | `ring3-sources.toml` |
-| `02LiveTools.toml` | `stage_02.live_tools.os_name` | compatibility duplication of `identity` | delete after migration |
-| `02LiveTools.toml` | `stage_02.live_tools.install_experience` | `scenarios` | `scenarios.toml` |
 
 #### Phase 1 Repo-Wide Variant Deltas
 
@@ -178,7 +173,6 @@ These variant deltas are the remaining currently loaded fields that differ by di
 | Variant | Current source | Current field | Canonical owner | Target owner file |
 |---|---|---|---|---|
 | `ralph` | `00Build.toml` | no `initramfs_installed_output` / no `installed_uki_outputs` | not present for this variant | none |
-| `ralph` | `02LiveTools.toml` | `install_experience = "automated_ssh"` | `scenarios` | `scenarios.toml` |
 | `acorn` | `00Build.toml` | `artifacts.installed_uki_outputs` | `ring1_transforms` | `ring1-transforms.toml` |
 | `acorn` | `01Boot.toml` | `rootfs_source.defines.*` | `ring3_sources` | `ring3-sources.toml` |
 | `acorn` | `01Boot.toml` | `openrc_inittab`, `profile_overlay` | `ring2_products` | `ring2-products.toml` |
@@ -186,7 +180,6 @@ These variant deltas are the remaining currently loaded fields that differ by di
 | `iuppiter` | `00Build.toml` | `artifacts.disk_image_output` | `ring0_release` | `ring0-release.toml` |
 | `iuppiter` | `01Boot.toml` | `rootfs_source.defines.*` | `ring3_sources` | `ring3-sources.toml` |
 | `iuppiter` | `01Boot.toml` | `openrc_inittab`, `profile_overlay` | `ring2_products` | `ring2-products.toml` |
-| `acorn`, `iuppiter` | `02LiveTools.toml` | variant-specific `install_experience` | `scenarios` | `scenarios.toml` |
 
 Notes:
 - the ring family remains additive during the migration window

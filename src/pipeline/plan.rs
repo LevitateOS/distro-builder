@@ -68,6 +68,7 @@ pub(crate) fn build_baseline_producers(
     ]
 }
 
+#[cfg(test)]
 pub(crate) fn boot_baseline_producers(overlay_kind: &str) -> Vec<RootfsProducer> {
     if overlay_kind == "systemd" {
         return vec![

@@ -20,26 +20,27 @@ pub struct RunMetadata {
 }
 
 pub fn manifest_path(run_dir: &Path) -> PathBuf {
+    run_manifest_path(run_dir)
+}
+
+pub fn run_manifest_path(run_dir: &Path) -> PathBuf {
     run_dir.join(RUN_MANIFEST_FILENAME)
 }
 
 pub fn load_runs_metadata(stage_root_dir: &Path) -> Result<Vec<RunMetadata>> {
-    if !stage_root_dir.is_dir() {
+    load_run_metadata(stage_root_dir)
+}
+
+pub fn load_run_metadata(run_root_dir: &Path) -> Result<Vec<RunMetadata>> {
+    if !run_root_dir.is_dir() {
         return Ok(Vec::new());
     }
     let mut runs = Vec::new();
-    for entry in fs::read_dir(stage_root_dir).with_context(|| {
-        format!(
-            "reading stage runs directory '{}'",
-            stage_root_dir.display()
-        )
-    })? {
-        let entry = entry.with_context(|| {
-            format!(
-                "iterating stage runs directory '{}'",
-                stage_root_dir.display()
-            )
-        })?;
+    for entry in fs::read_dir(run_root_dir)
+        .with_context(|| format!("reading run directory '{}'", run_root_dir.display()))?
+    {
+        let entry = entry
+            .with_context(|| format!("iterating run directory '{}'", run_root_dir.display()))?;
         let run_dir = entry.path();
         if !run_dir.is_dir() {
             continue;
@@ -50,62 +51,57 @@ pub fn load_runs_metadata(stage_root_dir: &Path) -> Result<Vec<RunMetadata>> {
         if run_name.starts_with('.') {
             continue;
         }
-        let path = manifest_path(&run_dir);
+        let path = run_manifest_path(&run_dir);
         if !path.is_file() {
             continue;
         }
         let bytes = fs::read(&path)
-            .with_context(|| format!("reading stage run metadata '{}'", path.display()))?;
+            .with_context(|| format!("reading run metadata '{}'", path.display()))?;
         let parsed: RunMetadata = serde_json::from_slice(&bytes)
-            .with_context(|| format!("parsing stage run metadata '{}'", path.display()))?;
+            .with_context(|| format!("parsing run metadata '{}'", path.display()))?;
         runs.push(parsed);
     }
     Ok(runs)
 }
 
-pub fn latest_successful_run_id(stage_root_dir: &Path) -> Result<Option<String>> {
-    let mut runs = load_runs_metadata(stage_root_dir)?;
+pub fn latest_successful_run_id(run_root_dir: &Path) -> Result<Option<String>> {
+    let mut runs = load_run_metadata(run_root_dir)?;
     runs.retain(|run| run.status == "success");
     runs.sort_by_key(|run| Reverse(run_sort_key(run)));
     Ok(runs.first().map(|r| r.run_id.clone()))
 }
 
-pub fn prune_old_runs(stage_root_dir: &Path, keep: usize) -> Result<()> {
-    let mut runs = load_runs_metadata(stage_root_dir)?;
+pub fn prune_old_runs(run_root_dir: &Path, keep: usize) -> Result<()> {
+    let mut runs = load_run_metadata(run_root_dir)?;
     runs.sort_by_key(|run| Reverse(run_sort_key(run)));
     for run in runs.into_iter().skip(keep) {
-        let path = stage_root_dir.join(&run.run_id);
-        fs::remove_dir_all(&path).with_context(|| {
-            format!("removing expired stage run directory '{}'", path.display())
-        })?;
+        let path = run_root_dir.join(&run.run_id);
+        fs::remove_dir_all(&path)
+            .with_context(|| format!("removing expired run directory '{}'", path.display()))?;
     }
     Ok(())
 }
 
-pub fn allocate_run_dir(stage_root_dir: &Path) -> Result<(String, PathBuf)> {
-    fs::create_dir_all(stage_root_dir).with_context(|| {
+pub fn allocate_run_dir(run_root_dir: &Path) -> Result<(String, PathBuf)> {
+    fs::create_dir_all(run_root_dir).with_context(|| {
         format!(
-            "creating stage output root directory '{}'",
-            stage_root_dir.display()
+            "creating run output root directory '{}'",
+            run_root_dir.display()
         )
     })?;
     for _ in 0..32 {
         let run_id = generate_run_id()?;
-        let run_root = stage_root_dir.join(&run_id);
+        let run_root = run_root_dir.join(&run_id);
         if run_root.exists() {
             continue;
         }
-        fs::create_dir_all(&run_root).with_context(|| {
-            format!(
-                "creating stage run output directory '{}'",
-                run_root.display()
-            )
-        })?;
+        fs::create_dir_all(&run_root)
+            .with_context(|| format!("creating run output directory '{}'", run_root.display()))?;
         return Ok((run_id, run_root));
     }
     bail!(
-        "failed allocating unique stage run directory under '{}'",
-        stage_root_dir.display()
+        "failed allocating unique run directory under '{}'",
+        run_root_dir.display()
     )
 }
 

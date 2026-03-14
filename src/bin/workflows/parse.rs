@@ -110,7 +110,7 @@ pub(crate) fn parse_product(value: Option<&str>) -> Result<crate::BuildProduct> 
     }
 }
 
-pub(crate) fn product_for_stage(stage: crate::BuildStage) -> crate::BuildProduct {
+pub(crate) fn product_for_stage(stage: crate::CompatibilityBuildStage) -> crate::BuildProduct {
     match stage.slug {
         STAGE00_SLUG => product_base_rootfs(),
         STAGE01_SLUG => product_live_boot(),
@@ -119,8 +119,37 @@ pub(crate) fn product_for_stage(stage: crate::BuildStage) -> crate::BuildProduct
     }
 }
 
-pub(crate) fn parse_stage(value: Option<&str>) -> Result<crate::BuildStage> {
-    Ok(parse_product(value)?.compatibility_stage)
+pub(crate) fn compatibility_stage_for_product(
+    product: crate::BuildProduct,
+) -> crate::CompatibilityBuildStage {
+    match product.canonical {
+        crate::PRODUCT_BASE_ROOTFS => crate::CompatibilityBuildStage {
+            canonical: STAGE00_CANONICAL,
+            slug: STAGE00_SLUG,
+            dir_name: STAGE00_DIRNAME,
+            artifact_tag: STAGE00_ARTIFACT_TAG,
+            native_build_script: STAGE00_NATIVE_BUILD_SCRIPT,
+        },
+        crate::PRODUCT_LIVE_BOOT => crate::CompatibilityBuildStage {
+            canonical: STAGE01_CANONICAL,
+            slug: STAGE01_SLUG,
+            dir_name: STAGE01_DIRNAME,
+            artifact_tag: STAGE01_ARTIFACT_TAG,
+            native_build_script: STAGE01_NATIVE_BUILD_SCRIPT,
+        },
+        crate::PRODUCT_LIVE_TOOLS => crate::CompatibilityBuildStage {
+            canonical: STAGE02_CANONICAL,
+            slug: STAGE02_SLUG,
+            dir_name: STAGE02_DIRNAME,
+            artifact_tag: STAGE02_ARTIFACT_TAG,
+            native_build_script: STAGE02_NATIVE_BUILD_SCRIPT,
+        },
+        _ => unreachable!("validated in parse_product"),
+    }
+}
+
+pub(crate) fn parse_stage(value: Option<&str>) -> Result<crate::CompatibilityBuildStage> {
+    Ok(compatibility_stage_for_product(parse_product(value)?))
 }
 
 fn product_base_rootfs() -> crate::BuildProduct {
@@ -134,13 +163,6 @@ fn product_base_rootfs() -> crate::BuildProduct {
         live_overlay_dir_name: "live-overlay",
         rootfs_source_pointer_filename: ".live-rootfs-source.path",
         issue_banner_label: "Base Rootfs",
-        compatibility_stage: crate::BuildStage {
-            canonical: STAGE00_CANONICAL,
-            slug: STAGE00_SLUG,
-            dir_name: STAGE00_DIRNAME,
-            artifact_tag: STAGE00_ARTIFACT_TAG,
-            native_build_script: STAGE00_NATIVE_BUILD_SCRIPT,
-        },
     }
 }
 
@@ -155,13 +177,6 @@ fn product_live_boot() -> crate::BuildProduct {
         live_overlay_dir_name: "live-overlay",
         rootfs_source_pointer_filename: ".live-rootfs-source.path",
         issue_banner_label: "Live Boot",
-        compatibility_stage: crate::BuildStage {
-            canonical: STAGE01_CANONICAL,
-            slug: STAGE01_SLUG,
-            dir_name: STAGE01_DIRNAME,
-            artifact_tag: STAGE01_ARTIFACT_TAG,
-            native_build_script: STAGE01_NATIVE_BUILD_SCRIPT,
-        },
     }
 }
 
@@ -176,13 +191,6 @@ fn product_live_tools() -> crate::BuildProduct {
         live_overlay_dir_name: "live-overlay",
         rootfs_source_pointer_filename: ".live-rootfs-source.path",
         issue_banner_label: "Live Tools",
-        compatibility_stage: crate::BuildStage {
-            canonical: STAGE02_CANONICAL,
-            slug: STAGE02_SLUG,
-            dir_name: STAGE02_DIRNAME,
-            artifact_tag: STAGE02_ARTIFACT_TAG,
-            native_build_script: STAGE02_NATIVE_BUILD_SCRIPT,
-        },
     }
 }
 

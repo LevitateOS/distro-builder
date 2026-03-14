@@ -13,7 +13,7 @@ const DEFAULT_DISTRO_ID: &str = "levitate";
 const S00_RUN_RETENTION_COUNT: usize = 5;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct BuildStage {
+struct CompatibilityBuildStage {
     canonical: &'static str,
     slug: &'static str,
     dir_name: &'static str,
@@ -32,7 +32,6 @@ struct BuildProduct {
     live_overlay_dir_name: &'static str,
     rootfs_source_pointer_filename: &'static str,
     issue_banner_label: &'static str,
-    compatibility_stage: BuildStage,
 }
 
 #[derive(Debug, Clone)]

@@ -615,18 +615,131 @@ Acceptance:
 
 ### Phase 8. Clean names, paths, and compatibility shims
 
-- [ ] Rename stage-owned internal identifiers to product/transform names.
-- [ ] Move toward:
-  - `.artifacts/out/<distro>/products/...`
-  - `.artifacts/out/<distro>/artifacts/...`
-  - `.artifacts/out/<distro>/releases/...`
-- [ ] Remove compatibility shims only after product/scenario routing is proven.
-- [ ] Update docs/help/just wrappers last.
+- [ ] Isolate `distro-builder` compatibility stage metadata out of the canonical product owner.
+  - owner files:
+    - `distro-builder/src/bin/distro-builder.rs`
+    - `distro-builder/src/bin/workflows/parse.rs`
+  - remove `BuildStage` and `compatibility_stage` from the canonical model
+  - keep stage aliases only in an explicit compatibility parser/adapter module
+
+- [ ] Make release execution fully product-native instead of stage-native under the hood.
+  - owner file:
+    - `distro-builder/src/bin/workflows/build.rs`
+  - stop driving release builds through `BUILD_STAGE_*`, `STAGE_*`, and `native_build_script`
+  - stop deriving release ISO names from `s00_build` / `s00-build`
+  - keep any stage shell hook invocation only behind an explicit compatibility boundary
+
+- [ ] Rename generic run/layout helpers so canonical code no longer uses `stage_*` names for product/scenario/release runs.
+  - owner files:
+    - `distro-builder/src/bin/stage_paths.rs`
+    - `distro-builder/src/bin/stage_runs.rs`
+    - `distro-builder/src/bin/stage_run_manifest.rs`
+  - introduce neutral names for:
+    - release/product/scenario output roots
+    - run allocation and pruning
+    - run manifest persistence
+  - keep `stage_*` wrappers only if still needed for explicit compatibility
+
+- [ ] Move stage-only artifact commands out of the canonical artifact workflow owner.
+  - owner file:
+    - `distro-builder/src/bin/workflows/artifacts.rs`
+  - canonical owner should expose only:
+    - `product prepare ...`
+    - `transform build ...`
+    - release/product-native artifact naming
+  - move:
+    - `build-stage-erofs`
+    - `prepare-stage-inputs`
+    - `prepare-s00-build-inputs`
+    - `prepare-s01-boot-inputs`
+    - `prepare-s02-live-tools-inputs`
+    into an explicit compatibility command module
+
+- [ ] Remove stage wrappers and stage metadata methods from the canonical scenario runner.
+  - owner file:
+    - `testing/install-tests/src/stages/mod.rs`
+  - move out of the canonical scenario owner:
+    - `compatibility_stage_name()`
+    - `compatibility_stage_slug()`
+    - `compatibility_stage_dirname()`
+    - `compatibility_stage_number()`
+    - `run_stage(...)`
+    - `run_stage_forced(...)`
+    - `run_up_to(...)`
+  - keep them only in CLI/compatibility wrapper code
+
+- [ ] Remove compatibility metadata and filename fallbacks from canonical preflight.
+  - owner file:
+    - `testing/install-tests/src/preflight.rs`
+  - stop using:
+    - `compatibility_stage_slug`
+    - stage-run manifest semantics
+    - `-filesystem.erofs`, `-overlayfs.erofs`, `-live-rootfs-source.path` compatibility discovery
+  - canonical preflight should validate product/scenario-native manifests and paths only
+  - if stage fallbacks remain, move them into a wrapper path outside canonical preflight
+
+- [ ] Rename `xtask` testing ownership from `Stages` to scenarios, leaving `stages` only as an alias surface if still needed.
+  - owner files:
+    - `xtask/src/cli/types.rs`
+    - `xtask/src/app.rs`
+    - `xtask/src/tasks/testing/stages.rs`
+  - canonical command/owner names should be scenario-based
+  - `stages` may remain only as a CLI alias layer
+
+- [ ] Clean stage-shaped runtime/live payload names and markers where they are no longer intentionally user-facing compatibility.
+  - owner files:
+    - `distro-builder/src/pipeline/live_tools.rs`
+    - `distro-builder/src/artifact/live_overlay.rs`
+    - `testing/install-tests/src/distro/mod.rs`
+    - `testing/install-tests/src/stages/mod.rs`
+    - `xtask/src/tasks/testing/stages.rs`
+  - audit and replace names such as:
+    - `stage-02-install-entrypoint`
+    - `30-stage-02-install-ux.sh`
+    - `stage02-entrypoint-helper=*`
+    - `stage02_install_experience()`
+    - `Stage 01` / `Stage 02` in canonical diagnostics where scenario/product wording should now be authoritative
+  - preserve compatibility names only when they are intentionally shipped UX or external interfaces
+
+- [ ] Remove stage-shaped metadata from canonical filesystem products.
+  - owner file:
+    - `distro-builder/src/pipeline/plan.rs`
+  - replace `usr/lib/stage-manifest.json` with product-native metadata
+  - stop branding canonical base product identity as `PRETTY_NAME="... (Stage 00Build)"`
+
+- [ ] Tighten output layout around canonical ownership.
+  - owner files:
+    - `distro-builder/src/bin/stage_paths.rs`
+    - `testing/install-tests/src/stages/mod.rs`
+    - `testing/install-tests/src/preflight.rs`
+  - canonical layout should converge on:
+    - `.artifacts/out/<distro>/products/...`
+    - `.artifacts/out/<distro>/artifacts/...`
+    - `.artifacts/out/<distro>/releases/...`
+    - `.artifacts/out/<distro>/scenarios/...`
+  - any remaining `s00-build`, `s01-boot`, `s02-live-tools`, `s03-install` layout must be wrapper-only
+
+- [ ] Update help text, docs, and wrappers last.
+  - owner files:
+    - `distro-builder/src/bin/distro-builder.rs`
+    - `testing/install-tests/src/bin/stages.rs`
+    - `xtask/src/cli/types.rs`
+    - `justfile`
+    - migration docs
+  - after canonical naming and layout are fixed, reduce stage-first wording in:
+    - usage/help text
+    - examples
+    - diagnostics
+    - wrapper commands
+  - keep stage aliases only where intentionally retained for operator compatibility
 
 Acceptance:
 
-- stage labels are no longer the canonical ownership model anywhere
-- any remaining stage surface is explicit compatibility only
+- [ ] stage labels are no longer the canonical ownership model anywhere
+- [ ] canonical builder execution no longer stores or routes through stage-native metadata
+- [ ] canonical test/preflight execution no longer consumes stage-native manifests or file names
+- [ ] canonical runtime/live payload names are product/scenario-native
+- [ ] any remaining stage surface is explicit compatibility only
 
 ## What Must Die
 

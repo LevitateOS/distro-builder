@@ -17,5 +17,6 @@ pub(crate) use commands::{
 };
 pub(crate) use layout::locate_repo_root;
 pub(crate) use parse::{
-    discover_distro_ids, parse_product, parse_release_build_command, parse_stage,
+    compatibility_stage_for_product, discover_distro_ids, parse_product,
+    parse_release_build_command, parse_stage,
 };

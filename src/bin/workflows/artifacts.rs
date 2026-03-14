@@ -37,7 +37,7 @@ struct PreparedProductManifest {
 #[derive(Debug, Clone, Copy)]
 enum PreparationMode {
     Canonical,
-    CompatibilityStage(crate::BuildStage),
+    CompatibilityStage(crate::CompatibilityBuildStage),
 }
 
 #[derive(Debug, Clone)]
@@ -155,8 +155,11 @@ pub(crate) fn build_stage_erofs_cmd(stage: &str, distro_id: &str) -> Result<()> 
     let cwd = std::env::current_dir().context("resolving current directory")?;
     let bundle = load_stage_00_contract_bundle_for_distro_from(&cwd, distro_id)
         .with_context(|| format!("loading 00Build contract for '{}'", distro_id))?;
-    let stage_output_dir =
-        crate::stage_paths::stage_output_dir_for(&bundle.repo_root, distro_id, stage.dir_name);
+    let stage_output_dir = crate::stage_paths::compatibility_stage_output_dir_for(
+        &bundle.repo_root,
+        distro_id,
+        stage.dir_name,
+    );
 
     fs::create_dir_all(&stage_output_dir).with_context(|| {
         format!(
@@ -295,7 +298,8 @@ fn prepare_product_inputs(
 
     match (product.canonical, mode) {
         (crate::PRODUCT_BASE_ROOTFS, PreparationMode::Canonical) => {
-            let output_root = crate::stage_paths::output_dir_for(&bundle.repo_root, distro_id);
+            let output_root =
+                crate::stage_paths::distro_output_root_for(&bundle.repo_root, distro_id);
             let spec = load_base_rootfs_product_spec(
                 distro_id,
                 &bundle.contract.identity.os_name,
@@ -315,7 +319,8 @@ fn prepare_product_inputs(
             })
         }
         (crate::PRODUCT_BASE_ROOTFS, PreparationMode::CompatibilityStage(_)) => {
-            let output_root = crate::stage_paths::output_dir_for(&bundle.repo_root, distro_id);
+            let output_root =
+                crate::stage_paths::distro_output_root_for(&bundle.repo_root, distro_id);
             let spec = distro_builder::stages::s01_boot_inputs::load_s00_build_input_spec(
                 distro_id,
                 &bundle.contract.identity.os_name,

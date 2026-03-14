@@ -1,9 +1,8 @@
 use anyhow::{Context, Result};
-use serde::Deserialize;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::pipeline::config::load_boot_config;
+use crate::pipeline::config::{load_boot_config, load_live_tools_config};
 use crate::pipeline::io::{
     create_empty_overlay_dir, create_unique_output_dir, extract_erofs_rootfs,
     resolve_parent_product_rootfs_image_for_distro,
@@ -138,25 +137,6 @@ pub struct LiveToolsProductSpec {
     live_overlay: OverlayLayout,
     overlay: S01OverlayPolicy,
     required_services: Vec<String>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct LiveToolsToml {
-    stage_02: LiveToolsStageToml,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct LiveToolsStageToml {
-    live_tools: LiveToolsInputsToml,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct LiveToolsInputsToml {
-    os_name: String,
-    install_experience: InstallExperience,
 }
 
 pub fn load_base_rootfs_product_spec(
@@ -367,11 +347,8 @@ pub fn load_live_tools_product_spec(
     distro_id: &str,
     layout: DerivedProductLayout,
 ) -> Result<LiveToolsProductSpec> {
-    let config_path = variant_dir.join("02LiveTools.toml");
-    let config_bytes = fs::read_to_string(&config_path)
-        .with_context(|| format!("reading live-tools config '{}'", config_path.display()))?;
-    let parsed: LiveToolsToml = toml::from_str(&config_bytes)
-        .with_context(|| format!("parsing live-tools config '{}'", config_path.display()))?;
+    let loaded = load_live_tools_config(variant_dir)
+        .with_context(|| format!("loading live-tools config for '{}'", distro_id))?;
 
     let live_boot_spec =
         load_live_boot_product_spec(repo_root, variant_dir, distro_id, layout.clone())
@@ -385,8 +362,8 @@ pub fn load_live_tools_product_spec(
     Ok(LiveToolsProductSpec {
         repo_root: repo_root.to_path_buf(),
         distro_id: distro_id.to_string(),
-        os_name: parsed.stage_02.live_tools.os_name,
-        install_experience: parsed.stage_02.live_tools.install_experience,
+        os_name: loaded.os_name,
+        install_experience: loaded.install_experience,
         rootfs_source_dir: layout.rootfs_source_dir,
         parent_rootfs: layout.parent_rootfs,
         live_overlay: layout.live_overlay,
@@ -471,6 +448,106 @@ pub fn prepare_live_tools_product(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_repo_root(test_name: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock before epoch")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "distro-builder-products-{test_name}-{}-{nanos}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&path).expect("create temp root");
+        path
+    }
+
+    fn write_file(path: &Path, content: &str) {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("create parent");
+        }
+        fs::write(path, content).expect("write file");
+    }
+
+    fn live_tools_layout() -> DerivedProductLayout {
+        DerivedProductLayout {
+            rootfs_source_dir: PathBuf::from("live-tools-rootfs"),
+            parent_rootfs: ParentRootfsInput {
+                release_dir_name: "live-boot".to_string(),
+                producer_label: "live-boot".to_string(),
+                rootfs_filename: "filesystem.erofs".to_string(),
+            },
+            live_overlay: OverlayLayout {
+                issue_banner_label: "Live Tools".to_string(),
+                dir_name: "live-overlay".to_string(),
+            },
+        }
+    }
+
+    fn write_live_tools_ring_scaffold(variant_dir: &Path) {
+        write_file(
+            &variant_dir.join("identity.toml"),
+            r#"schema_version = 6
+
+[identity]
+os_name = "LevitateOS"
+os_id = "levitateos"
+iso_label = "LEVITATE"
+os_version = "0.1.0"
+default_hostname = "levitate"
+"#,
+        );
+        write_file(
+            &variant_dir.join("scenarios.toml"),
+            r#"schema_version = 6
+
+[scenarios.live_environment]
+required_services = ["sshd"]
+
+[scenarios.live_tools]
+install_experience = "ux"
+"#,
+        );
+        write_file(
+            &variant_dir.join("ring2-products.toml"),
+            r#"schema_version = 6
+
+[ring2_products.rootfs_base]
+logical_name = "product.rootfs.base"
+description = "Canonical base root filesystem tree"
+
+[ring2_products.live_overlay]
+logical_name = "product.payload.live_overlay"
+description = "Read-only live overlay payload tree"
+overlay_kind = "systemd"
+
+[ring2_products.boot_live]
+logical_name = "product.payload.boot.live"
+description = "Live boot payload inputs"
+extends = "product.rootfs.base"
+
+[ring2_products.live_tools]
+logical_name = "product.payload.live_tools"
+description = "Live tools payload tree"
+extends = "product.payload.boot.live"
+
+[ring2_products.kernel_staging]
+logical_name = "product.kernel.staging"
+description = "Kernel image and modules staging product"
+"#,
+        );
+        write_file(
+            &variant_dir.join("ring3-sources.toml"),
+            r#"schema_version = 6
+
+[ring3_sources.rootfs_source]
+kind = "recipe_rpm_dvd"
+recipe_script = "distro-builder/recipes/fedora-stage01-rootfs.rhai"
+preseed_recipe_script = "distro-builder/recipes/fedora-preseed-iso.rhai"
+"#,
+        );
+    }
 
     #[test]
     fn base_rootfs_baseline_contains_os_release_files() {
@@ -517,5 +594,47 @@ mod tests {
             result.is_ok(),
             "stage-scoped rootfs path should be accepted"
         );
+    }
+
+    #[test]
+    fn live_tools_product_spec_loads_without_02livetools_when_ring_files_exist() {
+        let repo_root = temp_repo_root("live-tools-no-stage02");
+        let variant_dir = repo_root.join("distro-variants/levitate");
+        write_live_tools_ring_scaffold(&variant_dir);
+
+        let spec =
+            load_live_tools_product_spec(&repo_root, &variant_dir, "levitate", live_tools_layout())
+                .expect("load live tools spec from ring owners");
+
+        assert_eq!(spec.os_name, "LevitateOS");
+        assert_eq!(spec.install_experience, InstallExperience::Ux);
+        assert_eq!(spec.required_services, vec!["sshd".to_string()]);
+        assert!(matches!(spec.overlay, S01OverlayPolicy::Systemd { .. }));
+
+        fs::remove_dir_all(repo_root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn live_tools_product_spec_rejects_stage02_drift_from_scenarios() {
+        let repo_root = temp_repo_root("live-tools-stage02-drift");
+        let variant_dir = repo_root.join("distro-variants/levitate");
+        write_live_tools_ring_scaffold(&variant_dir);
+        write_file(
+            &variant_dir.join("02LiveTools.toml"),
+            r#"[stage_02.live_tools]
+os_name = "LevitateOS"
+install_experience = "automated_ssh"
+"#,
+        );
+
+        let err =
+            load_live_tools_product_spec(&repo_root, &variant_dir, "levitate", live_tools_layout())
+                .expect_err("drifted stage 02 live-tools config should fail");
+        assert!(
+            format!("{err:#}").contains("scenario/live-tools parity mismatch"),
+            "unexpected error: {err:#}"
+        );
+
+        fs::remove_dir_all(repo_root).expect("cleanup temp root");
     }
 }

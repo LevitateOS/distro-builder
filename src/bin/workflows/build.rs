@@ -15,62 +15,69 @@ pub(crate) fn preflight_iso_build(
     distro_id: &str,
     product: BuildProduct,
 ) -> Result<()> {
-    match product.canonical {
-        crate::PRODUCT_BASE_ROOTFS => {}
-        crate::PRODUCT_LIVE_BOOT => require_parent_product_rootfs(
-            repo_root,
-            distro_id,
-            product.canonical,
-            crate::PRODUCT_BASE_ROOTFS,
-            "filesystem.erofs",
-        )?,
-        crate::PRODUCT_LIVE_TOOLS => require_parent_product_rootfs(
-            repo_root,
-            distro_id,
-            product.canonical,
-            crate::PRODUCT_LIVE_BOOT,
-            "filesystem.erofs",
-        )?,
-        _ => unreachable!("validated in parse_stage"),
+    let bundle = load_stage_00_contract_bundle_for_distro_from(repo_root, distro_id)
+        .with_context(|| format!("loading 00Build contract for '{}'", distro_id))?;
+    if let Some(parent_product) = parent_product_for_release_product(&bundle.contract, product)? {
+        require_parent_product_rootfs(repo_root, distro_id, product, parent_product)?;
     }
 
     Ok(())
 }
 
+fn parent_product_for_release_product(
+    contract: &distro_contract::ConformanceContract,
+    product: BuildProduct,
+) -> Result<Option<BuildProduct>> {
+    let parent_logical_name = match product.canonical {
+        crate::PRODUCT_BASE_ROOTFS => None,
+        crate::PRODUCT_LIVE_BOOT => contract.products.boot_live.extends.as_deref(),
+        crate::PRODUCT_LIVE_TOOLS => contract.products.live_tools.extends.as_deref(),
+        _ => unreachable!("validated in parse_product"),
+    };
+
+    parent_logical_name
+        .map(crate::workflows::product_for_logical_name)
+        .transpose()
+}
+
 fn require_parent_product_rootfs(
     repo_root: &Path,
     distro_id: &str,
-    product_name: &str,
-    parent_product_name: &str,
-    parent_rootfs_filename: &str,
+    product: BuildProduct,
+    parent_product: BuildProduct,
 ) -> Result<()> {
-    let parent_root =
-        crate::stage_paths::release_product_dir_for(repo_root, distro_id, parent_product_name);
+    let parent_root = crate::stage_paths::release_product_dir_for(
+        repo_root,
+        distro_id,
+        parent_product.release_dir_name,
+    );
     let run_id = crate::stage_runs::latest_successful_run_id(&parent_root)?.ok_or_else(|| {
         anyhow::anyhow!(
             "preflight failed for '{}' release product '{}': no successful parent product '{}' runs found under '{}'.\n\
              Build the '{}' release first: `cargo run -p distro-builder --bin distro-builder -- release build iso {} {}`",
             distro_id,
-            product_name,
-            parent_product_name,
+            product.canonical,
+            parent_product.canonical,
             parent_root.display(),
-            parent_product_name,
+            parent_product.canonical,
             distro_id,
-            parent_product_name
+            parent_product.canonical
         )
     })?;
-    let parent_rootfs = parent_root.join(&run_id).join(parent_rootfs_filename);
+    let parent_rootfs = parent_root
+        .join(&run_id)
+        .join(parent_product.rootfs_erofs_filename);
     if !parent_rootfs.is_file() {
         bail!(
             "preflight failed for '{}' release product '{}': missing parent product '{}' rootfs image '{}'.\n\
              Build the '{}' release first: `cargo run -p distro-builder --bin distro-builder -- release build iso {} {}`",
             distro_id,
-            product_name,
-            parent_product_name,
+            product.canonical,
+            parent_product.canonical,
             parent_rootfs.display(),
-            parent_product_name,
+            parent_product.canonical,
             distro_id,
-            parent_product_name
+            parent_product.canonical
         );
     }
     Ok(())

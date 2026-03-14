@@ -13,7 +13,9 @@ use distro_builder::{
     prepare_base_rootfs_product, prepare_live_boot_product, prepare_live_tools_product,
     BaseProductLayout, DerivedProductLayout, OverlayLayout, ParentRootfsInput,
 };
-use distro_contract::load_stage_00_contract_bundle_for_distro_from;
+use distro_contract::{
+    load_stage_00_contract_bundle_for_distro_from, ConformanceContract, ProductDecl,
+};
 
 use crate::workflows::prepared_products::{
     canonical_prepared_output_names, read_prepared_product_manifest, resolve_prepared_product_path,
@@ -48,10 +50,21 @@ fn canonical_base_product_layout(product: crate::BuildProduct) -> BaseProductLay
 }
 
 fn canonical_derived_product_layout(
+    contract: &ConformanceContract,
     product: crate::BuildProduct,
-    parent_product: crate::BuildProduct,
-) -> DerivedProductLayout {
-    DerivedProductLayout {
+) -> Result<DerivedProductLayout> {
+    let parent_logical_name = runtime_product_decl(contract, product)
+        .extends
+        .as_deref()
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "missing canonical Ring 2 composition edge for '{}': product '{}' must declare `extends` in ring2-products.toml",
+                product.canonical,
+                runtime_product_decl(contract, product).logical_name
+            )
+        })?;
+    let parent_product = crate::workflows::product_for_logical_name(parent_logical_name)?;
+    Ok(DerivedProductLayout {
         rootfs_source_dir: PathBuf::from("rootfs-source"),
         parent_rootfs: ParentRootfsInput {
             release_dir_name: parent_product.release_dir_name.to_string(),
@@ -62,6 +75,17 @@ fn canonical_derived_product_layout(
             issue_banner_label: product.issue_banner_label.to_string(),
             dir_name: product.live_overlay_dir_name.to_string(),
         },
+    })
+}
+
+fn runtime_product_decl<'a>(
+    contract: &'a ConformanceContract,
+    product: crate::BuildProduct,
+) -> &'a ProductDecl {
+    match product.canonical {
+        crate::PRODUCT_LIVE_BOOT => &contract.products.boot_live,
+        crate::PRODUCT_LIVE_TOOLS => &contract.products.live_tools,
+        _ => unreachable!("canonical derived product layout is only valid for derived products"),
     }
 }
 
@@ -174,10 +198,7 @@ fn prepare_product_inputs(
             })
         }
         crate::PRODUCT_LIVE_BOOT => {
-            let layout = canonical_derived_product_layout(
-                product,
-                crate::workflows::parse_product(Some(crate::PRODUCT_BASE_ROOTFS))?,
-            );
+            let layout = canonical_derived_product_layout(&bundle.contract, product)?;
             let spec = load_live_boot_product_spec(
                 &bundle.repo_root,
                 &bundle.variant_dir,
@@ -194,9 +215,7 @@ fn prepare_product_inputs(
             })
         }
         crate::PRODUCT_LIVE_TOOLS => {
-            let live_boot_product =
-                crate::workflows::parse_product(Some(crate::PRODUCT_LIVE_BOOT))?;
-            let layout = canonical_derived_product_layout(product, live_boot_product);
+            let layout = canonical_derived_product_layout(&bundle.contract, product)?;
             let spec = load_live_tools_product_spec(
                 &bundle.repo_root,
                 &bundle.variant_dir,

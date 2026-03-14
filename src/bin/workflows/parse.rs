@@ -110,6 +110,18 @@ pub(crate) fn parse_product(value: Option<&str>) -> Result<crate::BuildProduct> 
     }
 }
 
+pub(crate) fn product_for_logical_name(logical_name: &str) -> Result<crate::BuildProduct> {
+    match logical_name {
+        "product.rootfs.base" => Ok(product_base_rootfs()),
+        "product.payload.boot.live" => Ok(product_live_boot()),
+        "product.payload.live_tools" => Ok(product_live_tools()),
+        other => bail!(
+            "unsupported canonical product logical name '{}'; expected one of: product.rootfs.base, product.payload.boot.live, product.payload.live_tools",
+            other
+        ),
+    }
+}
+
 pub(crate) fn product_for_stage(stage: crate::CompatibilityBuildStage) -> crate::BuildProduct {
     match stage.slug {
         STAGE00_SLUG => product_base_rootfs(),
@@ -284,6 +296,28 @@ mod tests {
         assert_eq!(
             parse_product(Some(STAGE02_CANONICAL)).expect("parse stage alias"),
             parse_product(Some(crate::PRODUCT_LIVE_TOOLS)).expect("parse canonical product")
+        );
+    }
+
+    #[test]
+    fn product_for_logical_name_maps_runtime_products() {
+        assert_eq!(
+            product_for_logical_name("product.rootfs.base")
+                .expect("map rootfs base")
+                .canonical,
+            crate::PRODUCT_BASE_ROOTFS
+        );
+        assert_eq!(
+            product_for_logical_name("product.payload.boot.live")
+                .expect("map live boot")
+                .canonical,
+            crate::PRODUCT_LIVE_BOOT
+        );
+        assert_eq!(
+            product_for_logical_name("product.payload.live_tools")
+                .expect("map live tools")
+                .canonical,
+            crate::PRODUCT_LIVE_TOOLS
         );
     }
 }

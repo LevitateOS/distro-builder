@@ -3,6 +3,7 @@ use serde::Deserialize;
 use std::fs;
 use std::path::Path;
 
+use crate::pipeline::live_tools::InstallExperience;
 use crate::pipeline::overlay::S01OverlayPolicy;
 use crate::pipeline::paths::resolve_repo_path;
 use crate::pipeline::source::{
@@ -16,6 +17,12 @@ pub(crate) struct S01LoadedConfig {
     pub(crate) required_services: Vec<String>,
     pub(crate) rootfs_source_policy: Option<S01RootfsSourcePolicy>,
     pub(crate) overlay: S01OverlayPolicy,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct LiveToolsLoadedConfig {
+    pub(crate) os_name: String,
+    pub(crate) install_experience: InstallExperience,
 }
 
 #[derive(Debug, Deserialize)]
@@ -35,6 +42,8 @@ struct Ring2ProductsSectionToml {
     #[allow(dead_code)]
     boot_live: Ring2ProductDeclToml,
     #[allow(dead_code)]
+    live_tools: Ring2ProductDeclToml,
+    #[allow(dead_code)]
     boot_installed: Option<Ring2ProductDeclToml>,
     #[allow(dead_code)]
     kernel_staging: Ring2ProductDeclToml,
@@ -47,6 +56,8 @@ struct Ring2ProductDeclToml {
     logical_name: String,
     #[allow(dead_code)]
     description: String,
+    #[allow(dead_code)]
+    extends: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -56,6 +67,8 @@ struct Ring2LiveOverlayToml {
     logical_name: String,
     #[allow(dead_code)]
     description: String,
+    #[allow(dead_code)]
+    extends: Option<String>,
     overlay_kind: String,
     issue_message: Option<String>,
     openrc_inittab: Option<String>,
@@ -120,8 +133,7 @@ struct LiveEnvironmentScenarioToml {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct LiveToolsScenarioToml {
-    #[allow(dead_code)]
-    install_experience: String,
+    install_experience: InstallExperience,
     #[allow(dead_code)]
     evidence: Option<ScenarioEvidenceToml>,
 }
@@ -157,6 +169,25 @@ struct S01BootInputsToml {
     openrc_inittab: Option<String>,
     profile_overlay: Option<String>,
     issue_message: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct S02LiveToolsToml {
+    stage_02: S02LiveToolsStageToml,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct S02LiveToolsStageToml {
+    live_tools: S02LiveToolsInputsToml,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct S02LiveToolsInputsToml {
+    os_name: String,
+    install_experience: InstallExperience,
 }
 
 pub(crate) fn load_boot_config(
@@ -201,6 +232,19 @@ pub(crate) fn load_boot_config(
     })
 }
 
+pub(crate) fn load_live_tools_config(variant_dir: &Path) -> Result<LiveToolsLoadedConfig> {
+    let config_path = variant_dir.join("02LiveTools.toml");
+    let legacy_live_tools = load_legacy_live_tools_inputs(&config_path)?;
+    let os_name = load_live_tools_os_name(variant_dir, legacy_live_tools.as_ref())?;
+    let install_experience =
+        load_live_tools_install_experience(variant_dir, legacy_live_tools.as_ref())?;
+
+    Ok(LiveToolsLoadedConfig {
+        os_name,
+        install_experience,
+    })
+}
+
 fn load_legacy_boot_inputs(config_path: &Path) -> Result<Option<S01BootInputsToml>> {
     if !config_path.is_file() {
         return Ok(None);
@@ -211,6 +255,18 @@ fn load_legacy_boot_inputs(config_path: &Path) -> Result<Option<S01BootInputsTom
     let parsed: S01BootToml = toml::from_str(&config_bytes)
         .with_context(|| format!("parsing Stage 01 config '{}'", config_path.display()))?;
     Ok(Some(parsed.stage_01.boot_inputs))
+}
+
+fn load_legacy_live_tools_inputs(config_path: &Path) -> Result<Option<S02LiveToolsInputsToml>> {
+    if !config_path.is_file() {
+        return Ok(None);
+    }
+
+    let config_bytes = fs::read_to_string(config_path)
+        .with_context(|| format!("reading Stage 02 config '{}'", config_path.display()))?;
+    let parsed: S02LiveToolsToml = toml::from_str(&config_bytes)
+        .with_context(|| format!("parsing Stage 02 config '{}'", config_path.display()))?;
+    Ok(Some(parsed.stage_02.live_tools))
 }
 
 fn load_identity_os_name(
@@ -247,6 +303,44 @@ fn load_identity_os_name(
     ring_os_name
         .or(legacy_os_name)
         .ok_or_else(|| anyhow::anyhow!("missing canonical os_name for '{}'", variant_dir.display()))
+}
+
+fn load_live_tools_os_name(
+    variant_dir: &Path,
+    legacy_live_tools: Option<&S02LiveToolsInputsToml>,
+) -> Result<String> {
+    let identity_path = variant_dir.join("identity.toml");
+    let ring_os_name = if identity_path.is_file() {
+        let config_bytes = fs::read_to_string(&identity_path)
+            .with_context(|| format!("reading identity config '{}'", identity_path.display()))?;
+        let parsed: IdentityToml = toml::from_str(&config_bytes)
+            .with_context(|| format!("parsing identity config '{}'", identity_path.display()))?;
+        Some(parsed.identity.os_name)
+    } else {
+        None
+    };
+
+    let legacy_os_name = legacy_live_tools
+        .map(|inputs| inputs.os_name.trim().to_string())
+        .filter(|value| !value.is_empty());
+
+    if let (Some(ring_os_name), Some(legacy_os_name)) = (&ring_os_name, &legacy_os_name) {
+        if ring_os_name != legacy_os_name {
+            bail!(
+                "identity/live-tools parity mismatch for '{}': legacy 02LiveTools os_name '{}' does not match identity.toml os_name '{}'",
+                variant_dir.display(),
+                legacy_os_name,
+                ring_os_name
+            );
+        }
+    }
+
+    ring_os_name.or(legacy_os_name).ok_or_else(|| {
+        anyhow::anyhow!(
+            "missing canonical live-tools os_name for '{}'",
+            variant_dir.display()
+        )
+    })
 }
 
 fn load_required_services(
@@ -294,6 +388,49 @@ fn load_required_services(
     Ok(ring_required_services
         .or(legacy_required_services)
         .unwrap_or_else(|| vec!["sshd".to_string()]))
+}
+
+fn load_live_tools_install_experience(
+    variant_dir: &Path,
+    legacy_live_tools: Option<&S02LiveToolsInputsToml>,
+) -> Result<InstallExperience> {
+    let scenarios_path = variant_dir.join("scenarios.toml");
+    let ring_install_experience = if scenarios_path.is_file() {
+        let config_bytes = fs::read_to_string(&scenarios_path)
+            .with_context(|| format!("reading scenarios config '{}'", scenarios_path.display()))?;
+        let parsed: ScenariosToml = toml::from_str(&config_bytes)
+            .with_context(|| format!("parsing scenarios config '{}'", scenarios_path.display()))?;
+        parsed
+            .scenarios
+            .live_tools
+            .map(|tools| tools.install_experience)
+    } else {
+        None
+    };
+
+    let legacy_install_experience = legacy_live_tools.map(|inputs| inputs.install_experience);
+
+    if let (Some(ring_install_experience), Some(legacy_install_experience)) =
+        (&ring_install_experience, &legacy_install_experience)
+    {
+        if ring_install_experience != legacy_install_experience {
+            bail!(
+                "scenario/live-tools parity mismatch for '{}': legacy 02LiveTools install_experience '{}' does not match scenarios.toml install_experience '{}'",
+                variant_dir.display(),
+                legacy_install_experience.as_str(),
+                ring_install_experience.as_str()
+            );
+        }
+    }
+
+    ring_install_experience
+        .or(legacy_install_experience)
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "missing canonical live-tools install_experience for '{}'",
+                variant_dir.display()
+            )
+        })
 }
 
 fn load_ring2_overlay_policy(
@@ -619,6 +756,12 @@ overlay_kind = "systemd"
 [ring2_products.boot_live]
 logical_name = "product.payload.boot.live"
 description = "Live boot payload inputs"
+extends = "product.rootfs.base"
+
+[ring2_products.live_tools]
+logical_name = "product.payload.live_tools"
+description = "Live tools payload tree"
+extends = "product.payload.boot.live"
 
 [ring2_products.kernel_staging]
 logical_name = "product.kernel.staging"
@@ -674,6 +817,12 @@ overlay_kind = "openrc"
 [ring2_products.boot_live]
 logical_name = "product.payload.boot.live"
 description = "Live boot payload inputs"
+extends = "product.rootfs.base"
+
+[ring2_products.live_tools]
+logical_name = "product.payload.live_tools"
+description = "Live tools payload tree"
+extends = "product.payload.boot.live"
 
 [ring2_products.kernel_staging]
 logical_name = "product.kernel.staging"
@@ -786,12 +935,7 @@ description = "Kernel image and modules staging product"
             .to_path_buf();
 
         let cases = [
-            (
-                "levitate",
-                "LevitateOS",
-                vec!["auditd", "sshd"],
-                "systemd",
-            ),
+            ("levitate", "LevitateOS", vec!["auditd", "sshd"], "systemd"),
             ("ralph", "RalphOS", vec!["sshd"], "systemd"),
             (
                 "acorn",
@@ -842,9 +986,7 @@ description = "Kernel image and modules staging product"
             match (&loaded.rootfs_source_policy, distro_id) {
                 (Some(S01RootfsSourcePolicy::RecipeRpmDvd { .. }), "levitate" | "ralph") => {}
                 (Some(S01RootfsSourcePolicy::RecipeCustom { .. }), "acorn" | "iuppiter") => {}
-                (other, _) => panic!(
-                    "unexpected rootfs source policy for {distro_id}: {other:?}"
-                ),
+                (other, _) => panic!("unexpected rootfs source policy for {distro_id}: {other:?}"),
             }
         }
     }

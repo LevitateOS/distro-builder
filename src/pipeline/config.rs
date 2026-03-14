@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
-use crate::pipeline::live_tools::InstallExperience;
+use crate::pipeline::live_tools::{InstallDocsFrontend, InstallExperience, LiveToolsRuntimeAction};
 use crate::pipeline::overlay::S01OverlayPolicy;
 use crate::pipeline::paths::resolve_repo_path;
 use crate::pipeline::plan::{boot_baseline_producers, RootfsProducer};
@@ -26,6 +26,7 @@ pub(crate) struct S01LoadedConfig {
 pub(crate) struct LiveToolsLoadedConfig {
     pub(crate) os_name: String,
     pub(crate) install_experience: InstallExperience,
+    pub(crate) runtime_actions: Vec<LiveToolsRuntimeAction>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -35,6 +36,7 @@ struct Ring2ProductsToml {
     schema_version: u32,
     ring2_products: Ring2ProductsSectionToml,
     ring2_payload_profiles: Option<BTreeMap<String, Ring2PayloadProfileToml>>,
+    ring2_runtime_profiles: Option<BTreeMap<String, Ring2RuntimeProfileToml>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -63,6 +65,9 @@ struct Ring2ProductDeclToml {
     #[allow(dead_code)]
     extends: Option<String>,
     payload_profile: Option<String>,
+    runtime_profiles: Option<Vec<String>>,
+    runtime_profiles_ux: Option<Vec<String>>,
+    runtime_profiles_automated_ssh: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -84,6 +89,38 @@ struct Ring2LiveOverlayToml {
 #[serde(deny_unknown_fields)]
 struct Ring2PayloadProfileToml {
     producers: Vec<Ring2RootfsProducerToml>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Ring2RuntimeProfileToml {
+    actions: Vec<Ring2RuntimeActionToml>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum Ring2RuntimeActionToml {
+    ToolPayloadWorkspaceBinary {
+        package: String,
+        binary: Option<String>,
+        target: Option<String>,
+    },
+    RootfsWorkspaceBinary {
+        package: String,
+        binary: Option<String>,
+        target: Option<String>,
+        destination: String,
+    },
+    ApkPackages {
+        packages: Vec<String>,
+    },
+    IuppiterDarPayload {
+        target: Option<String>,
+    },
+    InstallModePayload {
+        interactive_shell: String,
+        ux_docs_frontend: InstallDocsFrontend,
+    },
 }
 
 #[derive(Debug, Deserialize)]
@@ -304,16 +341,22 @@ pub(crate) fn load_installed_boot_payload_config(
     Ok(loaded)
 }
 
-pub(crate) fn load_live_tools_config(variant_dir: &Path) -> Result<LiveToolsLoadedConfig> {
+pub(crate) fn load_live_tools_config(
+    variant_dir: &Path,
+    distro_id: &str,
+) -> Result<LiveToolsLoadedConfig> {
     let config_path = variant_dir.join("02LiveTools.toml");
     let legacy_live_tools = load_legacy_live_tools_inputs(&config_path)?;
     let os_name = load_live_tools_os_name(variant_dir, legacy_live_tools.as_ref())?;
     let install_experience =
         load_live_tools_install_experience(variant_dir, legacy_live_tools.as_ref())?;
+    let runtime_actions =
+        load_live_tools_runtime_actions(variant_dir, distro_id, install_experience)?;
 
     Ok(LiveToolsLoadedConfig {
         os_name,
         install_experience,
+        runtime_actions,
     })
 }
 
@@ -406,6 +449,276 @@ fn load_boot_payload_producers(
         .iter()
         .map(rootfs_producer_from_ring2_toml)
         .collect()
+}
+
+fn load_live_tools_runtime_actions(
+    variant_dir: &Path,
+    distro_id: &str,
+    install_experience: InstallExperience,
+) -> Result<Vec<LiveToolsRuntimeAction>> {
+    let Some(parsed) = load_ring2_products_manifest(variant_dir)? else {
+        return Ok(legacy_live_tools_runtime_actions(
+            distro_id,
+            install_experience,
+        ));
+    };
+
+    let live_tools = &parsed.ring2_products.live_tools;
+    let mut profile_names = live_tools.runtime_profiles.clone().unwrap_or_default();
+    match install_experience {
+        InstallExperience::Ux => {
+            profile_names.extend(live_tools.runtime_profiles_ux.clone().unwrap_or_default());
+        }
+        InstallExperience::AutomatedSsh => {
+            profile_names.extend(
+                live_tools
+                    .runtime_profiles_automated_ssh
+                    .clone()
+                    .unwrap_or_default(),
+            );
+        }
+    }
+
+    if profile_names.is_empty() {
+        return Ok(legacy_live_tools_runtime_actions(
+            distro_id,
+            install_experience,
+        ));
+    }
+
+    let profiles = parsed.ring2_runtime_profiles.as_ref().ok_or_else(|| {
+        anyhow::anyhow!(
+            "missing ring2_runtime_profiles section in '{}'; required by live-tools runtime_profiles",
+            variant_dir.join("ring2-products.toml").display()
+        )
+    })?;
+
+    let mut actions = Vec::new();
+    for profile_name in &profile_names {
+        let profile = profiles.get(profile_name).ok_or_else(|| {
+            anyhow::anyhow!(
+                "unknown Ring 2 runtime profile '{}' referenced by '{}' in '{}'",
+                profile_name,
+                parsed.ring2_products.live_tools.logical_name,
+                variant_dir.join("ring2-products.toml").display()
+            )
+        })?;
+        if profile.actions.is_empty() {
+            bail!(
+                "Ring 2 runtime profile '{}' in '{}' must declare at least one action",
+                profile_name,
+                variant_dir.join("ring2-products.toml").display()
+            );
+        }
+        for action in &profile.actions {
+            actions.push(live_tools_runtime_action_from_toml(action)?);
+        }
+    }
+
+    Ok(actions)
+}
+
+fn legacy_live_tools_runtime_actions(
+    distro_id: &str,
+    install_experience: InstallExperience,
+) -> Vec<LiveToolsRuntimeAction> {
+    let target = match distro_id {
+        "levitate" | "ralph" => None,
+        "acorn" | "iuppiter" => Some("x86_64-unknown-linux-musl".to_string()),
+        _ => None,
+    };
+
+    let interactive_shell = match distro_id {
+        "levitate" | "ralph" => "/bin/bash",
+        "acorn" | "iuppiter" => "/bin/sh",
+        _ => "/bin/sh",
+    };
+    let ux_docs_frontend = match distro_id {
+        "levitate" => InstallDocsFrontend::BunBundle,
+        _ => InstallDocsFrontend::PlainText,
+    };
+
+    let mut actions = vec![
+        LiveToolsRuntimeAction::ToolPayloadWorkspaceBinary {
+            package: "recstrap".to_string(),
+            binary: None,
+            target: target.clone(),
+        },
+        LiveToolsRuntimeAction::ToolPayloadWorkspaceBinary {
+            package: "recfstab".to_string(),
+            binary: None,
+            target: target.clone(),
+        },
+        LiveToolsRuntimeAction::ToolPayloadWorkspaceBinary {
+            package: "recchroot".to_string(),
+            binary: None,
+            target: target.clone(),
+        },
+        LiveToolsRuntimeAction::InstallModePayload {
+            interactive_shell: interactive_shell.to_string(),
+            ux_docs_frontend,
+        },
+    ];
+
+    match distro_id {
+        "acorn" => actions.push(LiveToolsRuntimeAction::ApkPackages {
+            packages: vec![
+                "curl".to_string(),
+                "pciutils".to_string(),
+                "smartmontools".to_string(),
+                "hdparm".to_string(),
+                "vim".to_string(),
+                "htop".to_string(),
+            ],
+        }),
+        "iuppiter" => {
+            actions.push(LiveToolsRuntimeAction::ApkPackages {
+                packages: vec![
+                    "smartmontools".to_string(),
+                    "hdparm".to_string(),
+                    "sg3_utils".to_string(),
+                ],
+            });
+            actions.push(LiveToolsRuntimeAction::RootfsWorkspaceBinary {
+                package: "recab".to_string(),
+                binary: None,
+                target: target.clone(),
+                destination: "usr/bin/recab".into(),
+            });
+            actions.push(LiveToolsRuntimeAction::IuppiterDarPayload {
+                target: target.clone(),
+            });
+        }
+        _ => {}
+    }
+
+    if install_experience == InstallExperience::Ux {
+        actions.push(LiveToolsRuntimeAction::RootfsWorkspaceBinary {
+            package: "stage02-split-pane".to_string(),
+            binary: Some("levitate-install-docs-split".to_string()),
+            target,
+            destination: "usr/local/bin/levitate-install-docs-split".into(),
+        });
+    }
+
+    actions
+}
+
+fn live_tools_runtime_action_from_toml(
+    action: &Ring2RuntimeActionToml,
+) -> Result<LiveToolsRuntimeAction> {
+    fn normalize_string(raw: &str, field: &str) -> Result<String> {
+        let value = raw.trim();
+        if value.is_empty() {
+            bail!("Ring 2 runtime action field '{}' must not be empty", field);
+        }
+        Ok(value.to_string())
+    }
+
+    fn normalize_relative_path(raw: &str, field: &str) -> Result<String> {
+        let value = normalize_string(raw, field)?;
+        let path = std::path::Path::new(&value);
+        if path.is_absolute() {
+            bail!(
+                "Ring 2 runtime action field '{}' must be relative, got '{}'",
+                field,
+                path.display()
+            );
+        }
+        if path
+            .components()
+            .any(|component| matches!(component, std::path::Component::ParentDir))
+        {
+            bail!(
+                "Ring 2 runtime action field '{}' must not traverse parents, got '{}'",
+                field,
+                path.display()
+            );
+        }
+        Ok(value)
+    }
+
+    Ok(match action {
+        Ring2RuntimeActionToml::ToolPayloadWorkspaceBinary {
+            package,
+            binary,
+            target,
+        } => LiveToolsRuntimeAction::ToolPayloadWorkspaceBinary {
+            package: normalize_string(package, "package")?,
+            binary: binary
+                .as_deref()
+                .map(|value| normalize_string(value, "binary"))
+                .transpose()?,
+            target: target
+                .as_deref()
+                .map(|value| normalize_string(value, "target"))
+                .transpose()?,
+        },
+        Ring2RuntimeActionToml::RootfsWorkspaceBinary {
+            package,
+            binary,
+            target,
+            destination,
+        } => LiveToolsRuntimeAction::RootfsWorkspaceBinary {
+            package: normalize_string(package, "package")?,
+            binary: binary
+                .as_deref()
+                .map(|value| normalize_string(value, "binary"))
+                .transpose()?,
+            target: target
+                .as_deref()
+                .map(|value| normalize_string(value, "target"))
+                .transpose()?,
+            destination: std::path::PathBuf::from(normalize_relative_path(
+                destination,
+                "destination",
+            )?),
+        },
+        Ring2RuntimeActionToml::ApkPackages { packages } => {
+            let packages = packages
+                .iter()
+                .map(|package| normalize_string(package, "packages"))
+                .collect::<Result<Vec<_>>>()?;
+            if packages.is_empty() {
+                bail!("Ring 2 runtime action 'apk_packages' must declare at least one package");
+            }
+            LiveToolsRuntimeAction::ApkPackages { packages }
+        }
+        Ring2RuntimeActionToml::IuppiterDarPayload { target } => {
+            LiveToolsRuntimeAction::IuppiterDarPayload {
+                target: target
+                    .as_deref()
+                    .map(|value| normalize_string(value, "target"))
+                    .transpose()?,
+            }
+        }
+        Ring2RuntimeActionToml::InstallModePayload {
+            interactive_shell,
+            ux_docs_frontend,
+        } => {
+            let interactive_shell = normalize_string(interactive_shell, "interactive_shell")?;
+            let shell_path = std::path::Path::new(&interactive_shell);
+            if !shell_path.is_absolute() {
+                bail!(
+                    "Ring 2 runtime action field 'interactive_shell' must be absolute, got '{}'",
+                    shell_path.display()
+                );
+            }
+            if shell_path
+                .components()
+                .any(|component| matches!(component, std::path::Component::ParentDir))
+            {
+                bail!(
+                    "Ring 2 runtime action field 'interactive_shell' must not traverse parents, got '{}'",
+                    shell_path.display()
+                );
+            }
+            LiveToolsRuntimeAction::InstallModePayload {
+                interactive_shell,
+                ux_docs_frontend: *ux_docs_frontend,
+            }
+        }
+    })
 }
 
 fn rootfs_producer_from_ring2_toml(producer: &Ring2RootfsProducerToml) -> Result<RootfsProducer> {

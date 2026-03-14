@@ -24,6 +24,38 @@ impl InstallExperience {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum InstallDocsFrontend {
+    PlainText,
+    BunBundle,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum LiveToolsRuntimeAction {
+    ToolPayloadWorkspaceBinary {
+        package: String,
+        binary: Option<String>,
+        target: Option<String>,
+    },
+    RootfsWorkspaceBinary {
+        package: String,
+        binary: Option<String>,
+        target: Option<String>,
+        destination: PathBuf,
+    },
+    ApkPackages {
+        packages: Vec<String>,
+    },
+    IuppiterDarPayload {
+        target: Option<String>,
+    },
+    InstallModePayload {
+        interactive_shell: String,
+        ux_docs_frontend: InstallDocsFrontend,
+    },
+}
+
 const CANONICAL_INSTALL_EXPERIENCE_MARKER: &str = "usr/lib/levitate/install-experience";
 const COMPAT_INSTALL_EXPERIENCE_MARKER: &str = "usr/lib/levitate/stage-02/install-experience";
 const CANONICAL_INSTALL_DOCS_TEXT: &str = "usr/local/share/levitate/install-docs.txt";
@@ -39,38 +71,92 @@ pub(crate) fn add_required_tools(
     tool_payload_dir: &Path,
     distro_id: &str,
     install_experience: InstallExperience,
+    runtime_actions: &[LiveToolsRuntimeAction],
 ) -> Result<()> {
-    let target = match distro_id {
-        "levitate" | "ralph" => None,
-        "acorn" | "iuppiter" => Some("x86_64-unknown-linux-musl"),
-        other => bail!("unsupported distro id for tool wiring: '{}'", other),
-    };
+    let tool_payload_dest_dirs =
+        tool_payload_destination_dirs(rootfs_source_dir, tool_payload_dir)?;
 
-    if matches!(distro_id, "acorn" | "iuppiter") {
-        ensure_musl_packages(rootfs_source_dir, distro_id, install_experience)
-            .with_context(|| format!("installing musl package additions for '{}'", distro_id))?;
-    }
-    if distro_id == "iuppiter" {
-        install_iuppiter_runtime_payload(repo_root, rootfs_source_dir, target).with_context(
-            || {
+    for action in runtime_actions {
+        match action {
+            LiveToolsRuntimeAction::ToolPayloadWorkspaceBinary {
+                package,
+                binary,
+                target,
+            } => install_tool_payload_workspace_binary(
+                repo_root,
+                &tool_payload_dest_dirs,
+                package,
+                binary.as_deref(),
+                target.as_deref(),
+            )
+            .with_context(|| {
                 format!(
-                    "installing iuppiter runtime payload into live-tools rootfs for '{}'",
+                    "installing tool payload workspace binary '{}' for '{}'",
+                    binary.as_deref().unwrap_or(package),
                     distro_id
                 )
-            },
-        )?;
-    }
-    install_mode_payload(repo_root, rootfs_source_dir, distro_id, install_experience)
-        .with_context(|| format!("writing install experience payload for '{}'", distro_id))?;
-    if install_experience == InstallExperience::Ux {
-        install_split_launcher(repo_root, rootfs_source_dir, target).with_context(|| {
-            format!(
-                "installing install split launcher binary for '{}'",
-                distro_id
+            })?,
+            LiveToolsRuntimeAction::RootfsWorkspaceBinary {
+                package,
+                binary,
+                target,
+                destination,
+            } => install_rootfs_workspace_binary(
+                repo_root,
+                rootfs_source_dir,
+                package,
+                binary.as_deref(),
+                target.as_deref(),
+                destination,
             )
-        })?;
+            .with_context(|| {
+                format!(
+                    "installing rootfs workspace binary '{}' into '{}' for '{}'",
+                    binary.as_deref().unwrap_or(package),
+                    destination.display(),
+                    distro_id
+                )
+            })?,
+            LiveToolsRuntimeAction::ApkPackages { packages } => {
+                ensure_apk_packages(rootfs_source_dir, packages).with_context(|| {
+                    format!(
+                        "installing live-tools apk packages for '{}': {}",
+                        distro_id,
+                        packages.join(", ")
+                    )
+                })?
+            }
+            LiveToolsRuntimeAction::IuppiterDarPayload { target } => {
+                install_iuppiter_dar_payload(repo_root, rootfs_source_dir, target.as_deref())
+                    .with_context(|| {
+                        format!(
+                            "installing iuppiter DAR runtime payload for '{}'",
+                            distro_id
+                        )
+                    })?
+            }
+            LiveToolsRuntimeAction::InstallModePayload {
+                interactive_shell,
+                ux_docs_frontend,
+            } => install_mode_payload(
+                repo_root,
+                rootfs_source_dir,
+                distro_id,
+                install_experience,
+                interactive_shell,
+                *ux_docs_frontend,
+            )
+            .with_context(|| format!("writing install experience payload for '{}'", distro_id))?,
+        }
     }
 
+    Ok(())
+}
+
+fn tool_payload_destination_dirs(
+    rootfs_source_dir: &Path,
+    tool_payload_dir: &Path,
+) -> Result<Vec<PathBuf>> {
     // Preserve merged-/usr roots (e.g. /bin -> usr/bin): creating a real
     // overlay /bin directory would shadow the symlink and hide /bin/bash,/bin/sh.
     let mut dest_dirs = vec![tool_payload_dir.join("usr/bin")];
@@ -84,60 +170,91 @@ pub(crate) fn add_required_tools(
         fs::create_dir_all(dest_dir)
             .with_context(|| format!("creating tool destination '{}'", dest_dir.display()))?;
     }
+    Ok(dest_dirs)
+}
 
-    for tool in ["recstrap", "recfstab", "recchroot"] {
-        let built = build_workspace_binary(repo_root, tool, target)
-            .with_context(|| format!("building workspace tool '{}'", tool))?;
-        if !built.is_file() {
-            bail!(
-                "expected built tool binary not found: '{}'",
-                built.display()
-            );
-        }
-        for dest_dir in &dest_dirs {
-            let target = dest_dir.join(tool);
-            fs::copy(&built, &target).with_context(|| {
-                format!(
-                    "copying tool '{}' -> '{}'",
-                    built.display(),
-                    target.display()
-                )
-            })?;
-            let mut perms = fs::metadata(&target)
-                .with_context(|| format!("reading permissions for '{}'", target.display()))?
-                .permissions();
-            perms.set_mode(0o755);
-            fs::set_permissions(&target, perms).with_context(|| {
-                format!("setting executable permissions on '{}'", target.display())
-            })?;
-        }
+fn install_tool_payload_workspace_binary(
+    repo_root: &Path,
+    destination_dirs: &[PathBuf],
+    package_name: &str,
+    binary_name: Option<&str>,
+    target: Option<&str>,
+) -> Result<()> {
+    let built = build_workspace_binary_artifact(repo_root, package_name, binary_name, target)
+        .with_context(|| {
+            format!(
+                "building workspace binary '{}' from package '{}'",
+                binary_name.unwrap_or(package_name),
+                package_name
+            )
+        })?;
+    let output_name = binary_name.unwrap_or(package_name);
+
+    for destination_dir in destination_dirs {
+        copy_executable(&built, &destination_dir.join(output_name)).with_context(|| {
+            format!(
+                "copying tool payload binary '{}' into '{}'",
+                built.display(),
+                destination_dir.display()
+            )
+        })?;
     }
 
     Ok(())
 }
 
-fn install_iuppiter_runtime_payload(
+fn install_rootfs_workspace_binary(
+    repo_root: &Path,
+    rootfs_source_dir: &Path,
+    package_name: &str,
+    binary_name: Option<&str>,
+    target: Option<&str>,
+    destination: &Path,
+) -> Result<()> {
+    let built = build_workspace_binary_artifact(repo_root, package_name, binary_name, target)
+        .with_context(|| {
+            format!(
+                "building workspace binary '{}' from package '{}'",
+                binary_name.unwrap_or(package_name),
+                package_name
+            )
+        })?;
+    let destination = rootfs_source_dir.join(destination);
+    copy_executable(&built, &destination).with_context(|| {
+        format!(
+            "copying rootfs workspace binary '{}' -> '{}'",
+            built.display(),
+            destination.display()
+        )
+    })
+}
+
+fn build_workspace_binary_artifact(
+    repo_root: &Path,
+    package_name: &str,
+    binary_name: Option<&str>,
+    target: Option<&str>,
+) -> Result<PathBuf> {
+    let built = match binary_name {
+        Some(binary_name) => {
+            build_workspace_binary_named(repo_root, package_name, binary_name, target)
+        }
+        None => build_workspace_binary(repo_root, package_name, target),
+    }?;
+    if !built.is_file() {
+        bail!(
+            "expected built workspace binary not found at '{}'",
+            built.display()
+        );
+    }
+    Ok(built)
+}
+
+fn install_iuppiter_dar_payload(
     repo_root: &Path,
     rootfs_source_dir: &Path,
     target: Option<&str>,
 ) -> Result<()> {
-    let recab = build_workspace_binary(repo_root, "recab", target)
-        .context("building recab binary for iuppiter live-tools rootfs payload")?;
-    if !recab.is_file() {
-        bail!(
-            "expected built recab binary not found at '{}'",
-            recab.display()
-        );
-    }
-    let recab_dst = rootfs_source_dir.join("usr/bin/recab");
-    copy_executable(&recab, &recab_dst).with_context(|| {
-        format!(
-            "copying recab binary '{}' -> '{}'",
-            recab.display(),
-            recab_dst.display()
-        )
-    })?;
-
     let dar_root = resolve_iuppiter_dar_root(repo_root)?;
     let dar_bin = resolve_iuppiter_dar_bin(&dar_root, target)?;
     let dar_spa = resolve_iuppiter_dar_spa_dir(&dar_root)?;
@@ -350,17 +467,7 @@ fn ensure_symlink(link_target: &Path, link_path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn ensure_musl_packages(
-    rootfs_source_dir: &Path,
-    distro_id: &str,
-    _install_experience: InstallExperience,
-) -> Result<()> {
-    let packages: Vec<&str> = match distro_id {
-        "acorn" => vec!["curl", "pciutils", "smartmontools", "hdparm", "vim", "htop"],
-        "iuppiter" => vec!["smartmontools", "hdparm", "sg3_utils"],
-        _ => Vec::new(),
-    };
-
+fn ensure_apk_packages(rootfs_source_dir: &Path, packages: &[String]) -> Result<()> {
     if packages.is_empty() {
         return Ok(());
     }
@@ -403,8 +510,8 @@ fn ensure_musl_packages(
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
     bail!(
-        "apk package install failed for '{}': {}\n{}",
-        distro_id,
+        "apk package install failed for packages [{}]: {}\n{}",
+        pkg_string,
         stdout.trim(),
         stderr.trim()
     )
@@ -498,43 +605,6 @@ fn build_workspace_binary_named(
         stdout.trim(),
         stderr.trim()
     )
-}
-
-fn install_split_launcher(
-    repo_root: &Path,
-    rootfs_source_dir: &Path,
-    target: Option<&str>,
-) -> Result<()> {
-    let binary_name = "levitate-install-docs-split";
-    let built = build_workspace_binary_named(repo_root, "stage02-split-pane", binary_name, target)
-        .context("building install split-pane launcher")?;
-    if !built.is_file() {
-        bail!(
-            "expected install split launcher binary not found at '{}'",
-            built.display()
-        );
-    }
-
-    let dest = rootfs_source_dir.join("usr/local/bin").join(binary_name);
-    if let Some(parent) = dest.parent() {
-        fs::create_dir_all(parent).with_context(|| {
-            format!("creating split launcher destination '{}'", parent.display())
-        })?;
-    }
-    fs::copy(&built, &dest).with_context(|| {
-        format!(
-            "copying install split launcher '{}' -> '{}'",
-            built.display(),
-            dest.display()
-        )
-    })?;
-    let mut perms = fs::metadata(&dest)
-        .with_context(|| format!("reading permissions for '{}'", dest.display()))?
-        .permissions();
-    perms.set_mode(0o755);
-    fs::set_permissions(&dest, perms)
-        .with_context(|| format!("setting executable permissions on '{}'", dest.display()))?;
-    Ok(())
 }
 
 fn find_executable_in_path(name: &str) -> Option<PathBuf> {
@@ -686,12 +756,9 @@ fn install_mode_payload(
     rootfs_source_dir: &Path,
     distro_id: &str,
     install_experience: InstallExperience,
+    interactive_shell: &str,
+    ux_docs_frontend: InstallDocsFrontend,
 ) -> Result<()> {
-    let interactive_shell = match distro_id {
-        "levitate" | "ralph" => "/bin/bash",
-        _ => "/bin/sh",
-    };
-
     let marker_path = rootfs_source_dir.join(CANONICAL_INSTALL_EXPERIENCE_MARKER);
     write_text(&marker_path, &format!("{}\n", install_experience.as_str())).with_context(|| {
         format!(
@@ -738,17 +805,19 @@ fn install_mode_payload(
         )
         .with_context(|| "installing compatibility install-docs alias".to_string())?;
 
-        if distro_id == "levitate" {
-            install_bun_docs_tui_payload(repo_root, rootfs_source_dir, &docs_cmd_path)
-                .with_context(|| {
-                    format!(
-                        "installing bun-based install docs payload for '{}'",
-                        distro_id
-                    )
-                })?;
-        } else {
-            let docs_cmd = format!(
-                "#!/bin/sh\n\
+        match ux_docs_frontend {
+            InstallDocsFrontend::BunBundle => {
+                install_bun_docs_tui_payload(repo_root, rootfs_source_dir, &docs_cmd_path)
+                    .with_context(|| {
+                        format!(
+                            "installing bun-based install docs payload for '{}'",
+                            distro_id
+                        )
+                    })?
+            }
+            InstallDocsFrontend::PlainText => {
+                let docs_cmd = format!(
+                    "#!/bin/sh\n\
 set -eu\n\
 \n\
 DOCS_FILE=\"/usr/local/share/levitate/install-docs.txt\"\n\
@@ -779,14 +848,15 @@ else\n\
 fi\n\
 \n\
 exec \"${{SHELL:-{shell}}}\" -l\n",
-                shell = interactive_shell
-            );
-            write_executable(&docs_cmd_path, &docs_cmd).with_context(|| {
-                format!(
-                    "installing install docs command '{}'",
-                    docs_cmd_path.display()
-                )
-            })?;
+                    shell = interactive_shell
+                );
+                write_executable(&docs_cmd_path, &docs_cmd).with_context(|| {
+                    format!(
+                        "installing install docs command '{}'",
+                        docs_cmd_path.display()
+                    )
+                })?;
+            }
         }
 
         // Canonical docs-tui command alias for split-pane right-side launchers.

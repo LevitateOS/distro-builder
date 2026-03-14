@@ -9,7 +9,7 @@ use crate::pipeline::io::{
     create_empty_overlay_dir, create_unique_output_dir, extract_erofs_rootfs,
     resolve_parent_product_rootfs_image_for_distro,
 };
-use crate::pipeline::live_tools::{add_required_tools, InstallExperience};
+use crate::pipeline::live_tools::{add_required_tools, InstallExperience, LiveToolsRuntimeAction};
 use crate::pipeline::overlay::{
     create_live_overlay, ensure_openrc_shell, ensure_required_service_wiring,
     ensure_systemd_default_target, ensure_systemd_locale_completeness, ensure_systemd_sshd_dirs,
@@ -141,6 +141,7 @@ pub struct LiveToolsProductSpec {
     pub distro_id: String,
     pub os_name: String,
     install_experience: InstallExperience,
+    runtime_actions: Vec<LiveToolsRuntimeAction>,
     pub rootfs_source_dir: PathBuf,
     parent_rootfs: ParentRootfsInput,
     live_overlay: OverlayLayout,
@@ -364,7 +365,7 @@ pub fn load_live_tools_product_spec(
     distro_id: &str,
     layout: DerivedProductLayout,
 ) -> Result<LiveToolsProductSpec> {
-    let loaded = load_live_tools_config(variant_dir)
+    let loaded = load_live_tools_config(variant_dir, distro_id)
         .with_context(|| format!("loading live-tools config for '{}'", distro_id))?;
 
     let live_boot_spec =
@@ -381,6 +382,7 @@ pub fn load_live_tools_product_spec(
         distro_id: distro_id.to_string(),
         os_name: loaded.os_name,
         install_experience: loaded.install_experience,
+        runtime_actions: loaded.runtime_actions,
         rootfs_source_dir: layout.rootfs_source_dir,
         parent_rootfs: layout.parent_rootfs,
         live_overlay: layout.live_overlay,
@@ -472,6 +474,7 @@ pub fn prepare_live_tools_product(
         &live_overlay_dir,
         &spec.distro_id,
         spec.install_experience,
+        &spec.runtime_actions,
     )
     .with_context(|| format!("adding required live tools for '{}'", spec.distro_id))?;
 
@@ -661,6 +664,8 @@ payload_profile = "boot_baseline"
 logical_name = "product.payload.live_tools"
 description = "Live tools payload tree"
 extends = "product.payload.boot.live"
+runtime_profiles = ["live_tools_common"]
+runtime_profiles_ux = ["live_tools_ux"]
 
 [ring2_products.boot_installed]
 logical_name = "product.payload.boot.installed"
@@ -673,6 +678,31 @@ payload_profile = "boot_baseline"
 kind = "write_text"
 path = ".live-payload-role"
 content = "rootfs\n"
+
+[ring2_runtime_profiles.live_tools_common]
+[[ring2_runtime_profiles.live_tools_common.actions]]
+kind = "tool_payload_workspace_binary"
+package = "recstrap"
+
+[[ring2_runtime_profiles.live_tools_common.actions]]
+kind = "tool_payload_workspace_binary"
+package = "recfstab"
+
+[[ring2_runtime_profiles.live_tools_common.actions]]
+kind = "tool_payload_workspace_binary"
+package = "recchroot"
+
+[[ring2_runtime_profiles.live_tools_common.actions]]
+kind = "install_mode_payload"
+interactive_shell = "/bin/bash"
+ux_docs_frontend = "bun_bundle"
+
+[ring2_runtime_profiles.live_tools_ux]
+[[ring2_runtime_profiles.live_tools_ux.actions]]
+kind = "rootfs_workspace_binary"
+package = "stage02-split-pane"
+binary = "levitate-install-docs-split"
+destination = "usr/local/bin/levitate-install-docs-split"
 
 [ring2_products.kernel_staging]
 logical_name = "product.kernel.staging"
@@ -752,6 +782,19 @@ preseed_recipe_script = "distro-builder/recipes/fedora-preseed-iso.rhai"
         assert_eq!(spec.install_experience, InstallExperience::Ux);
         assert_eq!(spec.required_services, vec!["sshd".to_string()]);
         assert!(matches!(spec.overlay, S01OverlayPolicy::Systemd { .. }));
+        assert_eq!(spec.runtime_actions.len(), 5);
+        assert!(spec.runtime_actions.iter().any(|action| matches!(
+            action,
+            LiveToolsRuntimeAction::InstallModePayload {
+                interactive_shell,
+                ..
+            } if interactive_shell == "/bin/bash"
+        )));
+        assert!(spec.runtime_actions.iter().any(|action| matches!(
+            action,
+            LiveToolsRuntimeAction::RootfsWorkspaceBinary { destination, .. }
+                if destination == &PathBuf::from("usr/local/bin/levitate-install-docs-split")
+        )));
 
         fs::remove_dir_all(repo_root).expect("cleanup temp root");
     }

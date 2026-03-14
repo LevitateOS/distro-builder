@@ -2,7 +2,9 @@ use anyhow::{Context, Result};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::pipeline::config::{load_boot_config, load_boot_payload_config, load_live_tools_config};
+use crate::pipeline::config::{
+    load_boot_config, load_installed_boot_payload_config, load_live_tools_config,
+};
 use crate::pipeline::io::{
     create_empty_overlay_dir, create_unique_output_dir, extract_erofs_rootfs,
     resolve_parent_product_rootfs_image_for_distro,
@@ -14,10 +16,11 @@ use crate::pipeline::overlay::{
     S01OverlayPolicy,
 };
 #[cfg(test)]
+use crate::pipeline::plan::boot_baseline_producers;
+#[cfg(test)]
 use crate::pipeline::plan::ensure_non_legacy_rootfs_source;
 use crate::pipeline::plan::{
-    apply_producer_plan, boot_baseline_producers, build_baseline_producers, ProducerPlan,
-    RootfsProducer,
+    apply_producer_plan, build_baseline_producers, ProducerPlan, RootfsProducer,
 };
 use crate::pipeline::scripts::install_stage_test_scripts;
 use crate::pipeline::source::{
@@ -208,10 +211,7 @@ pub fn load_live_boot_product_spec(
 ) -> Result<LiveBootProductSpec> {
     let loaded = load_boot_config(repo_root, variant_dir, distro_id)?;
 
-    let mut add_producers = boot_baseline_producers(match &loaded.overlay {
-        S01OverlayPolicy::Systemd { .. } => "systemd",
-        S01OverlayPolicy::OpenRc { .. } => "openrc",
-    });
+    let mut add_producers = loaded.payload_producers.clone();
     if loaded.rootfs_source_policy.is_none() {
         add_producers.retain(|producer| matches!(producer, RootfsProducer::WriteText { .. }));
     }
@@ -395,12 +395,9 @@ pub fn load_installed_boot_product_spec(
     distro_id: &str,
     layout: DerivedProductLayout,
 ) -> Result<InstalledBootProductSpec> {
-    let loaded = load_boot_payload_config(repo_root, variant_dir, distro_id)?;
+    let loaded = load_installed_boot_payload_config(repo_root, variant_dir, distro_id)?;
 
-    let mut add_producers = boot_baseline_producers(match &loaded.overlay {
-        S01OverlayPolicy::Systemd { .. } => "systemd",
-        S01OverlayPolicy::OpenRc { .. } => "openrc",
-    });
+    let mut add_producers = loaded.payload_producers.clone();
     if loaded.rootfs_source_policy.is_none() {
         add_producers.retain(|producer| matches!(producer, RootfsProducer::WriteText { .. }));
     }
@@ -658,6 +655,7 @@ overlay_kind = "systemd"
 logical_name = "product.payload.boot.live"
 description = "Live boot payload inputs"
 extends = "product.rootfs.base"
+payload_profile = "boot_baseline"
 
 [ring2_products.live_tools]
 logical_name = "product.payload.live_tools"
@@ -668,6 +666,13 @@ extends = "product.payload.boot.live"
 logical_name = "product.payload.boot.installed"
 description = "Installed-system boot payload inputs"
 extends = "product.rootfs.base"
+payload_profile = "boot_baseline"
+
+[ring2_payload_profiles.boot_baseline]
+[[ring2_payload_profiles.boot_baseline.producers]]
+kind = "write_text"
+path = ".live-payload-role"
+content = "rootfs\n"
 
 [ring2_products.kernel_staging]
 logical_name = "product.kernel.staging"

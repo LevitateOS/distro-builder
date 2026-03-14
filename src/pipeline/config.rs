@@ -1,11 +1,13 @@
 use anyhow::{bail, Context, Result};
 use serde::Deserialize;
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
 use crate::pipeline::live_tools::InstallExperience;
 use crate::pipeline::overlay::S01OverlayPolicy;
 use crate::pipeline::paths::resolve_repo_path;
+use crate::pipeline::plan::{boot_baseline_producers, RootfsProducer};
 use crate::pipeline::source::{
     load_rootfs_source_policy, S01RootfsSourcePolicy, S01RootfsSourceToml,
 };
@@ -17,6 +19,7 @@ pub(crate) struct S01LoadedConfig {
     pub(crate) required_services: Vec<String>,
     pub(crate) rootfs_source_policy: Option<S01RootfsSourcePolicy>,
     pub(crate) overlay: S01OverlayPolicy,
+    pub(crate) payload_producers: Vec<RootfsProducer>,
 }
 
 #[derive(Debug, Clone)]
@@ -31,6 +34,7 @@ struct Ring2ProductsToml {
     #[allow(dead_code)]
     schema_version: u32,
     ring2_products: Ring2ProductsSectionToml,
+    ring2_payload_profiles: Option<BTreeMap<String, Ring2PayloadProfileToml>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -58,6 +62,7 @@ struct Ring2ProductDeclToml {
     description: String,
     #[allow(dead_code)]
     extends: Option<String>,
+    payload_profile: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -73,6 +78,51 @@ struct Ring2LiveOverlayToml {
     issue_message: Option<String>,
     openrc_inittab: Option<String>,
     profile_overlay: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Ring2PayloadProfileToml {
+    producers: Vec<Ring2RootfsProducerToml>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum Ring2RootfsProducerToml {
+    CopyTree {
+        source: String,
+        destination: String,
+    },
+    CopySymlink {
+        source: String,
+        destination: String,
+    },
+    CopyFile {
+        source: String,
+        destination: String,
+        #[serde(default)]
+        optional: bool,
+    },
+    WriteText {
+        path: String,
+        content: String,
+        mode: Option<u32>,
+    },
+}
+
+#[derive(Debug, Clone, Copy)]
+enum BootPayloadProduct {
+    Live,
+    Installed,
+}
+
+impl BootPayloadProduct {
+    fn logical_name(self) -> &'static str {
+        match self {
+            Self::Live => "product.payload.boot.live",
+            Self::Installed => "product.payload.boot.installed",
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -207,6 +257,8 @@ pub(crate) fn load_boot_payload_config(
         distro_id,
         legacy_boot_inputs.as_ref(),
     )?;
+    let payload_producers =
+        load_boot_payload_producers(variant_dir, BootPayloadProduct::Live, &overlay)?;
 
     let rootfs_source_policy = load_rootfs_source_policy(
         repo_root,
@@ -222,6 +274,7 @@ pub(crate) fn load_boot_payload_config(
         required_services,
         rootfs_source_policy,
         overlay,
+        payload_producers,
     })
 }
 
@@ -240,6 +293,17 @@ pub(crate) fn load_boot_config(
     Ok(loaded)
 }
 
+pub(crate) fn load_installed_boot_payload_config(
+    repo_root: &Path,
+    variant_dir: &Path,
+    distro_id: &str,
+) -> Result<S01LoadedConfig> {
+    let mut loaded = load_boot_payload_config(repo_root, variant_dir, distro_id)?;
+    loaded.payload_producers =
+        load_boot_payload_producers(variant_dir, BootPayloadProduct::Installed, &loaded.overlay)?;
+    Ok(loaded)
+}
+
 pub(crate) fn load_live_tools_config(variant_dir: &Path) -> Result<LiveToolsLoadedConfig> {
     let config_path = variant_dir.join("02LiveTools.toml");
     let legacy_live_tools = load_legacy_live_tools_inputs(&config_path)?;
@@ -250,6 +314,162 @@ pub(crate) fn load_live_tools_config(variant_dir: &Path) -> Result<LiveToolsLoad
     Ok(LiveToolsLoadedConfig {
         os_name,
         install_experience,
+    })
+}
+
+fn load_ring2_products_manifest(variant_dir: &Path) -> Result<Option<Ring2ProductsToml>> {
+    let ring2_config_path = variant_dir.join("ring2-products.toml");
+    if !ring2_config_path.is_file() {
+        return Ok(None);
+    }
+
+    let config_bytes = fs::read_to_string(&ring2_config_path).with_context(|| {
+        format!(
+            "reading Ring 2 product config '{}'",
+            ring2_config_path.display()
+        )
+    })?;
+    let parsed: Ring2ProductsToml = toml::from_str(&config_bytes).with_context(|| {
+        format!(
+            "parsing Ring 2 product config '{}'",
+            ring2_config_path.display()
+        )
+    })?;
+    Ok(Some(parsed))
+}
+
+fn load_boot_payload_producers(
+    variant_dir: &Path,
+    product: BootPayloadProduct,
+    overlay: &S01OverlayPolicy,
+) -> Result<Vec<RootfsProducer>> {
+    let overlay_kind = match overlay {
+        S01OverlayPolicy::Systemd { .. } => "systemd",
+        S01OverlayPolicy::OpenRc { .. } => "openrc",
+    };
+
+    let Some(parsed) = load_ring2_products_manifest(variant_dir)? else {
+        return Ok(boot_baseline_producers(overlay_kind));
+    };
+
+    let decl =
+        match product {
+            BootPayloadProduct::Live => &parsed.ring2_products.boot_live,
+            BootPayloadProduct::Installed => parsed
+                .ring2_products
+                .boot_installed
+                .as_ref()
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "missing canonical Ring 2 product declaration '{}' in '{}'",
+                        product.logical_name(),
+                        variant_dir.join("ring2-products.toml").display()
+                    )
+                })?,
+        };
+
+    let profile_name = decl.payload_profile.as_deref().ok_or_else(|| {
+        anyhow::anyhow!(
+            "missing canonical Ring 2 payload_profile for '{}' in '{}'",
+            product.logical_name(),
+            variant_dir.join("ring2-products.toml").display()
+        )
+    })?;
+
+    let profiles = parsed.ring2_payload_profiles.as_ref().ok_or_else(|| {
+        anyhow::anyhow!(
+            "missing ring2_payload_profiles section in '{}'; required by payload_profile '{}'",
+            variant_dir.join("ring2-products.toml").display(),
+            profile_name
+        )
+    })?;
+
+    let profile = profiles.get(profile_name).ok_or_else(|| {
+        anyhow::anyhow!(
+            "unknown Ring 2 payload profile '{}' referenced by '{}' in '{}'",
+            profile_name,
+            product.logical_name(),
+            variant_dir.join("ring2-products.toml").display()
+        )
+    })?;
+
+    if profile.producers.is_empty() {
+        bail!(
+            "Ring 2 payload profile '{}' in '{}' must declare at least one producer",
+            profile_name,
+            variant_dir.join("ring2-products.toml").display()
+        );
+    }
+
+    profile
+        .producers
+        .iter()
+        .map(rootfs_producer_from_ring2_toml)
+        .collect()
+}
+
+fn rootfs_producer_from_ring2_toml(producer: &Ring2RootfsProducerToml) -> Result<RootfsProducer> {
+    fn normalized_relative_path(raw: &str, field: &str) -> Result<std::path::PathBuf> {
+        let path = std::path::PathBuf::from(raw.trim());
+        if raw.trim().is_empty() {
+            bail!(
+                "Ring 2 payload producer field '{}' must not be empty",
+                field
+            );
+        }
+        if path.is_absolute() {
+            bail!(
+                "Ring 2 payload producer field '{}' must be relative, got '{}'",
+                field,
+                path.display()
+            );
+        }
+        if path
+            .components()
+            .any(|component| matches!(component, std::path::Component::ParentDir))
+        {
+            bail!(
+                "Ring 2 payload producer field '{}' must not traverse parents, got '{}'",
+                field,
+                path.display()
+            );
+        }
+        Ok(path)
+    }
+
+    Ok(match producer {
+        Ring2RootfsProducerToml::CopyTree {
+            source,
+            destination,
+        } => RootfsProducer::CopyTree {
+            source: normalized_relative_path(source, "source")?,
+            destination: normalized_relative_path(destination, "destination")?,
+        },
+        Ring2RootfsProducerToml::CopySymlink {
+            source,
+            destination,
+        } => RootfsProducer::CopySymlink {
+            source: normalized_relative_path(source, "source")?,
+            destination: normalized_relative_path(destination, "destination")?,
+        },
+        Ring2RootfsProducerToml::CopyFile {
+            source,
+            destination,
+            optional,
+        } => RootfsProducer::CopyFile {
+            source: normalized_relative_path(source, "source")?,
+            destination: normalized_relative_path(destination, "destination")?,
+            optional: *optional,
+        },
+        Ring2RootfsProducerToml::WriteText {
+            path,
+            content,
+            mode,
+        } => RootfsProducer::WriteText {
+            path: normalized_relative_path(path, "path")?,
+            content: content.clone(),
+            mode: *mode,
+        },
     })
 }
 
@@ -888,6 +1108,11 @@ description = "Kernel image and modules staging product"
             loaded.rootfs_source_policy,
             Some(S01RootfsSourcePolicy::RecipeRpmDvd { .. })
         ));
+        assert!(!loaded.payload_producers.is_empty());
+        assert!(loaded
+            .payload_producers
+            .iter()
+            .any(|producer| matches!(producer, RootfsProducer::WriteText { path, .. } if path == Path::new(".live-payload-role"))));
     }
 
     fn assert_uses_openrc_ring_base_config(
@@ -898,6 +1123,13 @@ description = "Kernel image and modules staging product"
         let variant_dir = repo_root.join(format!("distro-variants/{distro_id}"));
         let loaded = load_boot_config(repo_root, &variant_dir, distro_id)
             .unwrap_or_else(|err| panic!("load {distro_id} boot config: {err:#}"));
+        assert!(
+            !loaded.payload_producers.is_empty(),
+            "expected canonical payload producers for {distro_id}"
+        );
+        assert!(loaded.payload_producers.iter().any(
+            |producer| matches!(producer, RootfsProducer::WriteText { path, .. } if path == Path::new(".live-payload-role"))
+        ));
         match loaded.overlay {
             S01OverlayPolicy::OpenRc {
                 inittab,
@@ -972,6 +1204,10 @@ description = "Kernel image and modules staging product"
                     .collect::<Vec<_>>(),
                 "unexpected required services for {distro_id}"
             );
+            assert!(
+                !loaded.payload_producers.is_empty(),
+                "expected canonical payload producers for {distro_id}"
+            );
 
             match (expected_overlay_kind, loaded.overlay) {
                 ("systemd", S01OverlayPolicy::Systemd { .. }) => {}
@@ -997,5 +1233,21 @@ description = "Kernel image and modules staging product"
                 (other, _) => panic!("unexpected rootfs source policy for {distro_id}: {other:?}"),
             }
         }
+    }
+
+    #[test]
+    fn installed_boot_payload_config_uses_ring2_profile() {
+        let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("repo root")
+            .to_path_buf();
+        let variant_dir = repo_root.join("distro-variants/levitate");
+
+        let loaded = load_installed_boot_payload_config(&repo_root, &variant_dir, "levitate")
+            .expect("load installed boot payload config");
+
+        assert!(loaded.payload_producers.iter().any(
+            |producer| matches!(producer, RootfsProducer::CopySymlink { source, destination } if source == Path::new("bin") && destination == Path::new("bin"))
+        ));
     }
 }

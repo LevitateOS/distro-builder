@@ -6,7 +6,7 @@ use std::path::Path;
 use crate::pipeline::overlay::S01OverlayPolicy;
 use crate::pipeline::paths::resolve_repo_path;
 use crate::pipeline::source::{
-    parse_rootfs_source_policy, S01RootfsSourcePolicy, S01RootfsSourceToml,
+    load_rootfs_source_policy, S01RootfsSourcePolicy, S01RootfsSourceToml,
 };
 use crate::InittabVariant;
 
@@ -99,8 +99,12 @@ pub(crate) fn load_boot_config(
         ),
     };
 
-    let rootfs_source_policy =
-        parse_rootfs_source_policy(repo_root, &config_path, boot_inputs.rootfs_source.clone())?;
+    let rootfs_source_policy = load_rootfs_source_policy(
+        repo_root,
+        variant_dir,
+        &config_path,
+        boot_inputs.rootfs_source.clone(),
+    )?;
 
     Ok(S01LoadedConfig {
         os_name: boot_inputs.os_name,

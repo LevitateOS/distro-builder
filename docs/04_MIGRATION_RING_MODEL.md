@@ -218,6 +218,11 @@ Acceptance:
 - no source/provenance fact remains in product, transform, or scenario manifests
 - Ring 3 can be loaded and validated independently
 
+Pilot status:
+- `levitate` now loads `rootfs_source.*` canonically from `ring3-sources.toml`
+- legacy `01Boot.toml` source fields are still loaded in parallel and must stay semantically identical during the migration window
+- source-owner drift is a hard failure in `distro-builder`
+
 ### Phase 4. Ring 2 Base Product Ownership Migration
 
 Goal:

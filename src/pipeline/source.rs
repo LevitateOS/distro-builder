@@ -8,7 +8,7 @@ use crate::pipeline::paths::{normalize_distro_id, resolve_repo_path};
 use crate::pipeline::plan::ensure_non_legacy_rootfs_source;
 use crate::recipe::stage01_source::{materialize_rootfs_from_recipe, Stage01RootfsRecipeSpec};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum S01RootfsSourcePolicy {
     RecipeRpmDvd {
         recipe_script: PathBuf,
@@ -20,13 +20,70 @@ pub(crate) enum S01RootfsSourcePolicy {
     },
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct S01RootfsSourceToml {
     kind: String,
     recipe_script: String,
     preseed_recipe_script: Option<String>,
     defines: Option<BTreeMap<String, String>>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Ring3SourcesToml {
+    #[allow(dead_code)]
+    schema_version: u32,
+    ring3_sources: Ring3SourcesSectionToml,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Ring3SourcesSectionToml {
+    rootfs_source: Option<S01RootfsSourceToml>,
+}
+
+pub(crate) fn load_rootfs_source_policy(
+    repo_root: &Path,
+    variant_dir: &Path,
+    legacy_config_path: &Path,
+    legacy_source: Option<S01RootfsSourceToml>,
+) -> Result<Option<S01RootfsSourcePolicy>> {
+    let legacy_policy =
+        parse_rootfs_source_policy(repo_root, legacy_config_path, legacy_source.clone())?;
+    let ring3_config_path = variant_dir.join("ring3-sources.toml");
+    if !ring3_config_path.is_file() {
+        return Ok(legacy_policy);
+    }
+
+    let config_bytes = fs::read_to_string(&ring3_config_path).with_context(|| {
+        format!(
+            "reading Ring 3 source config '{}'",
+            ring3_config_path.display()
+        )
+    })?;
+    let parsed: Ring3SourcesToml = toml::from_str(&config_bytes).with_context(|| {
+        format!(
+            "parsing Ring 3 source config '{}'",
+            ring3_config_path.display()
+        )
+    })?;
+    let ring_policy = parse_rootfs_source_policy(
+        repo_root,
+        &ring3_config_path,
+        parsed.ring3_sources.rootfs_source.clone(),
+    )?;
+
+    if ring_policy != legacy_policy {
+        bail!(
+            "Ring 3 source parity mismatch for '{}': legacy 01Boot rootfs_source {:?} does not match ring3-sources rootfs_source {:?}",
+            variant_dir.display(),
+            legacy_policy,
+            ring_policy
+        );
+    }
+
+    Ok(ring_policy)
 }
 
 pub(crate) fn parse_rootfs_source_policy(
@@ -190,6 +247,27 @@ fn downloads_work_dir(repo_root: &Path, distro_id: &str) -> Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_repo_root(test_name: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock before epoch")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "distro-builder-source-{test_name}-{}-{nanos}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&path).expect("create temp root");
+        path
+    }
+
+    fn write_file(path: &Path, content: &str) {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("create parent");
+        }
+        fs::write(path, content).expect("write file");
+    }
 
     #[test]
     fn rootfs_source_policy_accepts_custom_recipe_for_any_distro() {
@@ -258,6 +336,86 @@ mod tests {
                 .contains("unsupported rootfs_source.kind 'recipe_rocky'"),
             "unexpected error: {err:#}"
         );
+    }
+
+    #[test]
+    fn ring3_rootfs_source_policy_matches_legacy_when_equal() {
+        let repo_root = temp_repo_root("ring3-parity");
+        let variant_dir = repo_root.join("distro-variants/levitate");
+        let legacy_config_path = variant_dir.join("01Boot.toml");
+        let legacy_source = S01RootfsSourceToml {
+            kind: "recipe_rpm_dvd".to_string(),
+            recipe_script: "distro-builder/recipes/fedora-stage01-rootfs.rhai".to_string(),
+            preseed_recipe_script: Some(
+                "distro-builder/recipes/fedora-preseed-iso.rhai".to_string(),
+            ),
+            defines: None,
+        };
+        write_file(
+            &variant_dir.join("ring3-sources.toml"),
+            r#"schema_version = 6
+
+[ring3_sources.rootfs_source]
+kind = "recipe_rpm_dvd"
+recipe_script = "distro-builder/recipes/fedora-stage01-rootfs.rhai"
+preseed_recipe_script = "distro-builder/recipes/fedora-preseed-iso.rhai"
+"#,
+        );
+
+        let loaded = load_rootfs_source_policy(
+            &repo_root,
+            &variant_dir,
+            &legacy_config_path,
+            Some(legacy_source),
+        )
+        .expect("load ring3 rootfs source policy");
+        assert!(matches!(
+            loaded,
+            Some(S01RootfsSourcePolicy::RecipeRpmDvd { .. })
+        ));
+
+        fs::remove_dir_all(repo_root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn ring3_rootfs_source_policy_rejects_drift_from_legacy() {
+        let repo_root = temp_repo_root("ring3-drift");
+        let variant_dir = repo_root.join("distro-variants/levitate");
+        let legacy_config_path = variant_dir.join("01Boot.toml");
+        let legacy_source = S01RootfsSourceToml {
+            kind: "recipe_rpm_dvd".to_string(),
+            recipe_script: "distro-builder/recipes/fedora-stage01-rootfs.rhai".to_string(),
+            preseed_recipe_script: Some(
+                "distro-builder/recipes/fedora-preseed-iso.rhai".to_string(),
+            ),
+            defines: None,
+        };
+        write_file(
+            &variant_dir.join("ring3-sources.toml"),
+            r#"schema_version = 6
+
+[ring3_sources.rootfs_source]
+kind = "recipe_custom"
+recipe_script = "distro-builder/recipes/custom-stage01-rootfs.rhai"
+
+[ring3_sources.rootfs_source.defines]
+CUSTOM_ROOTFS_DIR = "/tmp/rootfs"
+"#,
+        );
+
+        let err = load_rootfs_source_policy(
+            &repo_root,
+            &variant_dir,
+            &legacy_config_path,
+            Some(legacy_source),
+        )
+        .expect_err("drifted ring3 rootfs source should fail");
+        assert!(
+            err.to_string().contains("Ring 3 source parity mismatch"),
+            "unexpected error: {err:#}"
+        );
+
+        fs::remove_dir_all(repo_root).expect("cleanup temp root");
     }
 
     #[test]

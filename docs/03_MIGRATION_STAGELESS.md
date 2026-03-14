@@ -253,9 +253,11 @@ The main blockers are not cosmetic. They are ownership bugs.
 - `distro-builder/src/pipeline/io.rs`
   - still names overlays and rootfs-source pointers using stage tags
 - `testing/install-tests/src/preflight.rs`
-  - still detects `s00` / `s01` / `s02` from artifact names and rewrites contract expectations around those tags
+  - canonical preflight now resolves explicit artifact paths and release-product scope first
+  - stage-tagged names remain only as compatibility discovery, not as rewritten contract truth
 - `distro-contract/src/runtime.rs`
-  - still validates runtime layouts through `stage_artifact_tag`
+  - canonical runtime validation now consumes explicit artifact paths
+  - `validate_stage_01_runtime(..., stage_artifact_tag)` remains only as a compatibility wrapper
 
 ### 3. Builder execution is stage-first instead of product-first
 
@@ -535,15 +537,26 @@ Acceptance:
 
 ### Phase 6. Move runtime validation off stage tags
 
-- [ ] Remove stage-tag rewriting from:
+- [x] Remove stage-tag rewriting from:
   - `testing/install-tests/src/preflight.rs`
   - `distro-contract/src/runtime.rs`
-- [ ] Replace `stage_artifact_tag`-based validation with explicit artifact identities and scenario manifests.
+- [x] Replace `stage_artifact_tag`-based validation with explicit artifact identities and scenario manifests.
+
+Implemented:
+
+- `testing/install-tests/src/preflight.rs`
+  - resolves actual runtime artifact paths on disk
+  - prefers canonical product-native names
+  - falls back to compatibility names only as path discovery
+  - uses release run-manifest metadata to decide whether live-boot scenario validation applies
+- `distro-contract/src/runtime.rs`
+  - adds explicit-path validators for Stage 00/runtime and live-boot/runtime
+  - keeps stage-tagged Stage 01 validation only as a compatibility wrapper over the explicit-path validator
 
 Acceptance:
 
-- runtime validation does not need `s00` / `s01` / `s02` name rewriting
-- artifact names are resolved from declarations, not inferred from directory names
+- [x] runtime validation does not need `s00` / `s01` / `s02` name rewriting
+- [x] artifact names are resolved from explicit runtime layouts and release metadata, not rewritten contracts
 
 ### Phase 7. Convert install-tests from stage runner to scenario runner
 

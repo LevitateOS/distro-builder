@@ -15,6 +15,26 @@ pub(crate) fn ensure_release_iso_via_compatibility_hook(
 ) -> Result<()> {
     let compat_stage = crate::workflows::compatibility_stage_for_product(product);
     let output_dir = &build_layout.output_dir;
+    let live_uki = &bundle.contract.transforms.live_uki;
+    let [live_uki_filename, emergency_uki_filename, debug_uki_filename] =
+        live_uki.output_names.as_slice()
+    else {
+        bail!(
+            "invalid canonical Ring 1 live UKI transform for '{}': expected exactly three output names in `contract.transforms.live_uki.output_names`, found {:?}",
+            distro_id,
+            live_uki.output_names
+        );
+    };
+    let live_cmdline = live_uki.extra_cmdline.clone().unwrap_or_default();
+    let initramfs_live_filename = crate::workflows::canonical_initramfs_live_filename(
+        &bundle.contract,
+    )
+    .with_context(|| {
+        format!(
+            "resolving canonical Ring 1 live initramfs output for '{}'",
+            distro_id
+        )
+    })?;
     let rootfs_filename = crate::workflows::canonical_rootfs_erofs_filename(&bundle.contract)
         .with_context(|| {
             format!(
@@ -71,42 +91,10 @@ pub(crate) fn ensure_release_iso_via_compatibility_hook(
         .env("IDENTITY_OS_ID", &bundle.contract.identity.os_id)
         .env("IDENTITY_OS_VERSION", &bundle.contract.identity.os_version)
         .env("IDENTITY_ISO_LABEL", &bundle.contract.identity.iso_label)
-        .env(
-            "S00_LIVE_UKI_FILENAME",
-            &bundle
-                .contract
-                .stages
-                .stage_00_build
-                .iso_assembly
-                .live_uki_filename,
-        )
-        .env(
-            "S00_EMERGENCY_UKI_FILENAME",
-            &bundle
-                .contract
-                .stages
-                .stage_00_build
-                .iso_assembly
-                .emergency_uki_filename,
-        )
-        .env(
-            "S00_DEBUG_UKI_FILENAME",
-            &bundle
-                .contract
-                .stages
-                .stage_00_build
-                .iso_assembly
-                .debug_uki_filename,
-        )
-        .env(
-            "S00_LIVE_CMDLINE",
-            &bundle
-                .contract
-                .stages
-                .stage_00_build
-                .iso_assembly
-                .live_cmdline,
-        )
+        .env("S00_LIVE_UKI_FILENAME", live_uki_filename)
+        .env("S00_EMERGENCY_UKI_FILENAME", emergency_uki_filename)
+        .env("S00_DEBUG_UKI_FILENAME", debug_uki_filename)
+        .env("S00_LIVE_CMDLINE", &live_cmdline)
         .env("KERNEL_RELEASE_PATH", &kernel_release_path)
         .env("KERNEL_IMAGE_PATH", &kernel_image_path)
         .env("ISO_PATH", &iso_path)
@@ -114,7 +102,7 @@ pub(crate) fn ensure_release_iso_via_compatibility_hook(
         .env("PRODUCT_NAME", product.canonical)
         .env("BUILD_TARGET_LABEL", product.issue_banner_label)
         .env("ROOTFS_FILENAME", &rootfs_filename)
-        .env("INITRAMFS_LIVE_FILENAME", product.initramfs_live_filename)
+        .env("INITRAMFS_LIVE_FILENAME", &initramfs_live_filename)
         .env("LIVE_OVERLAY_DIRNAME", product.live_overlay_dir_name)
         .env("LIVE_OVERLAY_IMAGE_FILENAME", &overlay_filename)
         .env(

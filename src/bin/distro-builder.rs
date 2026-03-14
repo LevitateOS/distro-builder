@@ -27,7 +27,6 @@ struct BuildProduct {
     canonical: &'static str,
     release_dir_name: &'static str,
     iso_suffix: &'static str,
-    initramfs_live_filename: &'static str,
     live_overlay_dir_name: &'static str,
     rootfs_source_pointer_filename: &'static str,
     issue_banner_label: &'static str,

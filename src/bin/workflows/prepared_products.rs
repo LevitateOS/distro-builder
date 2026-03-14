@@ -40,6 +40,12 @@ pub(crate) fn canonical_overlay_erofs_filename(
     require_single_transform_output(&contract.transforms.overlay_image, "overlay_image")
 }
 
+pub(crate) fn canonical_initramfs_live_filename(
+    contract: &distro_contract::ConformanceContract,
+) -> Result<String> {
+    require_single_transform_output(&contract.transforms.initramfs_live, "initramfs_live")
+}
+
 pub(crate) fn canonical_prepared_output_names(
     contract: &distro_contract::ConformanceContract,
     product: crate::BuildProduct,
@@ -198,6 +204,14 @@ mod tests {
         );
         assert_eq!(names.rootfs_erofs_filename, "s00-filesystem.erofs");
         assert_eq!(names.overlay_erofs_filename, "s00-overlayfs.erofs");
+    }
+
+    #[test]
+    fn canonical_initramfs_live_filename_follows_ring1_boot_transforms() {
+        let contract = workspace_contract("levitate");
+        let filename = canonical_initramfs_live_filename(&contract)
+            .expect("resolve canonical initramfs-live filename");
+        assert_eq!(filename, "s00-initramfs-live.cpio.gz");
     }
 
     #[test]

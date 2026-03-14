@@ -26,5 +26,6 @@ pub(crate) use parse::{
     parse_release_build_command, parse_release_product, parse_stage, product_for_logical_name,
 };
 pub(crate) use prepared_products::{
-    canonical_overlay_erofs_filename, canonical_rootfs_erofs_filename,
+    canonical_initramfs_live_filename, canonical_overlay_erofs_filename,
+    canonical_rootfs_erofs_filename,
 };

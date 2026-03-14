@@ -47,17 +47,17 @@ pub(crate) fn build_baseline_producers(
     os_id: &str,
 ) -> Vec<RootfsProducer> {
     let os_release = format!(
-        "NAME=\"{}\"\nID={}\nPRETTY_NAME=\"{} (Stage 00Build)\"\n",
+        "NAME=\"{}\"\nID={}\nPRETTY_NAME=\"{}\"\n",
         os_name, os_id, os_name
     );
-    let stage_manifest = format!(
-        "{{\n  \"schema\": 1,\n  \"stage\": \"00Build\",\n  \"stage_slug\": \"s00_build\",\n  \"distro_id\": \"{}\",\n  \"os_name\": \"{}\",\n  \"os_id\": \"{}\",\n  \"payload_role\": \"rootfs-source\"\n}}\n",
+    let product_manifest = format!(
+        "{{\n  \"schema\": 1,\n  \"product\": \"base-rootfs\",\n  \"product_slug\": \"base_rootfs\",\n  \"distro_id\": \"{}\",\n  \"os_name\": \"{}\",\n  \"os_id\": \"{}\",\n  \"payload_role\": \"rootfs-source\"\n}}\n",
         distro_id, os_name, os_id
     );
     vec![
         RootfsProducer::WriteText {
-            path: PathBuf::from("usr/lib/stage-manifest.json"),
-            content: stage_manifest,
+            path: PathBuf::from("usr/lib/product-manifest.json"),
+            content: product_manifest,
             mode: None,
         },
         RootfsProducer::WriteText {

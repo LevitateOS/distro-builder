@@ -42,6 +42,10 @@ pub(crate) fn run_release_build_command(args: &[String]) -> Result<()> {
 }
 
 pub(crate) fn dispatch_non_release_command(args: &[String]) -> Result<()> {
+    if let Some(command) = crate::workflows::compat_commands::dispatch_compatibility_command(args) {
+        return command.with_context(|| format!("dispatching workflow for '{}'", args.join(" ")));
+    }
+
     let command = match args {
         [release, build_all_cmd, iso]
             if release == "release" && build_all_cmd == "build-all" && iso == "iso" =>
@@ -88,31 +92,6 @@ pub(crate) fn dispatch_non_release_command(args: &[String]) -> Result<()> {
             if artifact == "artifact" && build_overlay == "build-overlayfs-erofs" =>
         {
             crate::workflows::build_overlayfs_erofs(Path::new(source_dir), Path::new(output))
-        }
-        [artifact, build_stage_erofs, stage, distro]
-            if artifact == "artifact" && build_stage_erofs == "build-stage-erofs" =>
-        {
-            crate::workflows::build_stage_erofs_cmd(stage, distro)
-        }
-        [artifact, prepare_stage, stage, distro, output_dir]
-            if artifact == "artifact" && prepare_stage == "prepare-stage-inputs" =>
-        {
-            crate::workflows::prepare_stage_inputs_cmd(stage, distro, Path::new(output_dir))
-        }
-        [artifact, prepare_s01, distro, output_dir]
-            if artifact == "artifact" && prepare_s01 == "prepare-s01-boot-inputs" =>
-        {
-            crate::workflows::prepare_stage_inputs_cmd("01Boot", distro, Path::new(output_dir))
-        }
-        [artifact, prepare_s02, distro, output_dir]
-            if artifact == "artifact" && prepare_s02 == "prepare-s02-live-tools-inputs" =>
-        {
-            crate::workflows::prepare_stage_inputs_cmd("02LiveTools", distro, Path::new(output_dir))
-        }
-        [artifact, prepare_s00, distro, output_dir]
-            if artifact == "artifact" && prepare_s00 == "prepare-s00-build-inputs" =>
-        {
-            crate::workflows::prepare_stage_inputs_cmd("00Build", distro, Path::new(output_dir))
         }
         [artifact, preseed_stage01, distro]
             if artifact == "artifact" && preseed_stage01 == "preseed-stage01-source" =>

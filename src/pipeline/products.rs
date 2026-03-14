@@ -483,7 +483,7 @@ mod tests {
             })
             .collect();
         assert!(paths.contains(&PathBuf::from("etc/os-release")));
-        assert!(paths.contains(&PathBuf::from("usr/lib/stage-manifest.json")));
+        assert!(paths.contains(&PathBuf::from("usr/lib/product-manifest.json")));
     }
 
     #[test]

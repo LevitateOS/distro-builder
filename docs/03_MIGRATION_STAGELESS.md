@@ -742,6 +742,294 @@ Acceptance:
 - [x] canonical runtime/live payload names are product/scenario-native
 - [x] any remaining stage surface is explicit compatibility only
 
+### Phase 9. Legacy Placeholder
+
+Superseded by [04_MIGRATION_RING_MODEL.md](04_MIGRATION_RING_MODEL.md).
+
+Track 03 uncovered that the remaining work is not a pure naming purge.
+The real remaining problem is mixed ownership against the ring model, so the old
+Phase 9 concern now becomes Phase 1 of Track 04.
+
+The historical checklist below is kept only as an audit note for what exposed the
+problem, not as the active migration plan.
+
+#### Historical Audit Note: Purge `stage` from the filetree and source vocabulary
+
+Baseline measured on `2026-03-14` across active workspace roots (`distro-builder`, `distro-contract`, `distro-spec`, `testing`, `xtask`, `distro-variants`) excluding `.git`, `target`, `node_modules`, and `.artifacts`:
+
+- literal `stage` substring occurrences in file contents: `2698`
+- files containing at least one literal `stage` substring: `128`
+- file or directory paths containing the literal `stage` substring: `37`
+
+This phase is intentionally stricter than Phase 8:
+
+- Phase 8 made `stage` non-canonical.
+- Phase 9 removes the literal word `stage` from the active repo surface, especially the filetree.
+
+Design:
+
+- Treat Phase 9 as a controlled rename migration, not a grep-and-replace exercise.
+  - every rename must preserve one canonical owner
+  - no parallel `stage_*` and non-`stage_*` implementations may coexist in the default path
+  - rename the owner, then update all imports/callers in the same change set
+
+- Filetree-first is mandatory.
+  - if the filetree still contains `stage`, developers will keep reintroducing it into code and docs
+  - Phase 9 therefore starts with path/module/bin/script renames before broad identifier cleanup
+
+- Compatibility must become role-based only.
+  - allowed compatibility examples:
+    - `base-rootfs`
+    - `live-boot`
+    - `live-tools`
+    - `install`
+    - `installed-boot`
+    - `automated-login`
+    - `runtime`
+  - disallowed compatibility examples:
+    - `stage`
+    - `stages`
+    - `00Build`
+    - `01Boot`
+    - `02LiveTools`
+    - `03Install`
+    - `04LoginGate`
+    - `05Harness`
+    - `06Runtime`
+    - `s00`
+    - `s01`
+    - `s02`
+    - `0`
+    - `1`
+    - `2`
+    - `build-stage-erofs`
+    - `prepare-stage-inputs`
+    - `stage-window`
+  - if an old interface must survive temporarily, it must survive under a role alias only, not a numeric alias and not a literal-`stage` alias
+
+- Scope is two-ringed:
+  - Ring A: active implementation roots
+    - `distro-builder`
+    - `distro-contract`
+    - `distro-spec`
+    - `testing`
+    - `xtask`
+    - `distro-variants`
+  - Ring B: full tracked repo cleanup
+    - root docs
+    - `stages.md`
+    - `.teams/`
+    - helper scripts and repo notes
+  - completion for Phase 9 requires Ring A to be zero first, then Ring B to be zero
+
+- Historical notes do not get a naming exemption.
+  - if tracked docs still contain the literal word `stage`, they must either:
+    - be rewritten to the new vocabulary, or
+    - be moved out of the tracked repository
+  - moving them into a tracked `archive/stage-*` path is not acceptable because the filetree would still contain the forbidden word
+
+- Naming model for the final repo:
+  - `product`
+  - `transform`
+  - `release`
+  - `scenario`
+  - `source`
+  - `run`
+  - `compat`
+  - `input`
+  - `output`
+  - these replace `stage` everywhere in:
+    - paths
+    - module names
+    - bin names
+    - function names
+    - diagnostics
+    - docs
+  - they also replace numbered stage artifact families such as:
+    - `00Build.toml` -> `build.toml`
+    - `01Boot.toml` -> `boot.toml` or `boot-source.toml`
+    - `02LiveTools.toml` -> `live-tools.toml`
+    - `00Build-build.sh` -> `build-release.sh`
+    - `01Boot-build.sh` -> `boot-release.sh`
+    - `02LiveTools-build.sh` -> `live-tools-release.sh`
+    - `00Build-build-capability.sh` -> `build-capability.sh`
+
+- Rename order is fixed:
+  1. filetree and module paths
+  2. recipe/source filenames
+  3. public CLI/bin/wrapper names
+  4. identifiers and diagnostics
+  5. docs and historical notes
+  6. full-repo zero-match measurement
+
+- Measurement is an enforced gate, not a vanity metric.
+  - every sub-phase ends with a repo scan
+  - any newly added `stage` occurrence is a regression
+  - Phase 9 is complete only when scans hit zero for both:
+    - path names
+    - file contents
+
+- This phase should be executed in several small rename batches.
+  - one path family at a time
+  - one compatibility surface at a time
+  - verify build/test/CLI after each batch
+  - do not attempt a single monolithic repository-wide rename
+
+Recommended batch order:
+
+1. variant manifest and script family
+   - `00Build.toml`, `01Boot.toml`, `02LiveTools.toml`
+   - `00Build-build.sh`, `01Boot-build.sh`, `02LiveTools-build.sh`
+   - `00Build-build-capability.sh`
+   - replace with role-based manifest/script names before deeper module cleanup
+2. `distro-builder/src/bin/stage_*` and `distro-builder/src/stage_runs.rs`
+   - rename to neutral run/manifest/path names
+3. `distro-builder/src/stages/` and `testing/install-tests/src/stages/`
+   - rename directories/modules to `compat` / `scenarios` / `inputs`
+4. `testing/install-tests/src/bin/stages.rs`, `xtask`, and `justfile` wrapper names
+   - remove both literal-`stage` names and numeric stage aliases from the default UX
+5. `distro-builder/recipes/*stage01*` and `distro-builder/src/recipe/*stage01*`
+   - replace Stage 01 naming with source-role naming
+6. `testing/install-tests/test-scripts/stage-*.sh`
+   - rename scripts and their callers
+7. top-level/docs/history sweep
+   - `stages.md`
+   - `.teams/`
+   - root docs and migration docs
+
+- [ ] Remove `stage` from active file and directory names first.
+  - owner paths:
+    - `distro-variants/*/00Build.toml`
+    - `distro-variants/*/01Boot.toml`
+    - `distro-variants/*/02LiveTools.toml`
+    - `distro-variants/*/00Build-build.sh`
+    - `distro-variants/*/01Boot-build.sh`
+    - `distro-variants/*/02LiveTools-build.sh`
+    - `distro-variants/*/00Build-build-capability.sh`
+    - `distro-builder/src/bin/stage_paths.rs`
+    - `distro-builder/src/bin/stage_run_manifest.rs`
+    - `distro-builder/src/bin/stage_runs.rs`
+    - `distro-builder/src/stage_runs.rs`
+    - `distro-builder/src/stages/`
+    - `distro-builder/stage02-split-pane/`
+    - `testing/install-tests/src/bin/stages.rs`
+    - `testing/install-tests/src/stages/`
+    - `testing/install-tests/test-scripts/stage-*.sh`
+    - `distro-builder/docs/03_MIGRATION_STAGELESS.md`
+  - required model:
+    - replace numbered stage path owners with role-based names such as:
+      - `build.toml`
+      - `boot.toml`
+      - `live-tools.toml`
+      - `build-release.sh`
+      - `boot-release.sh`
+      - `live-tools-release.sh`
+      - `build-capability.sh`
+    - replace `stage_*` path owners with neutral names such as:
+      - `run_paths`
+      - `run_manifest`
+      - `run_store`
+      - `scenario_compat`
+      - `install-split-pane`
+      - `scenarios`
+    - update all internal module declarations, imports, bin targets, and wrapper references in the same change sets
+
+- [ ] Remove `stage` from recipe and source-owner filenames.
+  - owner paths:
+    - `distro-builder/recipes/stage01-dvd-deps.rhai`
+    - `distro-builder/recipes/fedora-stage01-rootfs.rhai`
+    - `distro-builder/recipes/alpine-stage01-rootfs.rhai`
+    - `distro-builder/recipes/custom-stage01-rootfs.rhai`
+    - `distro-builder/recipes/alpine-preseed-stage01-assets.rhai`
+    - `distro-builder/src/recipe/stage01_source.rs`
+    - `distro-builder/src/recipe/alpine_stage01.rs`
+  - required model:
+    - replace Stage 01 naming with source-role naming, for example:
+      - `dvd-source-deps`
+      - `fedora-dvd-source-rootfs`
+      - `alpine-live-source-rootfs`
+      - `source_rootfs`
+    - keep source-acquisition meaning, but stop encoding `stage` into filenames
+
+- [ ] Remove `stage` from code identifiers, functions, and diagnostics in active owners.
+  - owner files:
+    - `distro-contract/src/runtime.rs`
+    - `distro-contract/src/validate.rs`
+    - `distro-contract/src/variant.rs`
+    - `distro-spec/src/conformance.rs`
+    - `distro-builder/src/bin/workflows/*.rs`
+    - `testing/install-tests/src/preflight.rs`
+    - `testing/install-tests/src/scenarios/*.rs` after filetree rename
+    - `xtask/src/tasks/testing/scenarios.rs`
+  - required model:
+    - replace identifiers such as:
+      - `stage_required_kernel_cmdline`
+      - `stage_output_dir`
+      - `stage_root`
+      - `stage_artifact_tag`
+      - `Stage00.*`, `Stage01.*` diagnostics
+    - use:
+      - `scenario_*`
+      - `run_*`
+      - `product_*`
+      - `release_*`
+      - `source_*`
+
+- [ ] Remove `stage` from operator surfaces and wrapper names.
+  - owner files:
+    - `justfile`
+    - `distro-builder/src/bin/distro-builder.rs`
+    - `xtask/src/cli/types.rs`
+    - `testing/install-tests/src/bin/scenarios.rs` after rename
+    - migration docs and READMEs
+  - required model:
+    - canonical commands/examples must prefer:
+      - `scenario`
+      - `product`
+      - `release`
+      - `source`
+    - remove numbered stage aliases from the default visible path too
+    - any retained compatibility aliases must not keep either:
+      - the literal word `stage`
+      - numbered stage artifact names like `00Build`, `01Boot`, `02LiveTools`
+
+- [ ] Remove `stage` from docs and migration filenames.
+  - owner paths:
+    - `distro-builder/docs/03_MIGRATION_STAGELESS.md`
+    - `stages.md`
+    - team/docs notes under `.teams/` that still carry active references
+  - required model:
+    - rename the Track 03 document itself to a neutral title such as filesystem-first or product-model migration
+    - update `00_MIGRATION_INDEX.md` and any inbound links in the same change set
+
+- [ ] Re-measure and drive the literal `stage` count to zero in active workspace roots first, then the full tracked repository.
+  - required checks:
+    - Ring A:
+      - zero file or directory paths containing `stage`
+      - zero literal `stage` substrings in active code/docs under:
+        - `distro-builder`
+        - `distro-contract`
+        - `distro-spec`
+        - `testing`
+        - `xtask`
+        - `distro-variants`
+    - Ring B:
+      - zero file or directory paths containing `stage` anywhere in the tracked repo
+      - zero literal `stage` substrings anywhere in tracked repo contents
+-  - if any historical/archive material must keep the old word temporarily, move it out of the active roots before calling this phase complete
+  - if any historical/archive material must keep the old word temporarily, Phase 9 is not complete yet
+
+Acceptance:
+
+- [ ] no tracked file or directory path contains the literal substring `stage`
+- [ ] no tracked file or directory path contains stage-artifact numbering such as `00Build`, `01Boot`, `02LiveTools`, `s00`, `s01`, or `s02`
+- [ ] no active code identifier or diagnostic contains the literal substring `stage`
+- [ ] no canonical or compatibility command/help/doc surface uses:
+  - the literal substring `stage`
+  - numbered stage artifact names or numeric stage aliases
+- [ ] source/rootfs/release/scenario naming is role-based instead of stage-based everywhere
+- [ ] a repo-wide measured rescan returns zero literal `stage` matches
+
 ## What Must Die
 
 - fake later-stage placeholders in `distro-contract/src/variant.rs`

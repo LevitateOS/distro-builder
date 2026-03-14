@@ -14,15 +14,21 @@ This directory tracks the current high-level distro-builder migration work as nu
 
 3. [03_MIGRATION_STAGELESS.md](03_MIGRATION_STAGELESS.md)
    Status: ready
-   Scope: active filesystem-first migration away from stage-numbered composition toward explicit products, artifact transforms, and release-engineering outputs.
+   Scope: active filesystem-first migration away from stage-numbered composition toward explicit products, artifact transforms, and release-engineering outputs, followed by a final Phase 9 purge of both literal `stage` naming and numbered stage-artifact families like `00Build`, `01Boot`, and `02LiveTools`.
+
+4. [04_MIGRATION_RING_MODEL.md](04_MIGRATION_RING_MODEL.md)
+   Status: ready
+   Scope: replace the remaining mixed stage-era manifest ownership with ring-native ownership across `identity`, `build_host`, `ring3_sources`, `ring2_products`, `ring1_transforms`, `ring0_release`, and `scenarios`, then delete the old stage-era manifest families entirely.
 
 ## Recommended Order
 
 1. Keep the current A/B runtime/update model and improve its contract/install/test ownership as part of the product-model transition.
 2. Start the filesystem-first migration from `distro-contract`, then move builder/test routing after product ownership is real.
+3. After Track 03 semantics are in place, start Track 04 to redistribute mixed manifest ownership into the ring model before attempting final naming purges.
 
 ## Why This Split Exists
 
 - The Fedora swap was the concrete near-term migration that unblocked the later tracks.
 - The `bootc` track was evaluated and cancelled in favor of keeping the current A/B model.
 - The filesystem-first/product-model migration is now the primary architecture track and should start at contract ownership instead of surface-level CLI renames.
+- The ring-model track exists because Track 03 revealed the remaining problem is mixed ownership, not just leftover stage vocabulary.

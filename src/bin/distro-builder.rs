@@ -47,8 +47,6 @@ struct BuildRunMetadata {
     distro_id: String,
     target_kind: String,
     target_name: String,
-    compatibility_stage_name: String,
-    compatibility_stage_slug: String,
     status: String,
     created_at_utc: String,
     finished_at_utc: Option<String>,

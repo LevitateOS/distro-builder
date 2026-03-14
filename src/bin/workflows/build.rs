@@ -1,17 +1,16 @@
-use std::path::Path;
-use std::process::Command;
-
 use anyhow::{bail, Context, Result};
 use distro_builder::stages::s00_build::{
     ensure_kernel_installed_via_recipe, run_00build_evidence_script, S00BuildEvidenceSpec,
     S00BuildKernelEnsureOutcome, S00BuildKernelSpec,
 };
 use distro_contract::{
-    load_stage_00_contract_bundle_for_distro_from, require_valid_contract, LoadedVariantContract,
+    load_stage_00_contract_bundle_for_distro_from, require_valid_contract,
 };
+use std::path::Path;
+use std::process::Command;
 use time::OffsetDateTime;
 
-use crate::{BuildOutputLayout, BuildProduct, CompatibilityBuildStage};
+use crate::{BuildOutputLayout, BuildProduct};
 
 pub(crate) fn preflight_iso_build(
     repo_root: &Path,
@@ -126,7 +125,6 @@ pub(crate) fn build_one(distro_id: &str, product: BuildProduct) -> Result<()> {
             kernel_output_dir.display()
         )
     })?;
-    let compat_stage = crate::workflows::compatibility_stage_for_product(product);
     let build_layout = product_release_output_layout_for(&bundle.repo_root, distro_id, product)?;
 
     let output_dir = build_layout.output_dir.clone();
@@ -161,8 +159,6 @@ pub(crate) fn build_one(distro_id: &str, product: BuildProduct) -> Result<()> {
                 distro_id: distro_id.to_string(),
                 target_kind: "release-product".to_string(),
                 target_name: product.canonical.to_string(),
-                compatibility_stage_name: compat_stage.canonical.to_string(),
-                compatibility_stage_slug: compat_stage.slug.to_string(),
                 status: "building".to_string(),
                 created_at_utc: created_at_utc.clone(),
                 finished_at_utc: None,
@@ -190,13 +186,12 @@ pub(crate) fn build_one(distro_id: &str, product: BuildProduct) -> Result<()> {
                 );
             }
         }
-        ensure_iso_exists(
+        crate::workflows::ensure_release_iso_via_compatibility_hook(
             &bundle,
             distro_id,
             &kernel_output_dir,
             &build_layout,
             product,
-            compat_stage,
         )?;
 
         let evidence_spec = S00BuildEvidenceSpec {
@@ -242,9 +237,8 @@ pub(crate) fn build_one(distro_id: &str, product: BuildProduct) -> Result<()> {
         .with_context(|| format!("running 00Build evidence for '{distro_id}'"))?;
 
         println!(
-            "[release:iso:{}:{distro_id}] built via compatibility stage {} at {}",
+            "[release:iso:{}:{distro_id}] built at {}",
             product.canonical,
-            compat_stage.canonical,
             output_dir
                 .join(iso_filename_for_product(
                     &bundle.contract.artifacts.iso_filename,
@@ -270,8 +264,6 @@ pub(crate) fn build_one(distro_id: &str, product: BuildProduct) -> Result<()> {
                 distro_id: distro_id.to_string(),
                 target_kind: "release-product".to_string(),
                 target_name: product.canonical.to_string(),
-                compatibility_stage_name: compat_stage.canonical.to_string(),
-                compatibility_stage_slug: compat_stage.slug.to_string(),
                 status,
                 created_at_utc,
                 finished_at_utc,
@@ -299,165 +291,6 @@ pub(crate) fn build_one(distro_id: &str, product: BuildProduct) -> Result<()> {
     }
 
     build_result
-}
-
-fn ensure_iso_exists(
-    bundle: &LoadedVariantContract,
-    distro_id: &str,
-    kernel_output_dir: &Path,
-    build_layout: &BuildOutputLayout,
-    product: BuildProduct,
-    compat_stage: CompatibilityBuildStage,
-) -> Result<()> {
-    let output_dir = &build_layout.output_dir;
-    let iso_filename = iso_filename_for_product(&bundle.contract.artifacts.iso_filename, product);
-    let iso_path = output_dir.join(&iso_filename);
-    let native_build = bundle.variant_dir.join(compat_stage.native_build_script);
-    if !native_build.is_file() {
-        bail!(
-            "missing variant-native {} build hook for '{}': {}\n\
-             legacy crate entrypoints are blocked by policy.\n\
-             add '{}' under {} and implement ISO assembly there.",
-            compat_stage.canonical,
-            distro_id,
-            native_build.display(),
-            compat_stage.native_build_script,
-            bundle.variant_dir.display()
-        );
-    }
-
-    let kernel_release_path =
-        kernel_output_dir.join(&bundle.contract.stages.stage_00_build.kernel_release_path);
-    let kernel_image_path =
-        kernel_output_dir.join(&bundle.contract.stages.stage_00_build.kernel_image_path);
-
-    // Builds always target a freshly allocated per-run output directory.
-    // "missing ISO" in that directory is expected and not a cache miss.
-    println!(
-        "[release:iso:{}:{distro_id}] building release run {} via {} (output: {})",
-        product.canonical,
-        build_layout.run_id.as_deref().unwrap_or("adhoc"),
-        native_build.display(),
-        iso_path.display()
-    );
-
-    let distro_builder_bin =
-        std::env::current_exe().context("resolving distro-builder executable path")?;
-
-    let status = Command::new("sh")
-        .arg(&native_build)
-        .current_dir(&bundle.repo_root)
-        .env("DISTRO_ID", distro_id)
-        .env("IDENTITY_OS_NAME", &bundle.contract.identity.os_name)
-        .env("IDENTITY_OS_ID", &bundle.contract.identity.os_id)
-        .env("IDENTITY_OS_VERSION", &bundle.contract.identity.os_version)
-        .env("IDENTITY_ISO_LABEL", &bundle.contract.identity.iso_label)
-        .env(
-            "S00_LIVE_UKI_FILENAME",
-            &bundle
-                .contract
-                .stages
-                .stage_00_build
-                .iso_assembly
-                .live_uki_filename,
-        )
-        .env(
-            "S00_EMERGENCY_UKI_FILENAME",
-            &bundle
-                .contract
-                .stages
-                .stage_00_build
-                .iso_assembly
-                .emergency_uki_filename,
-        )
-        .env(
-            "S00_DEBUG_UKI_FILENAME",
-            &bundle
-                .contract
-                .stages
-                .stage_00_build
-                .iso_assembly
-                .debug_uki_filename,
-        )
-        .env(
-            "S00_LIVE_CMDLINE",
-            &bundle
-                .contract
-                .stages
-                .stage_00_build
-                .iso_assembly
-                .live_cmdline,
-        )
-        .env("KERNEL_RELEASE_PATH", &kernel_release_path)
-        .env("KERNEL_IMAGE_PATH", &kernel_image_path)
-        .env("ISO_PATH", &iso_path)
-        .env("ISO_FILENAME", &iso_filename)
-        .env("PRODUCT_NAME", product.canonical)
-        .env("BUILD_TARGET_LABEL", product.issue_banner_label)
-        .env("ROOTFS_FILENAME", product.rootfs_erofs_filename)
-        .env("INITRAMFS_LIVE_FILENAME", product.initramfs_live_filename)
-        .env("LIVE_OVERLAY_DIRNAME", product.live_overlay_dir_name)
-        .env(
-            "LIVE_OVERLAY_IMAGE_FILENAME",
-            product.overlay_erofs_filename,
-        )
-        .env(
-            "ROOTFS_SOURCE_POINTER_FILENAME",
-            product.rootfs_source_pointer_filename,
-        )
-        .env("BUILD_STAGE_NAME", compat_stage.canonical)
-        .env("BUILD_STAGE_SLUG", compat_stage.slug)
-        .env("BUILD_STAGE_DIRNAME", compat_stage.dir_name)
-        .env("STAGE_ARTIFACT_TAG", compat_stage.artifact_tag)
-        .env("STAGE_ROOT_DIR", &build_layout.root_dir)
-        .env("STAGE_RUN_DIR", output_dir)
-        .env(
-            "STAGE_REQUIRED_KERNEL_CMDLINE",
-            stage_required_kernel_cmdline(bundle, compat_stage),
-        )
-        .env("KERNEL_OUTPUT_DIR", kernel_output_dir)
-        .env("STAGE_OUTPUT_DIR", output_dir)
-        .env("BUILD_RUN_ID", build_layout.run_id.as_deref().unwrap_or(""))
-        .env("DISTRO_BUILDER_BIN", &distro_builder_bin)
-        .status()
-        .with_context(|| {
-            format!(
-                "running {} native build hook for '{}' from release product '{}' using {}",
-                compat_stage.canonical,
-                distro_id,
-                product.canonical,
-                native_build.display()
-            )
-        })?;
-
-    if !status.success() {
-        bail!("builder command failed for '{distro_id}' with status {status}");
-    }
-
-    if !iso_path.is_file() {
-        bail!(
-            "builder finished but ISO still missing for '{}': {}",
-            distro_id,
-            iso_path.display()
-        );
-    }
-
-    Ok(())
-}
-
-fn stage_required_kernel_cmdline(
-    bundle: &LoadedVariantContract,
-    compat_stage: CompatibilityBuildStage,
-) -> String {
-    match compat_stage.slug {
-        "s01_boot" | "s02_live_tools" => bundle
-            .contract
-            .stages
-            .stage_01_live_boot
-            .required_kernel_cmdline
-            .join(" "),
-        _ => String::new(),
-    }
 }
 
 pub(crate) fn iso_filename_for_product(

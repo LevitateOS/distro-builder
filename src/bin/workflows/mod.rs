@@ -3,6 +3,7 @@ mod build;
 mod commands;
 mod compat_artifacts;
 mod compat_commands;
+mod compat_release;
 mod layout;
 mod parse;
 mod prepared_products;
@@ -18,6 +19,7 @@ pub(crate) use commands::{
     dispatch_non_release_command, is_release_build_invocation, run_release_build_command,
 };
 pub(crate) use compat_artifacts::{build_stage_erofs_cmd, prepare_stage_inputs_cmd};
+pub(crate) use compat_release::ensure_release_iso_via_compatibility_hook;
 pub(crate) use layout::locate_repo_root;
 pub(crate) use parse::{
     compatibility_stage_for_product, discover_distro_ids, parse_product,

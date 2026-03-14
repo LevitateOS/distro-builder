@@ -15,6 +15,20 @@ pub(crate) fn ensure_release_iso_via_compatibility_hook(
 ) -> Result<()> {
     let compat_stage = crate::workflows::compatibility_stage_for_product(product);
     let output_dir = &build_layout.output_dir;
+    let rootfs_filename = crate::workflows::canonical_rootfs_erofs_filename(&bundle.contract)
+        .with_context(|| {
+            format!(
+                "resolving canonical Ring 1 rootfs output for '{}'",
+                distro_id
+            )
+        })?;
+    let overlay_filename = crate::workflows::canonical_overlay_erofs_filename(&bundle.contract)
+        .with_context(|| {
+            format!(
+                "resolving canonical Ring 1 overlay output for '{}'",
+                distro_id
+            )
+        })?;
     let iso_filename = crate::workflows::build::iso_filename_for_product(
         &bundle.contract.artifacts.iso_filename,
         product,
@@ -99,13 +113,10 @@ pub(crate) fn ensure_release_iso_via_compatibility_hook(
         .env("ISO_FILENAME", &iso_filename)
         .env("PRODUCT_NAME", product.canonical)
         .env("BUILD_TARGET_LABEL", product.issue_banner_label)
-        .env("ROOTFS_FILENAME", product.rootfs_erofs_filename)
+        .env("ROOTFS_FILENAME", &rootfs_filename)
         .env("INITRAMFS_LIVE_FILENAME", product.initramfs_live_filename)
         .env("LIVE_OVERLAY_DIRNAME", product.live_overlay_dir_name)
-        .env(
-            "LIVE_OVERLAY_IMAGE_FILENAME",
-            product.overlay_erofs_filename,
-        )
+        .env("LIVE_OVERLAY_IMAGE_FILENAME", &overlay_filename)
         .env(
             "ROOTFS_SOURCE_POINTER_FILENAME",
             product.rootfs_source_pointer_filename,

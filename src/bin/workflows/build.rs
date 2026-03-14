@@ -17,8 +17,21 @@ pub(crate) fn preflight_iso_build(
 ) -> Result<()> {
     let bundle = load_stage_00_contract_bundle_for_distro_from(repo_root, distro_id)
         .with_context(|| format!("loading 00Build contract for '{}'", distro_id))?;
+    let rootfs_filename = crate::workflows::canonical_rootfs_erofs_filename(&bundle.contract)
+        .with_context(|| {
+            format!(
+                "resolving canonical Ring 1 rootfs output for '{}'",
+                distro_id
+            )
+        })?;
     if let Some(parent_product) = parent_product_for_release_product(&bundle.contract, product)? {
-        require_parent_product_rootfs(repo_root, distro_id, product, parent_product)?;
+        require_parent_product_rootfs(
+            repo_root,
+            distro_id,
+            product,
+            parent_product,
+            &rootfs_filename,
+        )?;
     }
 
     Ok(())
@@ -45,6 +58,7 @@ fn require_parent_product_rootfs(
     distro_id: &str,
     product: BuildProduct,
     parent_product: BuildProduct,
+    rootfs_filename: &str,
 ) -> Result<()> {
     let parent_root = crate::stage_paths::release_product_dir_for(
         repo_root,
@@ -64,9 +78,7 @@ fn require_parent_product_rootfs(
             parent_product.canonical
         )
     })?;
-    let parent_rootfs = parent_root
-        .join(&run_id)
-        .join(parent_product.rootfs_erofs_filename);
+    let parent_rootfs = parent_root.join(&run_id).join(rootfs_filename);
     if !parent_rootfs.is_file() {
         bail!(
             "preflight failed for '{}' release product '{}': missing parent product '{}' rootfs image '{}'.\n\

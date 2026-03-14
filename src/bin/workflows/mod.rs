@@ -25,3 +25,6 @@ pub(crate) use parse::{
     compatibility_stage_for_product, discover_distro_ids, parse_product,
     parse_release_build_command, parse_release_product, parse_stage, product_for_logical_name,
 };
+pub(crate) use prepared_products::{
+    canonical_overlay_erofs_filename, canonical_rootfs_erofs_filename,
+};

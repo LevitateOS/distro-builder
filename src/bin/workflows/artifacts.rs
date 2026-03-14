@@ -15,12 +15,14 @@ use distro_builder::{
     OverlayLayout, ParentRootfsInput,
 };
 use distro_contract::{
-    load_stage_00_contract_bundle_for_distro_from, ConformanceContract, ProductDecl,
+    load_stage_00_contract_bundle_for_distro_from, ConformanceContract, LoadedVariantContract,
+    ProductDecl,
 };
 
 use crate::workflows::prepared_products::{
-    canonical_prepared_output_names, read_prepared_product_manifest, resolve_prepared_product_path,
-    write_prepared_product_outputs, PreparedProductInputs,
+    canonical_prepared_output_names, canonical_rootfs_erofs_filename,
+    read_prepared_product_manifest, resolve_prepared_product_path, write_prepared_product_outputs,
+    PreparedProductInputs,
 };
 
 pub(crate) fn build_rootfs_erofs(source_dir: &Path, output: &Path) -> Result<()> {
@@ -71,7 +73,7 @@ fn canonical_derived_product_layout(
         parent_rootfs: ParentRootfsInput {
             release_dir_name: parent_product.release_dir_name.to_string(),
             producer_label: parent_product.canonical.to_string(),
-            rootfs_filename: parent_product.rootfs_erofs_filename.to_string(),
+            rootfs_filename: canonical_rootfs_erofs_filename(contract)?,
         },
         live_overlay: OverlayLayout {
             issue_banner_label: product.issue_banner_label.to_string(),
@@ -159,8 +161,12 @@ pub(crate) fn build_prepared_product_erofs_cmd(prepared_dir: &Path) -> Result<()
 
 pub(crate) fn prepare_product_cmd(product: &str, distro_id: &str, output_dir: &Path) -> Result<()> {
     let product = crate::workflows::parse_product(Some(product))?;
-    let prepared = prepare_product_inputs(product, distro_id, output_dir)?;
-    let output_names = canonical_prepared_output_names(product);
+    let cwd = std::env::current_dir().context("resolving current directory")?;
+    let bundle = load_stage_00_contract_bundle_for_distro_from(&cwd, distro_id)
+        .with_context(|| format!("loading 00Build contract for '{}'", distro_id))?;
+    let prepared = prepare_product_inputs(&bundle, product, distro_id, output_dir)?;
+    let output_names = canonical_prepared_output_names(&bundle.contract, product)
+        .with_context(|| format!("resolving canonical Ring 1 outputs for '{}'", distro_id))?;
     let source_path_file =
         write_prepared_product_outputs(output_dir, product, distro_id, &prepared, &output_names)?;
 
@@ -175,14 +181,11 @@ pub(crate) fn prepare_product_cmd(product: &str, distro_id: &str, output_dir: &P
 }
 
 fn prepare_product_inputs(
+    bundle: &LoadedVariantContract,
     product: crate::BuildProduct,
     distro_id: &str,
     output_dir: &Path,
 ) -> Result<PreparedProductInputs> {
-    let cwd = std::env::current_dir().context("resolving current directory")?;
-    let bundle = load_stage_00_contract_bundle_for_distro_from(&cwd, distro_id)
-        .with_context(|| format!("loading 00Build contract for '{}'", distro_id))?;
-
     match product.canonical {
         crate::PRODUCT_BASE_ROOTFS => {
             let output_root =

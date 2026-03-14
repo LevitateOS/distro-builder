@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug)]
@@ -28,12 +28,27 @@ pub(crate) struct PreparedOutputNames {
     pub(crate) overlay_erofs_filename: String,
 }
 
-pub(crate) fn canonical_prepared_output_names(product: crate::BuildProduct) -> PreparedOutputNames {
-    PreparedOutputNames {
+pub(crate) fn canonical_rootfs_erofs_filename(
+    contract: &distro_contract::ConformanceContract,
+) -> Result<String> {
+    require_single_transform_output(&contract.transforms.rootfs_image, "rootfs_image")
+}
+
+pub(crate) fn canonical_overlay_erofs_filename(
+    contract: &distro_contract::ConformanceContract,
+) -> Result<String> {
+    require_single_transform_output(&contract.transforms.overlay_image, "overlay_image")
+}
+
+pub(crate) fn canonical_prepared_output_names(
+    contract: &distro_contract::ConformanceContract,
+    product: crate::BuildProduct,
+) -> Result<PreparedOutputNames> {
+    Ok(PreparedOutputNames {
         rootfs_source_pointer_filename: product.rootfs_source_pointer_filename.to_string(),
-        rootfs_erofs_filename: product.rootfs_erofs_filename.to_string(),
-        overlay_erofs_filename: product.overlay_erofs_filename.to_string(),
-    }
+        rootfs_erofs_filename: canonical_rootfs_erofs_filename(contract)?,
+        overlay_erofs_filename: canonical_overlay_erofs_filename(contract)?,
+    })
 }
 
 pub(crate) fn compatibility_prepared_output_names(
@@ -135,21 +150,54 @@ fn relative_prepared_product_path(output_dir: &Path, path: &Path) -> Result<Stri
     Ok(relative.display().to_string())
 }
 
+fn require_single_transform_output(
+    transform: &distro_contract::ArtifactTransform,
+    field: &str,
+) -> Result<String> {
+    match transform.output_names.as_slice() {
+        [output] => Ok(output.clone()),
+        [] => bail!(
+            "invalid canonical Ring 1 transform '{}': `contract.transforms.{}` must declare exactly one output name",
+            transform.logical_name,
+            field
+        ),
+        outputs => bail!(
+            "invalid canonical Ring 1 transform '{}': `contract.transforms.{}` must declare exactly one output name, found {:?}",
+            transform.logical_name,
+            field,
+            outputs
+        ),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use distro_contract::load_stage_00_contract_for_distro_from;
+    use std::path::PathBuf;
+
+    fn workspace_contract(distro_id: &str) -> distro_contract::ConformanceContract {
+        let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .canonicalize()
+            .expect("canonicalize workspace root");
+        load_stage_00_contract_for_distro_from(&repo_root, distro_id)
+            .unwrap_or_else(|err| panic!("failed to load {} contract: {}", distro_id, err))
+    }
 
     #[test]
-    fn canonical_prepared_output_names_are_product_native() {
+    fn canonical_prepared_output_names_follow_ring1_filesystem_transforms() {
+        let contract = workspace_contract("levitate");
         let product = crate::workflows::parse_product(Some(crate::PRODUCT_LIVE_BOOT))
             .expect("parse live-boot");
-        let names = canonical_prepared_output_names(product);
+        let names = canonical_prepared_output_names(&contract, product)
+            .expect("resolve canonical prepared output names");
         assert_eq!(
             names.rootfs_source_pointer_filename,
             ".live-rootfs-source.path"
         );
-        assert_eq!(names.rootfs_erofs_filename, "filesystem.erofs");
-        assert_eq!(names.overlay_erofs_filename, "overlayfs.erofs");
+        assert_eq!(names.rootfs_erofs_filename, "s00-filesystem.erofs");
+        assert_eq!(names.overlay_erofs_filename, "s00-overlayfs.erofs");
     }
 
     #[test]

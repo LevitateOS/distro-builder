@@ -224,7 +224,7 @@ The current stage model is still deeply real in active code:
 - `testing/install-tests/src/distro/*.rs`
   - still point at `s01-boot`, `s02-live-tools`, `s03-install`
 - `xtask/src/cli/types.rs`
-- `xtask/src/tasks/testing/stages.rs`
+- `xtask/src/tasks/testing/scenarios.rs`
   - still expose stage-numbered boot/test workflow as the primary UX
 - `justfile`
   - still teaches stage-numbered build/test routing
@@ -274,7 +274,7 @@ The main blockers are not cosmetic. They are ownership bugs.
 - `testing/install-tests/src/stages/mod.rs`
   - still models progression as stage-gated artifact ownership
 - `xtask/src/cli/types.rs`
-- `xtask/src/tasks/testing/stages.rs`
+- `xtask/src/tasks/testing/scenarios.rs`
   - still expose stage-numbered test workflow as primary UX
 
 ## Deep Investigation: Usable Core To Preserve
@@ -326,7 +326,7 @@ The repo already knows what kinds of artifacts exist. The ownership model around
 - `testing/install-tests/src/preflight.rs`
 - `testing/install-tests/src/distro/*.rs`
 - `xtask/src/cli/types.rs`
-- `xtask/src/tasks/testing/stages.rs`
+- `xtask/src/tasks/testing/scenarios.rs`
 - `justfile`
 
 ## Replacement Architecture
@@ -569,7 +569,7 @@ Acceptance:
 - [x] Replace persisted stage-number state in `testing/install-tests/src/stages/state.rs` with scenario identity plus concrete artifact/run identity.
 - [x] Stop invalidating cached results by `runtime_iso_mtime_secs_by_stage`; invalidate by the resolved scenario artifact identity instead.
 - [x] Replace `RuntimeStageRun`, `RuntimeStageRunManifest`, and `resolve_latest_stage03_runtime(...)` in `testing/install-tests/src/stages/mod.rs` with scenario-native installed-runtime ownership.
-- [x] Stop treating `s03-install` as the canonical owner for disk and OVMF runtime artifacts in `testing/install-tests/src/stages/mod.rs` and `xtask/src/tasks/testing/stages.rs`.
+- [x] Stop treating `s03-install` as the canonical owner for disk and OVMF runtime artifacts in `testing/install-tests/src/stages/mod.rs` and `xtask/src/tasks/testing/scenarios.rs`.
 - [x] Remove `default_iso_path()` as a canonical `DistroContext` contract in `testing/install-tests/src/distro/mod.rs`.
 - [x] Replace per-distro hardcoded `s01-boot` ISO paths in:
   `testing/install-tests/src/distro/levitate.rs`,
@@ -581,9 +581,9 @@ Acceptance:
 - [x] Replace `xtask` stage-native testing/boot routing in:
   `xtask/src/cli/types.rs`,
   `xtask/src/app.rs`,
-  `xtask/src/tasks/testing/stages.rs`.
+  `xtask/src/tasks/testing/scenarios.rs`.
 - [x] Replace `StagesCmd` / `BootConfig { stage01_root, stage02_root, stage03_root, ... }` with scenario/product-aware resolution while keeping stage-number aliases only at the CLI edge.
-- [x] Replace `resolve_stage_iso(...)` and `resolve_stage03_runtime(...)` in `xtask/src/tasks/testing/stages.rs` with scenario-native artifact/runtime resolvers.
+- [x] Replace `resolve_stage_iso(...)` and `resolve_stage03_runtime(...)` in `xtask/src/tasks/testing/scenarios.rs` with scenario-native artifact/runtime resolvers.
 - [x] Remove remaining deep stage-path heuristics such as the `s01-boot` / `s02-live-tools` fallback in `testing/install-tests/src/preflight.rs` once scenario metadata is fully authoritative.
 
 Implemented:
@@ -615,7 +615,7 @@ Acceptance:
 
 ### Phase 8. Clean names, paths, and compatibility shims
 
-- [ ] Isolate `distro-builder` compatibility stage metadata out of the canonical product owner.
+- [x] Isolate `distro-builder` compatibility stage metadata out of the canonical product owner.
   - owner files:
     - `distro-builder/src/bin/distro-builder.rs`
     - `distro-builder/src/bin/workflows/parse.rs`
@@ -629,7 +629,7 @@ Acceptance:
   - stop deriving release ISO names from `s00_build` / `s00-build`
   - keep any stage shell hook invocation only behind an explicit compatibility boundary
 
-- [ ] Rename generic run/layout helpers so canonical code no longer uses `stage_*` names for product/scenario/release runs.
+- [x] Rename generic run/layout helpers so canonical code no longer uses `stage_*` names for product/scenario/release runs.
   - owner files:
     - `distro-builder/src/bin/stage_paths.rs`
     - `distro-builder/src/bin/stage_runs.rs`
@@ -640,7 +640,7 @@ Acceptance:
     - run manifest persistence
   - keep `stage_*` wrappers only if still needed for explicit compatibility
 
-- [ ] Move stage-only artifact commands out of the canonical artifact workflow owner.
+- [x] Move stage-only artifact commands out of the canonical artifact workflow owner.
   - owner file:
     - `distro-builder/src/bin/workflows/artifacts.rs`
   - canonical owner should expose only:
@@ -655,7 +655,7 @@ Acceptance:
     - `prepare-s02-live-tools-inputs`
     into an explicit compatibility command module
 
-- [ ] Remove stage wrappers and stage metadata methods from the canonical scenario runner.
+- [x] Remove stage wrappers and stage metadata methods from the canonical scenario runner.
   - owner file:
     - `testing/install-tests/src/stages/mod.rs`
   - move out of the canonical scenario owner:
@@ -668,7 +668,7 @@ Acceptance:
     - `run_up_to(...)`
   - keep them only in CLI/compatibility wrapper code
 
-- [ ] Remove compatibility metadata and filename fallbacks from canonical preflight.
+- [x] Remove compatibility metadata and filename fallbacks from canonical preflight.
   - owner file:
     - `testing/install-tests/src/preflight.rs`
   - stop using:
@@ -678,21 +678,21 @@ Acceptance:
   - canonical preflight should validate product/scenario-native manifests and paths only
   - if stage fallbacks remain, move them into a wrapper path outside canonical preflight
 
-- [ ] Rename `xtask` testing ownership from `Stages` to scenarios, leaving `stages` only as an alias surface if still needed.
+- [x] Rename `xtask` testing ownership from `Stages` to scenarios, leaving `stages` only as an alias surface if still needed.
   - owner files:
     - `xtask/src/cli/types.rs`
     - `xtask/src/app.rs`
-    - `xtask/src/tasks/testing/stages.rs`
+    - `xtask/src/tasks/testing/scenarios.rs`
   - canonical command/owner names should be scenario-based
   - `stages` may remain only as a CLI alias layer
 
-- [ ] Clean stage-shaped runtime/live payload names and markers where they are no longer intentionally user-facing compatibility.
+- [x] Clean stage-shaped runtime/live payload names and markers where they are no longer intentionally user-facing compatibility.
   - owner files:
     - `distro-builder/src/pipeline/live_tools.rs`
     - `distro-builder/src/artifact/live_overlay.rs`
     - `testing/install-tests/src/distro/mod.rs`
     - `testing/install-tests/src/stages/mod.rs`
-    - `xtask/src/tasks/testing/stages.rs`
+    - `xtask/src/tasks/testing/scenarios.rs`
   - audit and replace names such as:
     - `stage-02-install-entrypoint`
     - `30-stage-02-install-ux.sh`
@@ -701,7 +701,7 @@ Acceptance:
     - `Stage 01` / `Stage 02` in canonical diagnostics where scenario/product wording should now be authoritative
   - preserve compatibility names only when they are intentionally shipped UX or external interfaces
 
-- [ ] Remove stage-shaped metadata from canonical filesystem products.
+- [x] Remove stage-shaped metadata from canonical filesystem products.
   - owner file:
     - `distro-builder/src/pipeline/plan.rs`
   - replace `usr/lib/stage-manifest.json` with product-native metadata

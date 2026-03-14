@@ -10,12 +10,12 @@ use crate::copy_dir_recursive;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub(crate) enum Stage02InstallExperience {
+pub(crate) enum InstallExperience {
     Ux,
     AutomatedSsh,
 }
 
-impl Stage02InstallExperience {
+impl InstallExperience {
     pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Ux => "ux",
@@ -24,12 +24,21 @@ impl Stage02InstallExperience {
     }
 }
 
+const CANONICAL_INSTALL_EXPERIENCE_MARKER: &str = "usr/lib/levitate/install-experience";
+const COMPAT_INSTALL_EXPERIENCE_MARKER: &str = "usr/lib/levitate/stage-02/install-experience";
+const CANONICAL_INSTALL_DOCS_TEXT: &str = "usr/local/share/levitate/install-docs.txt";
+const COMPAT_INSTALL_DOCS_TEXT: &str = "usr/local/share/levitate/stage-02-install-docs.txt";
+const CANONICAL_INSTALL_ENTRYPOINT: &str = "usr/local/bin/levitate-install-entrypoint";
+const COMPAT_INSTALL_ENTRYPOINT: &str = "usr/local/bin/stage-02-install-entrypoint";
+const CANONICAL_INSTALL_UX_PROFILE: &str = "etc/profile.d/30-install-ux.sh";
+const COMPAT_INSTALL_UX_PROFILE: &str = "etc/profile.d/30-stage-02-install-ux.sh";
+
 pub(crate) fn add_required_tools(
     repo_root: &Path,
     rootfs_source_dir: &Path,
     tool_payload_dir: &Path,
     distro_id: &str,
-    install_experience: Stage02InstallExperience,
+    install_experience: InstallExperience,
 ) -> Result<()> {
     let target = match distro_id {
         "levitate" | "ralph" => None,
@@ -45,23 +54,18 @@ pub(crate) fn add_required_tools(
         install_iuppiter_runtime_payload(repo_root, rootfs_source_dir, target).with_context(
             || {
                 format!(
-                    "installing iuppiter runtime payload into Stage 02 rootfs for '{}'",
+                    "installing iuppiter runtime payload into live-tools rootfs for '{}'",
                     distro_id
                 )
             },
         )?;
     }
     install_mode_payload(repo_root, rootfs_source_dir, distro_id, install_experience)
-        .with_context(|| {
-            format!(
-                "writing Stage 02 install experience payload for '{}'",
-                distro_id
-            )
-        })?;
-    if install_experience == Stage02InstallExperience::Ux {
+        .with_context(|| format!("writing install experience payload for '{}'", distro_id))?;
+    if install_experience == InstallExperience::Ux {
         install_split_launcher(repo_root, rootfs_source_dir, target).with_context(|| {
             format!(
-                "installing Stage 02 split launcher binary for '{}'",
+                "installing install split launcher binary for '{}'",
                 distro_id
             )
         })?;
@@ -118,7 +122,7 @@ fn install_iuppiter_runtime_payload(
     target: Option<&str>,
 ) -> Result<()> {
     let recab = build_workspace_binary(repo_root, "recab", target)
-        .context("building recab binary for iuppiter Stage 02 rootfs payload")?;
+        .context("building recab binary for iuppiter live-tools rootfs payload")?;
     if !recab.is_file() {
         bail!(
             "expected built recab binary not found at '{}'",
@@ -238,7 +242,7 @@ fn resolve_iuppiter_dar_bin(dar_root: &Path, target: Option<&str>) -> Result<Pat
 
     let target_hint = target.unwrap_or("x86_64-unknown-linux-musl");
     bail!(
-        "iuppiter-dar binary missing under '{}'. Build it first, then rerun Stage 02 build.\n\
+        "iuppiter-dar binary missing under '{}'. Build it first, then rerun live-tools product preparation.\n\
 Expected one of: {}\n\
 Suggested command:\n\
   cd '{}' && cargo build --target {} --release",
@@ -349,7 +353,7 @@ fn ensure_symlink(link_target: &Path, link_path: &Path) -> Result<()> {
 fn ensure_musl_packages(
     rootfs_source_dir: &Path,
     distro_id: &str,
-    _install_experience: Stage02InstallExperience,
+    _install_experience: InstallExperience,
 ) -> Result<()> {
     let packages: Vec<&str> = match distro_id {
         "acorn" => vec!["curl", "pciutils", "smartmontools", "hdparm", "vim", "htop"],
@@ -503,10 +507,10 @@ fn install_split_launcher(
 ) -> Result<()> {
     let binary_name = "levitate-install-docs-split";
     let built = build_workspace_binary_named(repo_root, "stage02-split-pane", binary_name, target)
-        .context("building Stage 02 split-pane launcher")?;
+        .context("building install split-pane launcher")?;
     if !built.is_file() {
         bail!(
-            "expected Stage 02 split launcher binary not found at '{}'",
+            "expected install split launcher binary not found at '{}'",
             built.display()
         );
     }
@@ -519,7 +523,7 @@ fn install_split_launcher(
     }
     fs::copy(&built, &dest).with_context(|| {
         format!(
-            "copying Stage 02 split launcher '{}' -> '{}'",
+            "copying install split launcher '{}' -> '{}'",
             built.display(),
             dest.display()
         )
@@ -548,14 +552,14 @@ fn install_bun_docs_tui_payload(
     let docs_app_dir = repo_root.join("tui/apps/s02-live-tools/install-docs");
     if !docs_app_dir.is_dir() {
         bail!(
-            "Stage 02 docs app source missing at '{}'. Expected workspace path 'tui/apps/s02-live-tools/install-docs'.",
+            "live install docs app source missing at '{}'. Expected workspace path 'tui/apps/s02-live-tools/install-docs'.",
             docs_app_dir.display()
         );
     }
 
     let bun_bin = find_executable_in_path("bun").ok_or_else(|| {
         anyhow::anyhow!(
-            "bun is required to build Stage 02 docs TUI payload.\n\
+            "bun is required to build the live install docs payload.\n\
              Remediation: install bun and ensure it is in PATH (https://bun.sh)."
         )
     })?;
@@ -569,7 +573,7 @@ fn install_bun_docs_tui_payload(
             .output()
             .with_context(|| {
                 format!(
-                    "running bun install for Stage 02 docs app at '{}'",
+                    "running bun install for live install docs app at '{}'",
                     docs_app_dir.display()
                 )
             })?;
@@ -577,7 +581,7 @@ fn install_bun_docs_tui_payload(
             let stdout = String::from_utf8_lossy(&install.stdout);
             let stderr = String::from_utf8_lossy(&install.stderr);
             bail!(
-                "bun install failed for Stage 02 docs app '{}': {}\n{}",
+                "bun install failed for live install docs app '{}': {}\n{}",
                 docs_app_dir.display(),
                 stdout.trim(),
                 stderr.trim()
@@ -588,7 +592,7 @@ fn install_bun_docs_tui_payload(
     let docs_bundle_dir = rootfs_source_dir.join("usr/local/share/levitate/docs-tui");
     fs::create_dir_all(&docs_bundle_dir).with_context(|| {
         format!(
-            "creating Stage 02 docs bundle directory '{}'",
+            "creating live install docs bundle directory '{}'",
             docs_bundle_dir.display()
         )
     })?;
@@ -605,7 +609,7 @@ fn install_bun_docs_tui_payload(
         .output()
         .with_context(|| {
             format!(
-                "building Stage 02 docs bundle from '{}' to '{}'",
+                "building live install docs bundle from '{}' to '{}'",
                 docs_app_dir.display(),
                 docs_bundle.display()
             )
@@ -614,7 +618,7 @@ fn install_bun_docs_tui_payload(
         let stdout = String::from_utf8_lossy(&build.stdout);
         let stderr = String::from_utf8_lossy(&build.stderr);
         bail!(
-            "bun build failed for Stage 02 docs bundle '{}': {}\n{}",
+            "bun build failed for live install docs bundle '{}': {}\n{}",
             docs_app_dir.display(),
             stdout.trim(),
             stderr.trim()
@@ -622,7 +626,7 @@ fn install_bun_docs_tui_payload(
     }
     if !docs_bundle.is_file() {
         bail!(
-            "Stage 02 docs bundle missing after build at '{}'",
+            "live install docs bundle missing after build at '{}'",
             docs_bundle.display()
         );
     }
@@ -651,7 +655,7 @@ set -eu\n\
 \n\
 APP=\"/usr/local/share/levitate/docs-tui/levitate-install-docs.js\"\n\
 if [ ! -r \"$APP\" ]; then\n\
-    echo \"Stage 02 docs bundle missing at $APP\" >&2\n\
+    echo \"install docs bundle missing at $APP\" >&2\n\
     exit 1\n\
 fi\n\
 \n\
@@ -669,7 +673,7 @@ fi\n\
 exec /usr/local/bin/bun \"$APP\" \"$@\"\n";
     write_executable(docs_cmd_path, docs_cmd).with_context(|| {
         format!(
-            "installing Stage 02 docs command launcher '{}'",
+            "installing install docs command launcher '{}'",
             docs_cmd_path.display()
         )
     })?;
@@ -681,27 +685,25 @@ fn install_mode_payload(
     repo_root: &Path,
     rootfs_source_dir: &Path,
     distro_id: &str,
-    install_experience: Stage02InstallExperience,
+    install_experience: InstallExperience,
 ) -> Result<()> {
     let interactive_shell = match distro_id {
         "levitate" | "ralph" => "/bin/bash",
         _ => "/bin/sh",
     };
 
-    let marker_dir = rootfs_source_dir.join("usr/lib/levitate/stage-02");
-    fs::create_dir_all(&marker_dir).with_context(|| {
+    let marker_path = rootfs_source_dir.join(CANONICAL_INSTALL_EXPERIENCE_MARKER);
+    write_text(&marker_path, &format!("{}\n", install_experience.as_str())).with_context(|| {
         format!(
-            "creating Stage 02 install experience marker dir '{}'",
-            marker_dir.display()
-        )
-    })?;
-    let marker_path = marker_dir.join("install-experience");
-    fs::write(&marker_path, format!("{}\n", install_experience.as_str())).with_context(|| {
-        format!(
-            "writing Stage 02 install experience marker '{}'",
+            "writing install experience marker '{}'",
             marker_path.display()
         )
     })?;
+    ensure_symlink(
+        Path::new("/usr/lib/levitate/install-experience"),
+        &rootfs_source_dir.join(COMPAT_INSTALL_EXPERIENCE_MARKER),
+    )
+    .with_context(|| "installing compatibility install-experience marker alias".to_string())?;
 
     install_shell_color_profile(rootfs_source_dir).with_context(|| {
         format!(
@@ -710,33 +712,37 @@ fn install_mode_payload(
         )
     })?;
 
-    if install_experience == Stage02InstallExperience::Ux {
+    if install_experience == InstallExperience::Ux {
         let docs_cmd_path = rootfs_source_dir.join("usr/local/bin/levitate-install-docs");
         let docs_tui_cmd_path = rootfs_source_dir.join("usr/local/bin/docs-tui");
-        let docs_text_path =
-            rootfs_source_dir.join("usr/local/share/levitate/stage-02-install-docs.txt");
+        let docs_text_path = rootfs_source_dir.join(CANONICAL_INSTALL_DOCS_TEXT);
         let docs_text = format!(
-            "LevitateOS Stage 02 Live Tools\n\
+            "LevitateOS Live Install Tools\n\
              Distro: {distro}\n\
              \n\
              This shell is intended for interactive install preparation.\n\
              Available baseline commands include: recstrap, recfstab, recchroot, sfdisk, mkfs.ext4, ip, ping, curl.\n\
              \n\
-             If this host is used for automation, switch to the stage profile that sets install_experience=automated_ssh.\n",
+             If this host is used for automation, switch to the profile that sets install_experience=automated_ssh.\n",
             distro = distro_id
         );
         write_text(&docs_text_path, &docs_text).with_context(|| {
             format!(
-                "writing Stage 02 docs payload '{}'",
+                "writing install docs payload '{}'",
                 docs_text_path.display()
             )
         })?;
+        ensure_symlink(
+            Path::new("/usr/local/share/levitate/install-docs.txt"),
+            &rootfs_source_dir.join(COMPAT_INSTALL_DOCS_TEXT),
+        )
+        .with_context(|| "installing compatibility install-docs alias".to_string())?;
 
         if distro_id == "levitate" {
             install_bun_docs_tui_payload(repo_root, rootfs_source_dir, &docs_cmd_path)
                 .with_context(|| {
                     format!(
-                        "installing bun-based Stage 02 docs payload for '{}'",
+                        "installing bun-based install docs payload for '{}'",
                         distro_id
                     )
                 })?;
@@ -745,7 +751,7 @@ fn install_mode_payload(
                 "#!/bin/sh\n\
 set -eu\n\
 \n\
-DOCS_FILE=\"/usr/local/share/levitate/stage-02-install-docs.txt\"\n\
+DOCS_FILE=\"/usr/local/share/levitate/install-docs.txt\"\n\
 case \"${{TERM:-}}\" in\n\
     \"\"|dumb|vt100|vt102|linux)\n\
         export TERM=xterm-256color\n\
@@ -769,7 +775,7 @@ if [ -f \"$DOCS_FILE\" ]; then\n\
     fi\n\
     cat \"$DOCS_FILE\"\n\
 else\n\
-    echo \"Stage 02 docs payload missing at $DOCS_FILE\"\n\
+    echo \"install docs payload missing at $DOCS_FILE\"\n\
 fi\n\
 \n\
 exec \"${{SHELL:-{shell}}}\" -l\n",
@@ -777,7 +783,7 @@ exec \"${{SHELL:-{shell}}}\" -l\n",
             );
             write_executable(&docs_cmd_path, &docs_cmd).with_context(|| {
                 format!(
-                    "installing Stage 02 docs command '{}'",
+                    "installing install docs command '{}'",
                     docs_cmd_path.display()
                 )
             })?;
@@ -788,15 +794,15 @@ exec \"${{SHELL:-{shell}}}\" -l\n",
 exec /usr/local/bin/levitate-install-docs \"$@\"\n";
         write_executable(&docs_tui_cmd_path, docs_tui_cmd).with_context(|| {
             format!(
-                "installing Stage 02 docs-tui alias '{}'",
+                "installing install docs-tui alias '{}'",
                 docs_tui_cmd_path.display()
             )
         })?;
     }
 
-    let entrypoint_path = rootfs_source_dir.join("usr/local/bin/stage-02-install-entrypoint");
+    let entrypoint_path = rootfs_source_dir.join(CANONICAL_INSTALL_ENTRYPOINT);
     let entrypoint_script = match install_experience {
-        Stage02InstallExperience::Ux => format!(
+        InstallExperience::Ux => format!(
             "#!/bin/sh\n\
 set -eu\n\
 \n\
@@ -823,21 +829,21 @@ choose_install_helper() {{\n\
 if [ \"${{1:-}}\" = \"--probe\" ]; then\n\
     helper=\"$(choose_install_helper || true)\"\n\
     if [ -n \"$helper\" ]; then\n\
-        printf 'stage02-entrypoint-helper=%s\\n' \"$helper\"\n\
+        printf 'install-entrypoint-helper=%s\\n' \"$helper\"\n\
         exit 0\n\
     fi\n\
-    printf 'stage02-entrypoint-helper=none\\n'\n\
+    printf 'install-entrypoint-helper=none\\n'\n\
     exit 3\n\
 fi\n\
 \n\
-echo \"[{distro}] Stage 02 install experience: UX\"\n\
+echo \"[{distro}] install experience: UX\"\n\
 echo \"Starting local interactive install helper if available...\"\n\
 \n\
 helper=\"$(choose_install_helper || true)\"\n\
 if [ -n \"$helper\" ]; then\n\
     case \"$helper\" in\n\
         */levitate-install-docs-split|levitate-install-docs-split)\n\
-            if [ \"${{STAGE02_ENTRYPOINT_SMOKE:-0}}\" = \"1\" ]; then\n\
+            if [ \"${{LEVITATE_INSTALL_ENTRYPOINT_SMOKE:-${{STAGE02_ENTRYPOINT_SMOKE:-0}}}}\" = \"1\" ]; then\n\
                 exec \"$helper\" --smoke\n\
             fi\n\
             ;;\n\
@@ -850,11 +856,11 @@ exec \"${{SHELL:-{shell}}}\" -l\n",
             shell = interactive_shell,
             distro = distro_id
         ),
-        Stage02InstallExperience::AutomatedSsh => format!(
+        InstallExperience::AutomatedSsh => format!(
             "#!/bin/sh\n\
 set -eu\n\
 \n\
-echo \"[{distro}] Stage 02 install experience: automated SSH\"\n\
+echo \"[{distro}] install experience: automated SSH\"\n\
 echo \"This ISO profile is intended for SSH-driven automation (qcow2/.img pipelines).\"\n\
 exec \"${{SHELL:-{shell}}}\" -l\n",
             shell = interactive_shell,
@@ -863,13 +869,18 @@ exec \"${{SHELL:-{shell}}}\" -l\n",
     };
     write_executable(&entrypoint_path, &entrypoint_script).with_context(|| {
         format!(
-            "installing Stage 02 entrypoint script '{}'",
+            "installing install entrypoint script '{}'",
             entrypoint_path.display()
         )
     })?;
+    ensure_symlink(
+        Path::new("/usr/local/bin/levitate-install-entrypoint"),
+        &rootfs_source_dir.join(COMPAT_INSTALL_ENTRYPOINT),
+    )
+    .with_context(|| "installing compatibility install entrypoint alias".to_string())?;
 
-    if install_experience == Stage02InstallExperience::Ux {
-        let ux_profile_path = rootfs_source_dir.join("etc/profile.d/30-stage-02-install-ux.sh");
+    if install_experience == InstallExperience::Ux {
+        let ux_profile_path = rootfs_source_dir.join(CANONICAL_INSTALL_UX_PROFILE);
         let ux_profile = "#!/bin/sh\n\
 case \"$-\" in\n\
     *i*) ;;\n\
@@ -877,7 +888,7 @@ case \"$-\" in\n\
 esac\n\
 \n\
 [ -n \"${TMUX:-}\" ] && return 0\n\
-[ \"${STAGE02_UX_LAUNCHED:-0}\" = \"1\" ] && return 0\n\
+[ \"${LEVITATE_INSTALL_UX_LAUNCHED:-${STAGE02_UX_LAUNCHED:-0}}\" = \"1\" ] && return 0\n\
 \n\
 if [ -r /run/boot-injection/payload.env ]; then\n\
     while IFS= read -r line; do\n\
@@ -895,36 +906,44 @@ if [ -r /run/boot-injection/payload.env ]; then\n\
 fi\n\
 \n\
 TTY=\"$(tty 2>/dev/null || true)\"\n\
-if [ -z \"${STAGE02_LEFT_CMD:-}\" ]; then\n\
+if [ -z \"${LEVITATE_INSTALL_LEFT_CMD:-${STAGE02_LEFT_CMD:-}}\" ]; then\n\
     if [ -x /bin/bash ]; then\n\
-        STAGE02_LEFT_CMD=\"/bin/bash -il\"\n\
+        LEVITATE_INSTALL_LEFT_CMD=\"/bin/bash -il\"\n\
     else\n\
-        STAGE02_LEFT_CMD=\"/bin/sh -il\"\n\
+        LEVITATE_INSTALL_LEFT_CMD=\"/bin/sh -il\"\n\
     fi\n\
-    export STAGE02_LEFT_CMD\n\
+    export LEVITATE_INSTALL_LEFT_CMD\n\
 fi\n\
+export STAGE02_LEFT_CMD=\"${STAGE02_LEFT_CMD:-${LEVITATE_INSTALL_LEFT_CMD:-}}\"\n\
 if [ \"$TTY\" = \"/dev/tty1\" ]; then\n\
     :\n\
-elif [ \"$TTY\" = \"/dev/ttyS0\" ] && [ \"${STAGE02_SERIAL_UX:-0}\" = \"1\" ]; then\n\
-    if [ -z \"${STAGE02_RIGHT_CMD:-}\" ]; then\n\
-        STAGE02_RIGHT_CMD=\"docs-tui --slug installation\"\n\
-        export STAGE02_RIGHT_CMD\n\
+elif [ \"$TTY\" = \"/dev/ttyS0\" ] && [ \"${LEVITATE_INSTALL_SERIAL_UX:-${STAGE02_SERIAL_UX:-0}}\" = \"1\" ]; then\n\
+    if [ -z \"${LEVITATE_INSTALL_RIGHT_CMD:-${STAGE02_RIGHT_CMD:-}}\" ]; then\n\
+        LEVITATE_INSTALL_RIGHT_CMD=\"docs-tui --slug installation\"\n\
+        export LEVITATE_INSTALL_RIGHT_CMD\n\
     fi\n\
+    export STAGE02_RIGHT_CMD=\"${STAGE02_RIGHT_CMD:-${LEVITATE_INSTALL_RIGHT_CMD:-}}\"\n\
     export LEVITATE_DOCS_PLAIN=1\n\
     :\n\
 else\n\
     return 0\n\
 fi\n\
 \n\
-echo \"[stage02-ux] Launching install UX on $TTY...\"\n\
+echo \"[install-ux] Launching install UX on $TTY...\"\n\
+export LEVITATE_INSTALL_UX_LAUNCHED=1\n\
 export STAGE02_UX_LAUNCHED=1\n\
-exec /usr/local/bin/stage-02-install-entrypoint\n";
+exec /usr/local/bin/levitate-install-entrypoint\n";
         write_text(&ux_profile_path, ux_profile).with_context(|| {
             format!(
-                "installing Stage 02 UX profile hook '{}'",
+                "installing install UX profile hook '{}'",
                 ux_profile_path.display()
             )
         })?;
+        ensure_symlink(
+            Path::new("/etc/profile.d/30-install-ux.sh"),
+            &rootfs_source_dir.join(COMPAT_INSTALL_UX_PROFILE),
+        )
+        .with_context(|| "installing compatibility install UX profile alias".to_string())?;
     }
 
     Ok(())

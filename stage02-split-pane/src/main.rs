@@ -77,7 +77,7 @@ fn print_help() {
     println!("  levitate-install-docs-split --smoke");
     println!();
     println!("Options:");
-    println!("  --smoke   Non-interactive split-pane smoke check for Stage 02 tests.");
+    println!("  --smoke   Non-interactive split-pane smoke check for install UX tests.");
 }
 
 #[derive(Debug, Clone)]
@@ -101,6 +101,12 @@ impl Config {
 }
 
 fn resolve_left_command() -> Option<String> {
+    if let Ok(raw) = env::var("LEVITATE_INSTALL_LEFT_CMD") {
+        let raw = raw.trim();
+        if !raw.is_empty() {
+            return Some(raw.to_string());
+        }
+    }
     if let Ok(raw) = env::var("STAGE02_LEFT_CMD") {
         let raw = raw.trim();
         if !raw.is_empty() {
@@ -111,6 +117,16 @@ fn resolve_left_command() -> Option<String> {
 }
 
 fn resolve_right_command() -> Option<String> {
+    if let Ok(raw) = env::var("LEVITATE_INSTALL_RIGHT_CMD") {
+        let raw = raw.trim();
+        if !raw.is_empty() {
+            if let Some(token) = first_token(raw) {
+                if command_exists(token) {
+                    return Some(raw.to_string());
+                }
+            }
+        }
+    }
     if let Ok(raw) = env::var("STAGE02_RIGHT_CMD") {
         let raw = raw.trim();
         if !raw.is_empty() {

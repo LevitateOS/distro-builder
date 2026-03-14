@@ -93,7 +93,7 @@ pub fn create_openrc_live_overlay(
 # Called by agetty -l as the login program
 # agetty has already set up stdin/stdout/stderr on the tty
 
-# Optional boot-injection environment (e.g. SSH_AUTHORIZED_KEY, STAGE02_SERIAL_UX).
+# Optional boot-injection environment (e.g. SSH_AUTHORIZED_KEY, LEVITATE_INSTALL_SERIAL_UX).
 # Parse as literal KEY=VALUE lines to avoid executing payload content.
 if [ -r /run/boot-injection/payload.env ]; then
     while IFS= read -r line; do
@@ -116,10 +116,11 @@ echo "[autologin] Starting login shell..." >/dev/console 2>/dev/null || true
 echo "___SHELL_READY___" >/dev/console 2>/dev/null || true
 echo "___SHELL_READY___" >/dev/kmsg 2>/dev/null || true
 
-if [ "${STAGE02_SERIAL_UX:-0}" = "1" ] && [ -x /usr/local/bin/stage-02-install-entrypoint ]; then
-    echo "[autologin] Launching Stage 02 install UX on serial console..."
+if [ "${LEVITATE_INSTALL_SERIAL_UX:-${STAGE02_SERIAL_UX:-0}}" = "1" ] && [ -x /usr/local/bin/levitate-install-entrypoint ]; then
+    echo "[autologin] Launching install UX on serial console..."
+    export LEVITATE_INSTALL_UX_LAUNCHED=1
     export STAGE02_UX_LAUNCHED=1
-    exec /usr/local/bin/stage-02-install-entrypoint
+    exec /usr/local/bin/levitate-install-entrypoint
 fi
 
 # Run sh as login shell (sources /etc/profile and /etc/profile.d/*)
@@ -370,7 +371,7 @@ cat <<'EOF'
 LevitateOS Live Quick Help
 
 Common commands:
-  stage-02-install-entrypoint --probe
+  levitate-install-entrypoint --probe
   stage-03-installation.sh
   live-net-setup.service (systemd unit)
   recstrap / recfstab / recchroot
@@ -425,7 +426,7 @@ unset LC_ALL LC_CTYPE LC_NUMERIC LC_TIME LC_COLLATE LC_MESSAGES \
       LC_MONETARY LC_PAPER LC_NAME LC_ADDRESS LC_TELEPHONE LC_MEASUREMENT \
       LC_IDENTIFICATION
 
-# Optional boot-injection environment (e.g. SSH_AUTHORIZED_KEY, STAGE02_SERIAL_UX).
+# Optional boot-injection environment (e.g. SSH_AUTHORIZED_KEY, LEVITATE_INSTALL_SERIAL_UX).
 # Parse as literal KEY=VALUE lines to avoid executing payload content.
 if [ -r /run/boot-injection/payload.env ]; then
     while IFS= read -r line; do
@@ -445,7 +446,7 @@ fi
 echo "___SHELL_READY___"
 
 # Keep default serial shell readable, but allow explicit verbose override for debugging.
-if [ "${STAGE_SERIAL_VERBOSE:-0}" = "1" ] || [ "${STAGE02_SERIAL_VERBOSE:-0}" = "1" ]; then
+if [ "${LEVITATE_INSTALL_SERIAL_VERBOSE:-${STAGE_SERIAL_VERBOSE:-${STAGE02_SERIAL_VERBOSE:-0}}}" = "1" ]; then
     if [ -w /proc/sys/kernel/printk ]; then
         echo 7 >/proc/sys/kernel/printk 2>/dev/null || true
     fi
@@ -461,10 +462,11 @@ else
     fi
 fi
 
-if [ "${STAGE02_SERIAL_UX:-0}" = "1" ] && [ -x /usr/local/bin/stage-02-install-entrypoint ]; then
-    echo "[autologin] Launching Stage 02 install UX on serial console..."
+if [ "${LEVITATE_INSTALL_SERIAL_UX:-${STAGE02_SERIAL_UX:-0}}" = "1" ] && [ -x /usr/local/bin/levitate-install-entrypoint ]; then
+    echo "[autologin] Launching install UX on serial console..."
+    export LEVITATE_INSTALL_UX_LAUNCHED=1
     export STAGE02_UX_LAUNCHED=1
-    exec /usr/local/bin/stage-02-install-entrypoint
+    exec /usr/local/bin/levitate-install-entrypoint
 fi
 
 exec /bin/bash -il

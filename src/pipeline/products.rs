@@ -8,7 +8,7 @@ use crate::pipeline::io::{
     create_empty_overlay_dir, create_unique_output_dir, extract_erofs_rootfs,
     resolve_parent_product_rootfs_image_for_distro,
 };
-use crate::pipeline::live_tools::{add_required_tools, Stage02InstallExperience};
+use crate::pipeline::live_tools::{add_required_tools, InstallExperience};
 use crate::pipeline::overlay::{
     create_live_overlay, ensure_openrc_shell, ensure_required_service_wiring,
     ensure_systemd_default_target, ensure_systemd_locale_completeness, ensure_systemd_sshd_dirs,
@@ -132,7 +132,7 @@ pub struct LiveToolsProductSpec {
     repo_root: PathBuf,
     pub distro_id: String,
     pub os_name: String,
-    install_experience: Stage02InstallExperience,
+    install_experience: InstallExperience,
     pub rootfs_source_dir: PathBuf,
     parent_rootfs: ParentRootfsInput,
     live_overlay: OverlayLayout,
@@ -156,7 +156,7 @@ struct LiveToolsStageToml {
 #[serde(deny_unknown_fields)]
 struct LiveToolsInputsToml {
     os_name: String,
-    install_experience: Stage02InstallExperience,
+    install_experience: InstallExperience,
 }
 
 pub fn load_base_rootfs_product_spec(
@@ -369,9 +369,9 @@ pub fn load_live_tools_product_spec(
 ) -> Result<LiveToolsProductSpec> {
     let config_path = variant_dir.join("02LiveTools.toml");
     let config_bytes = fs::read_to_string(&config_path)
-        .with_context(|| format!("reading Stage 02 config '{}'", config_path.display()))?;
+        .with_context(|| format!("reading live-tools config '{}'", config_path.display()))?;
     let parsed: LiveToolsToml = toml::from_str(&config_bytes)
-        .with_context(|| format!("parsing Stage 02 config '{}'", config_path.display()))?;
+        .with_context(|| format!("parsing live-tools config '{}'", config_path.display()))?;
 
     let live_boot_spec =
         load_live_boot_product_spec(repo_root, variant_dir, distro_id, layout.clone())

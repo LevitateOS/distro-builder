@@ -372,7 +372,7 @@ LevitateOS Live Quick Help
 
 Common commands:
   levitate-install-entrypoint --probe
-  stage-03-installation.sh
+  install.sh
   live-net-setup.service (systemd unit)
   recstrap / recfstab / recchroot
   docs-tui --slug installation

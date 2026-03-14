@@ -57,7 +57,7 @@ pub(crate) fn ensure_release_iso_via_compatibility_hook(
     let native_build = bundle.variant_dir.join(compat_stage.native_build_script);
     if !native_build.is_file() {
         bail!(
-            "missing compatibility build hook for release product '{}' on '{}': {}\n\
+            "missing variant release build hook for product '{}' on '{}': {}\n\
              expected '{}' under '{}'.",
             product.canonical,
             distro_id,
@@ -73,7 +73,7 @@ pub(crate) fn ensure_release_iso_via_compatibility_hook(
         kernel_output_dir.join(&bundle.contract.stages.stage_00_build.kernel_image_path);
 
     println!(
-        "[release:iso:{}:{distro_id}] building release run {} via compatibility hook {} (output: {})",
+        "[release:iso:{}:{distro_id}] building release run {} via variant release hook {} (output: {})",
         product.canonical,
         build_layout.run_id.as_deref().unwrap_or("adhoc"),
         native_build.display(),
@@ -126,7 +126,7 @@ pub(crate) fn ensure_release_iso_via_compatibility_hook(
         .status()
         .with_context(|| {
             format!(
-                "running compatibility build hook '{}' for release product '{}' on '{}'",
+                "running variant release build hook '{}' for product '{}' on '{}'",
                 native_build.display(),
                 product.canonical,
                 distro_id

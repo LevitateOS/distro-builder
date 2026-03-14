@@ -42,10 +42,6 @@ pub(crate) fn run_release_build_command(args: &[String]) -> Result<()> {
 }
 
 pub(crate) fn dispatch_non_release_command(args: &[String]) -> Result<()> {
-    if let Some(command) = crate::workflows::compat_commands::dispatch_compatibility_command(args) {
-        return command.with_context(|| format!("dispatching workflow for '{}'", args.join(" ")));
-    }
-
     let command = match args {
         [release, build_all_cmd, iso]
             if release == "release" && build_all_cmd == "build-all" && iso == "iso" =>
@@ -94,22 +90,21 @@ pub(crate) fn dispatch_non_release_command(args: &[String]) -> Result<()> {
             crate::workflows::build_overlayfs_erofs(Path::new(source_dir), Path::new(output))
         }
         [artifact, preseed_stage01, distro]
-            if artifact == "artifact" && preseed_stage01 == "preseed-stage01-source" =>
+            if artifact == "artifact" && preseed_stage01 == "preseed-rootfs-source" =>
         {
-            crate::workflows::preseed_stage01_source_cmd(distro, false)
+            crate::workflows::preseed_rootfs_source_cmd(distro, false)
         }
         [artifact, preseed_stage01, distro, refresh]
             if artifact == "artifact"
-                && preseed_stage01 == "preseed-stage01-source"
+                && preseed_stage01 == "preseed-rootfs-source"
                 && refresh == "--refresh" =>
         {
-            crate::workflows::preseed_stage01_source_cmd(distro, true)
+            crate::workflows::preseed_rootfs_source_cmd(distro, true)
         }
         [artifact, materialize_stage01, distro]
-            if artifact == "artifact"
-                && materialize_stage01 == "materialize-stage01-source-rootfs" =>
+            if artifact == "artifact" && materialize_stage01 == "materialize-rootfs-source" =>
         {
-            crate::workflows::materialize_stage01_source_rootfs_cmd(distro)
+            crate::workflows::materialize_rootfs_source_cmd(distro)
         }
         _ => bail!(crate::usage()),
     };

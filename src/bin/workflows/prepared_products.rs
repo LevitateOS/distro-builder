@@ -63,16 +63,6 @@ pub(crate) fn canonical_prepared_output_names(
     })
 }
 
-pub(crate) fn compatibility_prepared_output_names(
-    stage: crate::CompatibilityBuildStage,
-) -> PreparedOutputNames {
-    PreparedOutputNames {
-        rootfs_source_pointer_filename: format!(".{}-live-rootfs-source.path", stage.artifact_tag),
-        rootfs_erofs_filename: format!("{}-filesystem.erofs", stage.artifact_tag),
-        overlay_erofs_filename: format!("{}-overlayfs.erofs", stage.artifact_tag),
-    }
-}
-
 pub(crate) fn write_prepared_product_outputs(
     output_dir: &Path,
     product: crate::BuildProduct,
@@ -185,7 +175,7 @@ fn require_single_transform_output(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use distro_contract::load_stage_00_contract_for_distro_from;
+    use distro_contract::load_variant_contract_for_distro_from;
     use std::path::PathBuf;
 
     fn workspace_contract(distro_id: &str) -> distro_contract::ConformanceContract {
@@ -193,7 +183,7 @@ mod tests {
             .join("..")
             .canonicalize()
             .expect("canonicalize workspace root");
-        load_stage_00_contract_for_distro_from(&repo_root, distro_id)
+        load_variant_contract_for_distro_from(&repo_root, distro_id)
             .unwrap_or_else(|err| panic!("failed to load {} contract: {}", distro_id, err))
     }
 
@@ -226,17 +216,5 @@ mod tests {
         let filename =
             canonical_iso_filename(&contract).expect("resolve canonical ring0 iso filename");
         assert_eq!(filename, "levitateos-x86_64.iso");
-    }
-
-    #[test]
-    fn compatibility_prepared_output_names_preserve_stage_artifacts() {
-        let stage = crate::workflows::parse_stage(Some("01Boot")).expect("parse stage");
-        let names = compatibility_prepared_output_names(stage);
-        assert_eq!(
-            names.rootfs_source_pointer_filename,
-            ".s01-live-rootfs-source.path"
-        );
-        assert_eq!(names.rootfs_erofs_filename, "s01-filesystem.erofs");
-        assert_eq!(names.overlay_erofs_filename, "s01-overlayfs.erofs");
     }
 }

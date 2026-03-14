@@ -268,9 +268,9 @@ pub(crate) fn apply_producer_plan(plan: &ProducerPlan, destination_root: &Path) 
         )
     }) {
         bail!(
-            "Stage 01 producer plan requires copy-based rootfs source, but no non-legacy source_rootfs_dir is configured.\n\
+            "live-boot product preparation requires copy-based rootfs sourcing, but no non-legacy source_rootfs_dir is configured.\n\
              Legacy */downloads/rootfs mappings are intentionally forbidden.\n\
-             Migrate Stage 01 payload assembly to non-legacy staged producers."
+             Migrate payload assembly to canonical non-legacy producers."
         );
     }
 

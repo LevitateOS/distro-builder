@@ -179,7 +179,7 @@ pub(crate) fn ensure_required_service_wiring(
                         .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '@'))
                 {
                     bail!(
-                        "unsupported Stage 01 required systemd service '{}': invalid token",
+                        "unsupported live-boot required systemd service '{}': invalid token",
                         service_name
                     );
                 }
@@ -187,7 +187,7 @@ pub(crate) fn ensure_required_service_wiring(
                     service_name.to_string()
                 } else if service_name.contains('.') {
                     bail!(
-                        "unsupported Stage 01 required systemd service '{}': use bare name or '.service' unit",
+                        "unsupported live-boot required systemd service '{}': use bare name or '.service' unit",
                         service_name
                     );
                 } else {
@@ -252,7 +252,7 @@ pub(crate) fn ensure_required_service_wiring(
                 })?;
             }
             (_, other) => {
-                bail!("unsupported Stage 01 required service '{}'", other);
+                bail!("unsupported live-boot required service '{}'", other);
             }
         }
     }

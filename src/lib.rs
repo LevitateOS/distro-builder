@@ -60,6 +60,7 @@ pub mod artifact;
 pub mod artifact_store;
 pub mod build;
 pub mod cache;
+pub mod compat_inputs;
 pub mod component;
 pub mod contracts;
 pub mod executor;
@@ -68,8 +69,7 @@ pub mod preflight;
 pub mod process;
 pub mod qemu;
 pub mod recipe;
-pub mod stage_runs;
-pub mod stages;
+pub mod run_history;
 pub mod timing;
 
 pub use build::licenses::LicenseTracker;

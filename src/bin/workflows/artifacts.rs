@@ -2,11 +2,11 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use anyhow::{bail, Context, Result};
-use distro_builder::recipe::alpine_stage01::preseed_alpine_stage01_assets;
-use distro_builder::recipe::stage01_source::preseed_stage01_dvd;
-use distro_builder::stages::s01_boot_inputs::{
+use distro_builder::compat_inputs::live_boot_inputs::{
     load_s01_boot_input_spec, materialize_s01_source_rootfs,
 };
+use distro_builder::recipe::alpine_rootfs_source::preseed_alpine_rootfs_source_assets;
+use distro_builder::recipe::rootfs_source::preseed_rootfs_source_dvd;
 use distro_builder::{build_erofs_default, build_overlayfs_default};
 use distro_builder::{
     load_base_rootfs_product_spec, load_installed_boot_product_spec, load_live_boot_product_spec,
@@ -15,7 +15,7 @@ use distro_builder::{
     OverlayLayout, ParentRootfsInput,
 };
 use distro_contract::{
-    load_stage_00_contract_bundle_for_distro_from, ConformanceContract, LoadedVariantContract,
+    load_variant_contract_bundle_for_distro_from, ConformanceContract, LoadedVariantContract,
     ProductDecl,
 };
 
@@ -162,8 +162,8 @@ pub(crate) fn build_prepared_product_erofs_cmd(prepared_dir: &Path) -> Result<()
 pub(crate) fn prepare_product_cmd(product: &str, distro_id: &str, output_dir: &Path) -> Result<()> {
     let product = crate::workflows::parse_product(Some(product))?;
     let cwd = std::env::current_dir().context("resolving current directory")?;
-    let bundle = load_stage_00_contract_bundle_for_distro_from(&cwd, distro_id)
-        .with_context(|| format!("loading 00Build contract for '{}'", distro_id))?;
+    let bundle = load_variant_contract_bundle_for_distro_from(&cwd, distro_id)
+        .with_context(|| format!("loading canonical variant contract for '{}'", distro_id))?;
     let prepared = prepare_product_inputs(&bundle, product, distro_id, output_dir)?;
     let output_names = canonical_prepared_output_names(&bundle.contract, product)
         .with_context(|| format!("resolving canonical Ring 1 outputs for '{}'", distro_id))?;
@@ -189,7 +189,7 @@ fn prepare_product_inputs(
     match product.canonical {
         crate::PRODUCT_BASE_ROOTFS => {
             let output_root =
-                crate::stage_paths::distro_output_root_for(&bundle.repo_root, distro_id);
+                crate::artifact_paths::distro_output_root_for(&bundle.repo_root, distro_id);
             let spec = load_base_rootfs_product_spec(
                 distro_id,
                 &bundle.contract.identity.os_name,
@@ -264,17 +264,17 @@ fn prepare_product_inputs(
     }
 }
 
-pub(crate) fn preseed_stage01_source_cmd(distro_id: &str, refresh: bool) -> Result<()> {
+pub(crate) fn preseed_rootfs_source_cmd(distro_id: &str, refresh: bool) -> Result<()> {
     let cwd = std::env::current_dir().context("resolving current directory")?;
-    let bundle = load_stage_00_contract_bundle_for_distro_from(&cwd, distro_id)
-        .with_context(|| format!("loading 00Build contract for '{}'", distro_id))?;
+    let bundle = load_variant_contract_bundle_for_distro_from(&cwd, distro_id)
+        .with_context(|| format!("loading canonical variant contract for '{}'", distro_id))?;
     let s01_spec = load_s01_boot_input_spec(&bundle.repo_root, &bundle.variant_dir, distro_id)
-        .with_context(|| format!("loading 01Boot config for '{}'", distro_id))?;
+        .with_context(|| format!("loading canonical rootfs source policy for '{}'", distro_id))?;
 
     if let Some(preseed_recipe_script) = s01_spec.rpm_dvd_preseed_recipe_script() {
         let iso_path =
-            preseed_stage01_dvd(&bundle.repo_root, distro_id, preseed_recipe_script, refresh)
-                .with_context(|| format!("preseeding Stage 01 source for '{}'", distro_id))?;
+            preseed_rootfs_source_dvd(&bundle.repo_root, distro_id, preseed_recipe_script, refresh)
+                .with_context(|| format!("preseeding rootfs source for '{}'", distro_id))?;
         let trust_dir = iso_path
             .parent()
             .map(|p| p.to_path_buf())
@@ -286,15 +286,15 @@ pub(crate) fn preseed_stage01_source_cmd(distro_id: &str, refresh: bool) -> Resu
                     .join("downloads")
             });
 
-        println!("Stage 01 source preseed ready for {}:", distro_id);
+        println!("rootfs source preseed ready for {}:", distro_id);
         println!("  ISO:   {}", iso_path.display());
         println!("  Trust: {}", trust_dir.display());
         return Ok(());
     }
 
     if s01_spec.uses_alpine_stage01_rootfs_source() {
-        let output = preseed_alpine_stage01_assets(&bundle.repo_root, distro_id, refresh)
-            .with_context(|| format!("preseeding Stage 01 source for '{}'", distro_id))?;
+        let output = preseed_alpine_rootfs_source_assets(&bundle.repo_root, distro_id, refresh)
+            .with_context(|| format!("preseeding rootfs source for '{}'", distro_id))?;
         let trust_dir = output
             .iso_path
             .parent()
@@ -307,7 +307,7 @@ pub(crate) fn preseed_stage01_source_cmd(distro_id: &str, refresh: bool) -> Resu
                     .join("downloads")
             });
 
-        println!("Stage 01 source preseed ready for {}:", distro_id);
+        println!("rootfs source preseed ready for {}:", distro_id);
         println!("  ISO:        {}", output.iso_path.display());
         println!("  apk-tools:  {}", output.apk_tools_path.display());
         println!("  Trust:      {}", trust_dir.display());
@@ -315,27 +315,23 @@ pub(crate) fn preseed_stage01_source_cmd(distro_id: &str, refresh: bool) -> Resu
     }
 
     bail!(
-        "Stage 01 for '{}' does not use a canonical preseedable source recipe in '{}'",
+        "rootfs source for '{}' does not use a canonical preseedable recipe in '{}'",
         distro_id,
-        bundle.variant_dir.join("01Boot.toml").display()
+        bundle.variant_dir.join("ring3-sources.toml").display()
     );
 }
 
-pub(crate) fn materialize_stage01_source_rootfs_cmd(distro_id: &str) -> Result<()> {
+pub(crate) fn materialize_rootfs_source_cmd(distro_id: &str) -> Result<()> {
     let cwd = std::env::current_dir().context("resolving current directory")?;
-    let bundle = load_stage_00_contract_bundle_for_distro_from(&cwd, distro_id)
-        .with_context(|| format!("loading 00Build contract for '{}'", distro_id))?;
+    let bundle = load_variant_contract_bundle_for_distro_from(&cwd, distro_id)
+        .with_context(|| format!("loading canonical variant contract for '{}'", distro_id))?;
     let s01_spec = load_s01_boot_input_spec(&bundle.repo_root, &bundle.variant_dir, distro_id)
-        .with_context(|| format!("loading 01Boot config for '{}'", distro_id))?;
+        .with_context(|| format!("loading canonical rootfs source policy for '{}'", distro_id))?;
 
-    let source_rootfs_dir = materialize_s01_source_rootfs(&s01_spec).with_context(|| {
-        format!(
-            "materializing canonical Stage 01 source rootfs for '{}'",
-            distro_id
-        )
-    })?;
+    let source_rootfs_dir = materialize_s01_source_rootfs(&s01_spec)
+        .with_context(|| format!("materializing canonical rootfs source for '{}'", distro_id))?;
 
-    println!("Stage 01 source rootfs ready for {}:", distro_id);
+    println!("rootfs source ready for {}:", distro_id);
     println!("  rootfs source: {}", source_rootfs_dir.display());
     Ok(())
 }

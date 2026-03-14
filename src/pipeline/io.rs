@@ -82,7 +82,7 @@ pub(crate) fn resolve_parent_product_rootfs_image_for_distro(
         .join("releases")
         .join(product_dir_name);
 
-    let run_id = crate::stage_runs::latest_successful_run_id(&product_root)?.ok_or_else(|| {
+    let run_id = crate::run_history::latest_successful_run_id(&product_root)?.ok_or_else(|| {
         anyhow::anyhow!(
             "missing successful {} release under '{}'; build parent product first",
             parent_product_label,
@@ -150,7 +150,7 @@ mod tests {
             .join(".artifacts/out/levitate/releases/base-rootfs/run-1");
         fs::create_dir_all(&stage_root).expect("create stage root");
         fs::write(
-            crate::stage_runs::manifest_path(&stage_root),
+            crate::run_history::manifest_path(&stage_root),
             serde_json::to_vec_pretty(&json!({
                 "run_id": "run-1",
                 "status": "success",

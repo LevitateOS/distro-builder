@@ -8,7 +8,7 @@ use super::{
 use crate::pipeline::paths::normalize_distro_id;
 
 #[derive(Debug, Clone)]
-pub struct Stage01RootfsRecipeSpec {
+pub struct RootfsSourceRecipeSpec {
     pub recipe_script: PathBuf,
     pub defines: BTreeMap<String, String>,
 }
@@ -24,21 +24,20 @@ fn resolve_recipe_path(repo_root: &Path, recipe_script: &Path) -> PathBuf {
 pub fn materialize_rootfs_from_recipe(
     repo_root: &Path,
     build_dir: &Path,
-    spec: &Stage01RootfsRecipeSpec,
+    spec: &RootfsSourceRecipeSpec,
 ) -> Result<PathBuf> {
     let recipe_path = resolve_recipe_path(repo_root, &spec.recipe_script);
     if !recipe_path.is_file() {
         bail!(
-            "Stage 01 rootfs source recipe script not found: '{}'",
+            "rootfs source recipe script not found: '{}'",
             recipe_path.display()
         );
     }
 
-    let recipe_bin =
-        find_recipe(repo_root).context("resolving recipe binary for Stage 01 rootfs source")?;
+    let recipe_bin = find_recipe(repo_root).context("resolving recipe binary for rootfs source")?;
     let recipes_path = recipe_path.parent().ok_or_else(|| {
         anyhow::anyhow!(
-            "Stage 01 rootfs recipe has no parent directory: '{}'",
+            "rootfs source recipe has no parent directory: '{}'",
             recipe_path.display()
         )
     })?;
@@ -58,7 +57,7 @@ pub fn materialize_rootfs_from_recipe(
     )
     .with_context(|| {
         format!(
-            "materializing Stage 01 rootfs source via '{}'",
+            "materializing rootfs source via '{}'",
             recipe_path.display()
         )
     })?;
@@ -70,7 +69,7 @@ pub fn materialize_rootfs_from_recipe(
 
     if !rootfs.is_dir() {
         bail!(
-            "Stage 01 rootfs source directory missing after recipe run: '{}'",
+            "rootfs source directory missing after recipe run: '{}'",
             rootfs.display()
         );
     }
@@ -78,7 +77,7 @@ pub fn materialize_rootfs_from_recipe(
     Ok(rootfs)
 }
 
-pub fn preseed_stage01_dvd(
+pub fn preseed_rootfs_source_dvd(
     repo_root: &Path,
     distro_id: &str,
     recipe_script: &Path,
@@ -87,7 +86,7 @@ pub fn preseed_stage01_dvd(
     let build_dir = downloads_work_dir(repo_root, distro_id)?;
     std::fs::create_dir_all(&build_dir).with_context(|| {
         format!(
-            "creating Stage 01 source preseed work directory '{}'",
+            "creating rootfs source preseed work directory '{}'",
             build_dir.display()
         )
     })?;
@@ -95,16 +94,16 @@ pub fn preseed_stage01_dvd(
     let recipe_path = resolve_recipe_path(repo_root, recipe_script);
     if !recipe_path.is_file() {
         bail!(
-            "Stage 01 source preseed recipe script not found: '{}'",
+            "rootfs source preseed recipe script not found: '{}'",
             recipe_path.display()
         );
     }
 
     let recipe_bin =
-        find_recipe(repo_root).context("resolving recipe binary for Stage 01 source preseed")?;
+        find_recipe(repo_root).context("resolving recipe binary for rootfs source preseed")?;
     let recipes_path = recipe_path.parent().ok_or_else(|| {
         anyhow::anyhow!(
-            "Stage 01 source preseed recipe has no parent directory: '{}'",
+            "rootfs source preseed recipe has no parent directory: '{}'",
             recipe_path.display()
         )
     })?;
@@ -124,17 +123,17 @@ pub fn preseed_stage01_dvd(
         &envs,
         Some(recipes_path),
     )
-    .with_context(|| format!("preseeding Stage 01 source via '{}'", recipe_path.display()))?;
+    .with_context(|| format!("preseeding rootfs source via '{}'", recipe_path.display()))?;
     let iso_path = ctx["iso_path"].as_str().map(PathBuf::from).ok_or_else(|| {
         anyhow::anyhow!(
-            "Stage 01 source preseed recipe '{}' did not expose ctx.iso_path",
+            "rootfs source preseed recipe '{}' did not expose ctx.iso_path",
             recipe_path.display()
         )
     })?;
 
     if !iso_path.is_file() {
         bail!(
-            "Stage 01 source preseed recipe did not produce ISO at '{}'",
+            "rootfs source preseed recipe did not produce ISO at '{}'",
             iso_path.display()
         );
     }
@@ -143,7 +142,7 @@ pub fn preseed_stage01_dvd(
 }
 
 fn downloads_work_dir(repo_root: &Path, distro_id: &str) -> Result<PathBuf> {
-    let normalized = normalize_distro_id(distro_id, "Stage 01 source preseed")?;
+    let normalized = normalize_distro_id(distro_id, "rootfs source preseed")?;
     Ok(repo_root
         .join(".artifacts/work")
         .join(normalized)

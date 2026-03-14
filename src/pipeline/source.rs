@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use crate::pipeline::paths::{normalize_distro_id, resolve_repo_path};
 use crate::pipeline::plan::ensure_non_legacy_rootfs_source;
-use crate::recipe::stage01_source::{materialize_rootfs_from_recipe, Stage01RootfsRecipeSpec};
+use crate::recipe::rootfs_source::{materialize_rootfs_from_recipe, RootfsSourceRecipeSpec};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum S01RootfsSourcePolicy {
@@ -46,14 +46,14 @@ struct Ring3SourcesSectionToml {
 pub(crate) fn load_rootfs_source_policy(
     repo_root: &Path,
     variant_dir: &Path,
-    legacy_config_path: &Path,
-    legacy_source: Option<S01RootfsSourceToml>,
 ) -> Result<Option<S01RootfsSourcePolicy>> {
-    let legacy_policy =
-        parse_rootfs_source_policy(repo_root, legacy_config_path, legacy_source.clone())?;
     let ring3_config_path = variant_dir.join("ring3-sources.toml");
     if !ring3_config_path.is_file() {
-        return Ok(legacy_policy);
+        bail!(
+            "missing canonical Ring 3 source owner for '{}': expected '{}'",
+            variant_dir.display(),
+            ring3_config_path.display()
+        );
     }
 
     let config_bytes = fs::read_to_string(&ring3_config_path).with_context(|| {
@@ -68,22 +68,14 @@ pub(crate) fn load_rootfs_source_policy(
             ring3_config_path.display()
         )
     })?;
-    let ring_policy = parse_rootfs_source_policy(
-        repo_root,
-        &ring3_config_path,
-        parsed.ring3_sources.rootfs_source.clone(),
-    )?;
+    let source = parsed.ring3_sources.rootfs_source.clone().ok_or_else(|| {
+        anyhow::anyhow!(
+            "missing canonical Ring 3 source owner '[ring3_sources.rootfs_source]' in '{}'",
+            ring3_config_path.display()
+        )
+    })?;
 
-    if legacy_source.is_some() && ring_policy != legacy_policy {
-        bail!(
-            "Ring 3 source parity mismatch for '{}': legacy 01Boot rootfs_source {:?} does not match ring3-sources rootfs_source {:?}",
-            variant_dir.display(),
-            legacy_policy,
-            ring_policy
-        );
-    }
-
-    Ok(ring_policy)
+    parse_rootfs_source_policy(repo_root, &ring3_config_path, Some(source))
 }
 
 pub(crate) fn parse_rootfs_source_policy(
@@ -101,7 +93,7 @@ pub(crate) fn parse_rootfs_source_policy(
             let preseed_recipe_script = match source.preseed_recipe_script {
                 Some(script) => resolve_repo_path(repo_root, script.trim()),
                 None => bail!(
-                    "invalid Stage 01 config '{}': rootfs_source.preseed_recipe_script is required for kind='recipe_rpm_dvd'",
+                    "invalid rootfs source config '{}': rootfs_source.preseed_recipe_script is required for kind='recipe_rpm_dvd'",
                     config_path.display()
                 ),
             };
@@ -118,7 +110,7 @@ pub(crate) fn parse_rootfs_source_policy(
             }))
         }
         other => bail!(
-            "invalid Stage 01 config '{}': unsupported rootfs_source.kind '{}'",
+            "invalid rootfs source config '{}': unsupported rootfs_source.kind '{}'",
             config_path.display(),
             other
         ),
@@ -135,21 +127,21 @@ pub(crate) fn materialize_source_rootfs(
             let build_dir = rootfs_provider_recipe_work_dir(repo_root, distro_id, recipe_script)?;
             fs::create_dir_all(&build_dir).with_context(|| {
                 format!(
-                    "creating Stage 01 recipe source provider directory '{}'",
+                    "creating rootfs source recipe provider directory '{}'",
                     build_dir.display()
                 )
             })?;
             let source_rootfs_dir = materialize_rootfs_from_recipe(
                 repo_root,
                 &build_dir,
-                &Stage01RootfsRecipeSpec {
+                &RootfsSourceRecipeSpec {
                     recipe_script: recipe_script.clone(),
                     defines: BTreeMap::new(),
                 },
             )
             .with_context(|| {
                 format!(
-                    "materializing Stage 01 recipe source rootfs for '{}'",
+                    "materializing rootfs source recipe output for '{}'",
                     distro_id
                 )
             })?;
@@ -163,21 +155,21 @@ pub(crate) fn materialize_source_rootfs(
             let build_dir = rootfs_provider_recipe_work_dir(repo_root, distro_id, recipe_script)?;
             fs::create_dir_all(&build_dir).with_context(|| {
                 format!(
-                    "creating Stage 01 recipe source provider directory '{}'",
+                    "creating rootfs source recipe provider directory '{}'",
                     build_dir.display()
                 )
             })?;
             let source_rootfs_dir = materialize_rootfs_from_recipe(
                 repo_root,
                 &build_dir,
-                &Stage01RootfsRecipeSpec {
+                &RootfsSourceRecipeSpec {
                     recipe_script: recipe_script.clone(),
                     defines: defines.clone(),
                 },
             )
             .with_context(|| {
                 format!(
-                    "materializing Stage 01 recipe source rootfs for '{}'",
+                    "materializing rootfs source recipe output for '{}'",
                     distro_id
                 )
             })?;
@@ -185,7 +177,7 @@ pub(crate) fn materialize_source_rootfs(
             Ok(source_rootfs_dir)
         }
         None => bail!(
-            "Stage 01 producer plan requires copy-based rootfs source, but no rootfs_source policy is configured for '{}'.",
+            "live-boot product preparation requires a copy-based rootfs source, but no canonical rootfs_source policy is configured for '{}'.",
             distro_id
         ),
     }
@@ -208,7 +200,7 @@ fn rootfs_provider_work_dir(repo_root: &Path, distro_id: &str) -> Result<PathBuf
         .join("stage01-rootfs-provider");
     fs::create_dir_all(&provider_dir).with_context(|| {
         format!(
-            "creating Stage 01 rootfs provider work directory '{}'",
+            "creating rootfs provider work directory '{}'",
             provider_dir.display()
         )
     })?;
@@ -237,7 +229,7 @@ fn downloads_work_dir(repo_root: &Path, distro_id: &str) -> Result<PathBuf> {
         .join("downloads");
     fs::create_dir_all(&downloads).with_context(|| {
         format!(
-            "creating Stage 01 work downloads directory '{}'",
+            "creating rootfs source work downloads directory '{}'",
             downloads.display()
         )
     })?;
@@ -282,7 +274,7 @@ mod tests {
         };
         let policy = parse_rootfs_source_policy(
             Path::new("."),
-            &PathBuf::from("distro-variants/acorn/01Boot.toml"),
+            &PathBuf::from("distro-variants/acorn/ring3-sources.toml"),
             Some(source),
         )
         .expect("parsing custom rootfs_source policy must succeed");
@@ -305,7 +297,7 @@ mod tests {
         };
         let policy = parse_rootfs_source_policy(
             Path::new("."),
-            &PathBuf::from("distro-variants/levitate/01Boot.toml"),
+            &PathBuf::from("distro-variants/levitate/ring3-sources.toml"),
             Some(source),
         )
         .expect("parsing recipe_rpm_dvd must succeed");
@@ -326,7 +318,7 @@ mod tests {
         };
         let err = parse_rootfs_source_policy(
             Path::new("."),
-            &PathBuf::from("distro-variants/levitate/01Boot.toml"),
+            &PathBuf::from("distro-variants/levitate/ring3-sources.toml"),
             Some(source),
         )
         .expect_err("legacy recipe_rocky kind must fail");
@@ -339,18 +331,9 @@ mod tests {
     }
 
     #[test]
-    fn ring3_rootfs_source_policy_matches_legacy_when_equal() {
-        let repo_root = temp_repo_root("ring3-parity");
+    fn ring3_rootfs_source_policy_loads_from_canonical_owner() {
+        let repo_root = temp_repo_root("ring3-canonical");
         let variant_dir = repo_root.join("distro-variants/levitate");
-        let legacy_config_path = variant_dir.join("01Boot.toml");
-        let legacy_source = S01RootfsSourceToml {
-            kind: "recipe_rpm_dvd".to_string(),
-            recipe_script: "distro-builder/recipes/fedora-stage01-rootfs.rhai".to_string(),
-            preseed_recipe_script: Some(
-                "distro-builder/recipes/fedora-preseed-iso.rhai".to_string(),
-            ),
-            defines: None,
-        };
         write_file(
             &variant_dir.join("ring3-sources.toml"),
             r#"schema_version = 6
@@ -362,13 +345,8 @@ preseed_recipe_script = "distro-builder/recipes/fedora-preseed-iso.rhai"
 "#,
         );
 
-        let loaded = load_rootfs_source_policy(
-            &repo_root,
-            &variant_dir,
-            &legacy_config_path,
-            Some(legacy_source),
-        )
-        .expect("load ring3 rootfs source policy");
+        let loaded = load_rootfs_source_policy(&repo_root, &variant_dir)
+            .expect("load ring3 rootfs source policy");
         assert!(matches!(
             loaded,
             Some(S01RootfsSourcePolicy::RecipeRpmDvd { .. })
@@ -378,40 +356,14 @@ preseed_recipe_script = "distro-builder/recipes/fedora-preseed-iso.rhai"
     }
 
     #[test]
-    fn ring3_rootfs_source_policy_rejects_drift_from_legacy() {
-        let repo_root = temp_repo_root("ring3-drift");
+    fn ring3_rootfs_source_policy_requires_canonical_owner() {
+        let repo_root = temp_repo_root("ring3-missing");
         let variant_dir = repo_root.join("distro-variants/levitate");
-        let legacy_config_path = variant_dir.join("01Boot.toml");
-        let legacy_source = S01RootfsSourceToml {
-            kind: "recipe_rpm_dvd".to_string(),
-            recipe_script: "distro-builder/recipes/fedora-stage01-rootfs.rhai".to_string(),
-            preseed_recipe_script: Some(
-                "distro-builder/recipes/fedora-preseed-iso.rhai".to_string(),
-            ),
-            defines: None,
-        };
-        write_file(
-            &variant_dir.join("ring3-sources.toml"),
-            r#"schema_version = 6
-
-[ring3_sources.rootfs_source]
-kind = "recipe_custom"
-recipe_script = "distro-builder/recipes/custom-stage01-rootfs.rhai"
-
-[ring3_sources.rootfs_source.defines]
-CUSTOM_ROOTFS_DIR = "/tmp/rootfs"
-"#,
-        );
-
-        let err = load_rootfs_source_policy(
-            &repo_root,
-            &variant_dir,
-            &legacy_config_path,
-            Some(legacy_source),
-        )
-        .expect_err("drifted ring3 rootfs source should fail");
+        let err = load_rootfs_source_policy(&repo_root, &variant_dir)
+            .expect_err("missing ring3 rootfs source should fail");
         assert!(
-            err.to_string().contains("Ring 3 source parity mismatch"),
+            err.to_string()
+                .contains("missing canonical Ring 3 source owner"),
             "unexpected error: {err:#}"
         );
 

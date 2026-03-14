@@ -26,7 +26,7 @@ use crate::pipeline::scripts::install_stage_test_scripts;
 use crate::pipeline::source::{
     cleanup_legacy_provider_dir, materialize_source_rootfs, S01RootfsSourcePolicy,
 };
-use crate::recipe::alpine_stage01::is_alpine_stage01_recipe;
+use crate::recipe::alpine_rootfs_source::is_alpine_rootfs_source_recipe;
 
 #[derive(Debug, Clone)]
 pub struct BaseRootfsProduct {
@@ -131,7 +131,7 @@ impl LiveBootProductSpec {
         else {
             return false;
         };
-        is_alpine_stage01_recipe(recipe_script)
+        is_alpine_rootfs_source_recipe(recipe_script)
     }
 }
 

@@ -1,9 +1,9 @@
 use anyhow::{bail, Context, Result};
-use distro_builder::stages::s00_build::{
+use distro_builder::compat_inputs::build_capability::{
     ensure_kernel_installed_via_recipe, run_00build_evidence_script, S00BuildEvidenceSpec,
     S00BuildKernelEnsureOutcome, S00BuildKernelSpec,
 };
-use distro_contract::{load_stage_00_contract_bundle_for_distro_from, require_valid_contract};
+use distro_contract::{load_variant_contract_bundle_for_distro_from, require_valid_contract};
 use std::path::Path;
 use std::process::Command;
 use time::OffsetDateTime;
@@ -15,8 +15,8 @@ pub(crate) fn preflight_iso_build(
     distro_id: &str,
     product: BuildProduct,
 ) -> Result<()> {
-    let bundle = load_stage_00_contract_bundle_for_distro_from(repo_root, distro_id)
-        .with_context(|| format!("loading 00Build contract for '{}'", distro_id))?;
+    let bundle = load_variant_contract_bundle_for_distro_from(repo_root, distro_id)
+        .with_context(|| format!("loading variant contract for '{}'", distro_id))?;
     let rootfs_filename = crate::workflows::canonical_rootfs_erofs_filename(&bundle.contract)
         .with_context(|| {
             format!(
@@ -60,12 +60,12 @@ fn require_parent_product_rootfs(
     parent_product: BuildProduct,
     rootfs_filename: &str,
 ) -> Result<()> {
-    let parent_root = crate::stage_paths::release_product_dir_for(
+    let parent_root = crate::artifact_paths::release_product_dir_for(
         repo_root,
         distro_id,
         parent_product.release_dir_name,
     );
-    let run_id = crate::stage_runs::latest_successful_run_id(&parent_root)?.ok_or_else(|| {
+    let run_id = crate::run_history::latest_successful_run_id(&parent_root)?.ok_or_else(|| {
         anyhow::anyhow!(
             "preflight failed for '{}' release product '{}': no successful parent product '{}' runs found under '{}'.\n\
              Build the '{}' release first: `cargo run -p distro-builder --bin distro-builder -- release build iso {} {}`",
@@ -129,13 +129,14 @@ pub(crate) fn build_all(product: BuildProduct) -> Result<()> {
 
 pub(crate) fn build_one(distro_id: &str, product: BuildProduct) -> Result<()> {
     let cwd = std::env::current_dir().context("resolving current directory")?;
-    let bundle = load_stage_00_contract_bundle_for_distro_from(&cwd, distro_id)
-        .with_context(|| format!("loading 00Build contract for '{distro_id}'"))?;
+    let bundle = load_variant_contract_bundle_for_distro_from(&cwd, distro_id)
+        .with_context(|| format!("loading variant contract for '{distro_id}'"))?;
 
     require_valid_contract(&bundle.contract)
-        .with_context(|| format!("validating 00Build contract for '{distro_id}'"))?;
+        .with_context(|| format!("validating variant contract for '{distro_id}'"))?;
 
-    let kernel_output_dir = crate::stage_paths::kernel_output_dir_for(&bundle.repo_root, distro_id);
+    let kernel_output_dir =
+        crate::artifact_paths::kernel_output_dir_for(&bundle.repo_root, distro_id);
     std::fs::create_dir_all(&kernel_output_dir).with_context(|| {
         format!(
             "creating kernel output directory '{}'",
@@ -167,8 +168,8 @@ pub(crate) fn build_one(distro_id: &str, product: BuildProduct) -> Result<()> {
     let iso_path = output_dir.join(iso_filename_for_product(&base_iso_filename, product));
 
     if let Some(run_id) = build_layout.run_id.as_deref() {
-        let metadata_path = crate::stage_runs::run_manifest_path(&output_dir);
-        crate::stage_run_manifest::write_run_metadata(
+        let metadata_path = crate::run_history::run_manifest_path(&output_dir);
+        crate::run_manifest::write_run_metadata(
             &metadata_path,
             &crate::BuildRunMetadata {
                 run_id: run_id.to_string(),
@@ -247,7 +248,7 @@ pub(crate) fn build_one(distro_id: &str, product: BuildProduct) -> Result<()> {
             &output_dir,
             &evidence_spec,
         )
-        .with_context(|| format!("running 00Build evidence for '{distro_id}'"))?;
+        .with_context(|| format!("running build evidence for '{distro_id}'"))?;
 
         println!(
             "[release:iso:{}:{distro_id}] built at {}",
@@ -260,14 +261,14 @@ pub(crate) fn build_one(distro_id: &str, product: BuildProduct) -> Result<()> {
     })();
 
     if let Some(run_id) = build_layout.run_id.as_deref() {
-        let metadata_path = crate::stage_runs::run_manifest_path(&output_dir);
+        let metadata_path = crate::run_history::run_manifest_path(&output_dir);
         let finished_at_utc = Some(now_utc_compact()?);
         let status = if build_result.is_ok() {
             "success".to_string()
         } else {
             "failed".to_string()
         };
-        let metadata_result = crate::stage_run_manifest::write_run_metadata(
+        let metadata_result = crate::run_manifest::write_run_metadata(
             &metadata_path,
             &crate::BuildRunMetadata {
                 run_id: run_id.to_string(),
@@ -293,7 +294,7 @@ pub(crate) fn build_one(distro_id: &str, product: BuildProduct) -> Result<()> {
         }
 
         if build_result.is_ok() {
-            crate::stage_runs::prune_old_runs(
+            crate::run_history::prune_old_runs(
                 &build_layout.root_dir,
                 crate::S00_RUN_RETENTION_COUNT,
             )?;
@@ -325,15 +326,18 @@ pub(crate) fn product_release_output_layout_for(
     distro_id: &str,
     product: BuildProduct,
 ) -> Result<BuildOutputLayout> {
-    let root_dir =
-        crate::stage_paths::release_product_dir_for(repo_root, distro_id, product.release_dir_name);
+    let root_dir = crate::artifact_paths::release_product_dir_for(
+        repo_root,
+        distro_id,
+        product.release_dir_name,
+    );
     std::fs::create_dir_all(&root_dir).with_context(|| {
         format!(
             "creating product release root directory '{}'",
             root_dir.display()
         )
     })?;
-    let (run_id, run_root) = crate::stage_runs::allocate_run_dir(&root_dir)?;
+    let (run_id, run_root) = crate::run_history::allocate_run_dir(&root_dir)?;
 
     Ok(BuildOutputLayout {
         root_dir,

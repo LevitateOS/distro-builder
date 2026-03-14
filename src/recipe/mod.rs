@@ -11,9 +11,9 @@
 //! 5. System PATH (`which recipe`)
 
 pub mod alpine;
-pub mod alpine_stage01;
+pub mod alpine_rootfs_source;
 pub mod linux;
-pub mod stage01_source;
+pub mod rootfs_source;
 
 use crate::process::ensure_exists;
 use anyhow::{bail, Context, Result};

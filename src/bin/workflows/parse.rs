@@ -6,17 +6,17 @@ const STAGE00_CANONICAL: &str = "00Build";
 const STAGE00_SLUG: &str = "s00_build";
 const STAGE00_DIRNAME: &str = "s00-build";
 const STAGE00_ARTIFACT_TAG: &str = "s00";
-const STAGE00_NATIVE_BUILD_SCRIPT: &str = "00Build-build.sh";
+const STAGE00_NATIVE_BUILD_SCRIPT: &str = "build-release.sh";
 const STAGE01_CANONICAL: &str = "01Boot";
 const STAGE01_SLUG: &str = "s01_boot";
 const STAGE01_DIRNAME: &str = "s01-boot";
 const STAGE01_ARTIFACT_TAG: &str = "s01";
-const STAGE01_NATIVE_BUILD_SCRIPT: &str = "01Boot-build.sh";
+const STAGE01_NATIVE_BUILD_SCRIPT: &str = "boot-release.sh";
 const STAGE02_CANONICAL: &str = "02LiveTools";
 const STAGE02_SLUG: &str = "s02_live_tools";
 const STAGE02_DIRNAME: &str = "s02-live-tools";
 const STAGE02_ARTIFACT_TAG: &str = "s02";
-const STAGE02_NATIVE_BUILD_SCRIPT: &str = "02LiveTools-build.sh";
+const STAGE02_NATIVE_BUILD_SCRIPT: &str = "live-tools-release.sh";
 
 pub(crate) fn parse_release_build_command(
     args: Vec<&String>,
@@ -68,7 +68,7 @@ pub(crate) fn parse_release_two_args(
     let known_distros = known_distros.join(", ");
     bail!(
         "invalid `release build iso` arguments: '{}' '{}'. Expected `<distro> <product>` or `<product> <distro>`.\n\
-         `product` supports: {}, {}, {}; compatibility aliases: 00Build|01Boot|02LiveTools|0|00|1|01|2|02.\n\
+         `product` supports: {}, {}, {}.\n\
          available distros: {}",
         arg1,
         arg2,
@@ -94,18 +94,12 @@ pub(crate) fn parse_distro_id(value: &str, known_distros: &[String]) -> Result<S
 
 pub(crate) fn parse_product(value: Option<&str>) -> Result<crate::BuildProduct> {
     match value.unwrap_or(crate::PRODUCT_BASE_ROOTFS) {
-        crate::PRODUCT_BASE_ROOTFS | STAGE00_CANONICAL | "0" | "00" => {
-            Ok(product_base_rootfs())
-        }
-        crate::PRODUCT_LIVE_BOOT | STAGE01_CANONICAL | "1" | "01" => {
-            Ok(product_live_boot())
-        }
-        crate::PRODUCT_LIVE_TOOLS | STAGE02_CANONICAL | "2" | "02" => {
-            Ok(product_live_tools())
-        }
+        crate::PRODUCT_BASE_ROOTFS => Ok(product_base_rootfs()),
+        crate::PRODUCT_LIVE_BOOT => Ok(product_live_boot()),
+        crate::PRODUCT_LIVE_TOOLS => Ok(product_live_tools()),
         crate::PRODUCT_INSTALLED_BOOT => Ok(product_installed_boot()),
         other => bail!(
-            "unsupported product '{}'; expected one of: '{}', '{}', '{}', '{}'; compatibility aliases: 00Build|01Boot|02LiveTools|0|00|1|01|2|02",
+            "unsupported product '{}'; expected one of: '{}', '{}', '{}', '{}'",
             other,
             crate::PRODUCT_BASE_ROOTFS,
             crate::PRODUCT_LIVE_BOOT,
@@ -144,15 +138,6 @@ pub(crate) fn product_for_logical_name(logical_name: &str) -> Result<crate::Buil
     }
 }
 
-pub(crate) fn product_for_stage(stage: crate::CompatibilityBuildStage) -> crate::BuildProduct {
-    match stage.slug {
-        STAGE00_SLUG => product_base_rootfs(),
-        STAGE01_SLUG => product_live_boot(),
-        STAGE02_SLUG => product_live_tools(),
-        _ => unreachable!("validated in parse_stage"),
-    }
-}
-
 pub(crate) fn compatibility_stage_for_product(
     product: crate::BuildProduct,
 ) -> crate::CompatibilityBuildStage {
@@ -180,12 +165,6 @@ pub(crate) fn compatibility_stage_for_product(
         },
         _ => unreachable!("validated in parse_product"),
     }
-}
-
-pub(crate) fn parse_stage(value: Option<&str>) -> Result<crate::CompatibilityBuildStage> {
-    Ok(compatibility_stage_for_product(parse_release_product(
-        value,
-    )?))
 }
 
 fn product_base_rootfs() -> crate::BuildProduct {
@@ -250,7 +229,7 @@ pub(crate) fn discover_distro_ids(repo_root: &Path) -> Result<Vec<String>> {
             continue;
         }
 
-        if !path.join("00Build.toml").is_file() {
+        if !path.join("identity.toml").is_file() {
             continue;
         }
 
@@ -262,7 +241,7 @@ pub(crate) fn discover_distro_ids(repo_root: &Path) -> Result<Vec<String>> {
 
     if distro_ids.is_empty() {
         bail!(
-            "no distro variants discovered under '{}'; expected directories with 00Build.toml",
+            "no distro variants discovered under '{}'; expected directories with identity.toml",
             variants_dir.display()
         );
     }
@@ -304,30 +283,16 @@ mod tests {
     }
 
     #[test]
-    fn product_parser_accepts_stage_aliases() {
-        assert_eq!(
-            parse_product(Some(STAGE01_CANONICAL))
-                .expect("parse stage alias")
-                .canonical,
-            crate::PRODUCT_LIVE_BOOT
+    fn product_parser_rejects_stage_aliases() {
+        let err = parse_product(Some(STAGE01_CANONICAL)).expect_err("stage alias must be rejected");
+        assert!(
+            err.to_string().contains("unsupported product"),
+            "unexpected error: {err:#}"
         );
-        assert_eq!(
-            parse_product(Some("02"))
-                .expect("parse numeric stage alias")
-                .canonical,
-            crate::PRODUCT_LIVE_TOOLS
-        );
-    }
-
-    #[test]
-    fn product_parser_maps_stage_alias_and_canonical_name_to_same_product() {
-        assert_eq!(
-            parse_product(Some(STAGE01_CANONICAL)).expect("parse stage alias"),
-            parse_product(Some(crate::PRODUCT_LIVE_BOOT)).expect("parse canonical product")
-        );
-        assert_eq!(
-            parse_product(Some(STAGE02_CANONICAL)).expect("parse stage alias"),
-            parse_product(Some(crate::PRODUCT_LIVE_TOOLS)).expect("parse canonical product")
+        let err = parse_product(Some("02")).expect_err("numeric stage alias must be rejected");
+        assert!(
+            err.to_string().contains("unsupported product"),
+            "unexpected error: {err:#}"
         );
     }
 

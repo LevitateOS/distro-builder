@@ -25,7 +25,10 @@ pub(crate) fn parse_release_build_command(
     let known_distros = crate::workflows::discover_distro_ids(repo_root)?;
 
     match args.as_slice() {
-        [] => Ok((crate::DEFAULT_DISTRO_ID.to_string(), parse_product(None)?)),
+        [] => Ok((
+            crate::DEFAULT_DISTRO_ID.to_string(),
+            parse_release_product(None)?,
+        )),
         [arg] => parse_release_one_arg(arg, &known_distros),
         [arg1, arg2] => parse_release_two_args(arg1, arg2, &known_distros),
         _ => bail!(
@@ -39,10 +42,10 @@ pub(crate) fn parse_release_one_arg(
     known_distros: &[String],
 ) -> Result<(String, crate::BuildProduct)> {
     if let Ok(distro_id) = parse_distro_id(arg, known_distros) {
-        return Ok((distro_id, parse_product(None)?));
+        return Ok((distro_id, parse_release_product(None)?));
     }
 
-    let product = parse_product(Some(arg))?;
+    let product = parse_release_product(Some(arg))?;
     Ok((crate::DEFAULT_DISTRO_ID.to_string(), product))
 }
 
@@ -52,12 +55,12 @@ pub(crate) fn parse_release_two_args(
     known_distros: &[String],
 ) -> Result<(String, crate::BuildProduct)> {
     if let Ok(distro_id) = parse_distro_id(arg1, known_distros) {
-        if let Ok(product) = parse_product(Some(arg2)) {
+        if let Ok(product) = parse_release_product(Some(arg2)) {
             return Ok((distro_id, product));
         }
     }
 
-    if let Ok(product) = parse_product(Some(arg1)) {
+    if let Ok(product) = parse_release_product(Some(arg1)) {
         let distro_id = parse_distro_id(arg2, known_distros)?;
         return Ok((distro_id, product));
     }
@@ -100,14 +103,32 @@ pub(crate) fn parse_product(value: Option<&str>) -> Result<crate::BuildProduct> 
         crate::PRODUCT_LIVE_TOOLS | STAGE02_CANONICAL | "2" | "02" => {
             Ok(product_live_tools())
         }
+        crate::PRODUCT_INSTALLED_BOOT => Ok(product_installed_boot()),
         other => bail!(
-            "unsupported product '{}'; expected one of: '{}', '{}', '{}'; compatibility aliases: 00Build|01Boot|02LiveTools|0|00|1|01|2|02",
+            "unsupported product '{}'; expected one of: '{}', '{}', '{}', '{}'; compatibility aliases: 00Build|01Boot|02LiveTools|0|00|1|01|2|02",
             other,
             crate::PRODUCT_BASE_ROOTFS,
             crate::PRODUCT_LIVE_BOOT,
-            crate::PRODUCT_LIVE_TOOLS
+            crate::PRODUCT_LIVE_TOOLS,
+            crate::PRODUCT_INSTALLED_BOOT
         ),
     }
+}
+
+pub(crate) fn parse_release_product(value: Option<&str>) -> Result<crate::BuildProduct> {
+    let product = parse_product(value)?;
+    if product.canonical == crate::PRODUCT_INSTALLED_BOOT {
+        bail!(
+            "unsupported release build product '{}'; release build supports '{}', '{}', '{}'.\n\
+             '{}' is a canonical product preparation target, not a release ISO target.",
+            product.canonical,
+            crate::PRODUCT_BASE_ROOTFS,
+            crate::PRODUCT_LIVE_BOOT,
+            crate::PRODUCT_LIVE_TOOLS,
+            crate::PRODUCT_INSTALLED_BOOT
+        );
+    }
+    Ok(product)
 }
 
 pub(crate) fn product_for_logical_name(logical_name: &str) -> Result<crate::BuildProduct> {
@@ -115,8 +136,9 @@ pub(crate) fn product_for_logical_name(logical_name: &str) -> Result<crate::Buil
         "product.rootfs.base" => Ok(product_base_rootfs()),
         "product.payload.boot.live" => Ok(product_live_boot()),
         "product.payload.live_tools" => Ok(product_live_tools()),
+        "product.payload.boot.installed" => Ok(product_installed_boot()),
         other => bail!(
-            "unsupported canonical product logical name '{}'; expected one of: product.rootfs.base, product.payload.boot.live, product.payload.live_tools",
+            "unsupported canonical product logical name '{}'; expected one of: product.rootfs.base, product.payload.boot.live, product.payload.live_tools, product.payload.boot.installed",
             other
         ),
     }
@@ -161,7 +183,9 @@ pub(crate) fn compatibility_stage_for_product(
 }
 
 pub(crate) fn parse_stage(value: Option<&str>) -> Result<crate::CompatibilityBuildStage> {
-    Ok(compatibility_stage_for_product(parse_product(value)?))
+    Ok(compatibility_stage_for_product(parse_release_product(
+        value,
+    )?))
 }
 
 fn product_base_rootfs() -> crate::BuildProduct {
@@ -203,6 +227,20 @@ fn product_live_tools() -> crate::BuildProduct {
         live_overlay_dir_name: "live-overlay",
         rootfs_source_pointer_filename: ".live-rootfs-source.path",
         issue_banner_label: "Live Tools",
+    }
+}
+
+fn product_installed_boot() -> crate::BuildProduct {
+    crate::BuildProduct {
+        canonical: crate::PRODUCT_INSTALLED_BOOT,
+        release_dir_name: crate::PRODUCT_INSTALLED_BOOT,
+        iso_suffix: "installed-boot",
+        rootfs_erofs_filename: "filesystem.erofs",
+        overlay_erofs_filename: "overlayfs.erofs",
+        initramfs_live_filename: "initramfs-live.cpio.gz",
+        live_overlay_dir_name: "boot-overlay",
+        rootfs_source_pointer_filename: ".rootfs-source.path",
+        issue_banner_label: "Installed Boot",
     }
 }
 
@@ -269,6 +307,12 @@ mod tests {
                 .canonical,
             crate::PRODUCT_LIVE_TOOLS
         );
+        assert_eq!(
+            parse_product(Some(crate::PRODUCT_INSTALLED_BOOT))
+                .expect("parse installed-boot")
+                .canonical,
+            crate::PRODUCT_INSTALLED_BOOT
+        );
     }
 
     #[test]
@@ -318,6 +362,23 @@ mod tests {
                 .expect("map live tools")
                 .canonical,
             crate::PRODUCT_LIVE_TOOLS
+        );
+        assert_eq!(
+            product_for_logical_name("product.payload.boot.installed")
+                .expect("map installed boot")
+                .canonical,
+            crate::PRODUCT_INSTALLED_BOOT
+        );
+    }
+
+    #[test]
+    fn release_product_parser_rejects_installed_boot() {
+        let err = parse_release_product(Some(crate::PRODUCT_INSTALLED_BOOT))
+            .expect_err("installed-boot must not be a release ISO product");
+        assert!(
+            err.to_string()
+                .contains("canonical product preparation target"),
+            "unexpected error: {err:#}"
         );
     }
 }

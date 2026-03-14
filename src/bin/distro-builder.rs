@@ -9,6 +9,7 @@ mod workflows;
 const PRODUCT_BASE_ROOTFS: &str = "base-rootfs";
 const PRODUCT_LIVE_BOOT: &str = "live-boot";
 const PRODUCT_LIVE_TOOLS: &str = "live-tools";
+const PRODUCT_INSTALLED_BOOT: &str = "installed-boot";
 const DEFAULT_DISTRO_ID: &str = "levitate";
 const S00_RUN_RETENTION_COUNT: usize = 5;
 
@@ -56,7 +57,7 @@ struct BuildRunMetadata {
 }
 
 fn usage() -> &'static str {
-    "Usage:\n  distro-builder release build iso [<distro_id|product>] [<distro_id|product>]\n    product defaults to base-rootfs, distro defaults to levitate\n    products: base-rootfs | live-boot | live-tools\n    compatibility aliases: 00Build|01Boot|02LiveTools|0|00|1|01|2|02\n  distro-builder release build-all iso [base-rootfs|live-boot|live-tools]\n  distro-builder product prepare <base-rootfs|live-boot|live-tools> <distro_id> <output_dir>\n  distro-builder transform build rootfs-erofs <source_dir> <output>\n  distro-builder transform build overlayfs-erofs <source_dir> <output>\n  distro-builder transform build product-erofs <prepared_product_dir>\n  distro-builder artifact preseed-stage01-source <distro_id> [--refresh]\n  distro-builder artifact materialize-stage01-source-rootfs <distro_id>\n\nCompatibility aliases:\n  distro-builder iso build [<distro_id|stage>] [<distro_id|stage>]\n  distro-builder iso build-all [00Build|01Boot|02LiveTools]\n  distro-builder artifact build-stage-erofs <stage> <distro_id>\n  distro-builder artifact prepare-stage-inputs <stage> <distro_id> <output_dir>\n  distro-builder artifact prepare-s00-build-inputs <distro_id> <output_dir>\n  distro-builder artifact prepare-s01-boot-inputs <distro_id> <output_dir>\n  distro-builder artifact prepare-s02-live-tools-inputs <distro_id> <output_dir>"
+    "Usage:\n  distro-builder release build iso [<distro_id|product>] [<distro_id|product>]\n    product defaults to base-rootfs, distro defaults to levitate\n    release products: base-rootfs | live-boot | live-tools\n    compatibility aliases: 00Build|01Boot|02LiveTools|0|00|1|01|2|02\n  distro-builder release build-all iso [base-rootfs|live-boot|live-tools]\n  distro-builder product prepare <base-rootfs|live-boot|live-tools|installed-boot> <distro_id> <output_dir>\n  distro-builder transform build rootfs-erofs <source_dir> <output>\n  distro-builder transform build overlayfs-erofs <source_dir> <output>\n  distro-builder transform build product-erofs <prepared_product_dir>\n  distro-builder artifact preseed-stage01-source <distro_id> [--refresh]\n  distro-builder artifact materialize-stage01-source-rootfs <distro_id>\n\nCompatibility aliases:\n  distro-builder iso build [<distro_id|stage>] [<distro_id|stage>]\n  distro-builder iso build-all [00Build|01Boot|02LiveTools]\n  distro-builder artifact build-stage-erofs <stage> <distro_id>\n  distro-builder artifact prepare-stage-inputs <stage> <distro_id> <output_dir>\n  distro-builder artifact prepare-s00-build-inputs <distro_id> <output_dir>\n  distro-builder artifact prepare-s01-boot-inputs <distro_id> <output_dir>\n  distro-builder artifact prepare-s02-live-tools-inputs <distro_id> <output_dir>"
 }
 
 fn main() -> Result<()> {

@@ -190,7 +190,7 @@ struct S02LiveToolsInputsToml {
     install_experience: InstallExperience,
 }
 
-pub(crate) fn load_boot_config(
+pub(crate) fn load_boot_payload_config(
     repo_root: &Path,
     variant_dir: &Path,
     distro_id: &str,
@@ -200,13 +200,6 @@ pub(crate) fn load_boot_config(
 
     let os_name = load_identity_os_name(variant_dir, legacy_boot_inputs.as_ref())?;
     let required_services = load_required_services(variant_dir, legacy_boot_inputs.as_ref())?;
-    if !required_services.iter().any(|svc| svc == "sshd") {
-        bail!(
-            "invalid live boot config for '{}': required_services must include 'sshd' (OpenSSH is first-class in live boot)",
-            distro_id
-        );
-    }
-
     let overlay = load_ring2_overlay_policy(
         repo_root,
         variant_dir,
@@ -230,6 +223,21 @@ pub(crate) fn load_boot_config(
         rootfs_source_policy,
         overlay,
     })
+}
+
+pub(crate) fn load_boot_config(
+    repo_root: &Path,
+    variant_dir: &Path,
+    distro_id: &str,
+) -> Result<S01LoadedConfig> {
+    let loaded = load_boot_payload_config(repo_root, variant_dir, distro_id)?;
+    if !loaded.required_services.iter().any(|svc| svc == "sshd") {
+        bail!(
+            "invalid live boot config for '{}': required_services must include 'sshd' (OpenSSH is first-class in live boot)",
+            distro_id
+        );
+    }
+    Ok(loaded)
 }
 
 pub(crate) fn load_live_tools_config(variant_dir: &Path) -> Result<LiveToolsLoadedConfig> {

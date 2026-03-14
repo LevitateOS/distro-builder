@@ -9,9 +9,10 @@ use distro_builder::stages::s01_boot_inputs::{
 };
 use distro_builder::{build_erofs_default, build_overlayfs_default};
 use distro_builder::{
-    load_base_rootfs_product_spec, load_live_boot_product_spec, load_live_tools_product_spec,
-    prepare_base_rootfs_product, prepare_live_boot_product, prepare_live_tools_product,
-    BaseProductLayout, DerivedProductLayout, OverlayLayout, ParentRootfsInput,
+    load_base_rootfs_product_spec, load_installed_boot_product_spec, load_live_boot_product_spec,
+    load_live_tools_product_spec, prepare_base_rootfs_product, prepare_installed_boot_product,
+    prepare_live_boot_product, prepare_live_tools_product, BaseProductLayout, DerivedProductLayout,
+    OverlayLayout, ParentRootfsInput,
 };
 use distro_contract::{
     load_stage_00_contract_bundle_for_distro_from, ConformanceContract, ProductDecl,
@@ -53,14 +54,15 @@ fn canonical_derived_product_layout(
     contract: &ConformanceContract,
     product: crate::BuildProduct,
 ) -> Result<DerivedProductLayout> {
-    let parent_logical_name = runtime_product_decl(contract, product)
+    let runtime_product = runtime_product_decl(contract, product)?;
+    let parent_logical_name = runtime_product
         .extends
         .as_deref()
         .ok_or_else(|| {
             anyhow::anyhow!(
                 "missing canonical Ring 2 composition edge for '{}': product '{}' must declare `extends` in ring2-products.toml",
                 product.canonical,
-                runtime_product_decl(contract, product).logical_name
+                runtime_product.logical_name
             )
         })?;
     let parent_product = crate::workflows::product_for_logical_name(parent_logical_name)?;
@@ -81,10 +83,16 @@ fn canonical_derived_product_layout(
 fn runtime_product_decl<'a>(
     contract: &'a ConformanceContract,
     product: crate::BuildProduct,
-) -> &'a ProductDecl {
+) -> Result<&'a ProductDecl> {
     match product.canonical {
-        crate::PRODUCT_LIVE_BOOT => &contract.products.boot_live,
-        crate::PRODUCT_LIVE_TOOLS => &contract.products.live_tools,
+        crate::PRODUCT_LIVE_BOOT => Ok(&contract.products.boot_live),
+        crate::PRODUCT_LIVE_TOOLS => Ok(&contract.products.live_tools),
+        crate::PRODUCT_INSTALLED_BOOT => contract.products.boot_installed.as_ref().ok_or_else(|| {
+            anyhow::anyhow!(
+                "missing canonical Ring 2 product declaration for '{}': ring2-products.toml must define `boot_installed`",
+                product.canonical
+            )
+        }),
         _ => unreachable!("canonical derived product layout is only valid for derived products"),
     }
 }
@@ -226,6 +234,24 @@ fn prepare_product_inputs(
             let prepared = prepare_live_tools_product(&spec, output_dir).with_context(|| {
                 format!("preparing {} inputs for '{}'", product.canonical, distro_id)
             })?;
+            Ok(PreparedProductInputs {
+                rootfs_source_dir: prepared.rootfs_source_dir,
+                live_overlay_dir: prepared.live_overlay_dir,
+            })
+        }
+        crate::PRODUCT_INSTALLED_BOOT => {
+            let layout = canonical_derived_product_layout(&bundle.contract, product)?;
+            let spec = load_installed_boot_product_spec(
+                &bundle.repo_root,
+                &bundle.variant_dir,
+                distro_id,
+                layout,
+            )
+            .with_context(|| format!("loading {} config for '{}'", product.canonical, distro_id))?;
+            let prepared =
+                prepare_installed_boot_product(&spec, output_dir).with_context(|| {
+                    format!("preparing {} inputs for '{}'", product.canonical, distro_id)
+                })?;
             Ok(PreparedProductInputs {
                 rootfs_source_dir: prepared.rootfs_source_dir,
                 live_overlay_dir: prepared.live_overlay_dir,

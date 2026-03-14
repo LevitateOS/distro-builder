@@ -23,5 +23,5 @@ pub(crate) use compat_release::ensure_release_iso_via_compatibility_hook;
 pub(crate) use layout::locate_repo_root;
 pub(crate) use parse::{
     compatibility_stage_for_product, discover_distro_ids, parse_product,
-    parse_release_build_command, parse_stage, product_for_logical_name,
+    parse_release_build_command, parse_release_product, parse_stage, product_for_logical_name,
 };

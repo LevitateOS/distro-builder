@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::pipeline::config::{load_boot_config, load_live_tools_config};
+use crate::pipeline::config::{load_boot_config, load_boot_payload_config, load_live_tools_config};
 use crate::pipeline::io::{
     create_empty_overlay_dir, create_unique_output_dir, extract_erofs_rootfs,
     resolve_parent_product_rootfs_image_for_distro,
@@ -39,6 +39,12 @@ pub struct LiveBootProduct {
 
 #[derive(Debug, Clone)]
 pub struct LiveToolsProduct {
+    pub rootfs_source_dir: PathBuf,
+    pub live_overlay_dir: PathBuf,
+}
+
+#[derive(Debug, Clone)]
+pub struct InstalledBootProduct {
     pub rootfs_source_dir: PathBuf,
     pub live_overlay_dir: PathBuf,
 }
@@ -137,6 +143,17 @@ pub struct LiveToolsProductSpec {
     live_overlay: OverlayLayout,
     overlay: S01OverlayPolicy,
     required_services: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct InstalledBootProductSpec {
+    repo_root: PathBuf,
+    pub distro_id: String,
+    pub rootfs_source_dir: PathBuf,
+    parent_rootfs: ParentRootfsInput,
+    live_overlay_dir_name: String,
+    add_plan: ProducerPlan,
+    rootfs_source_policy: Option<S01RootfsSourcePolicy>,
 }
 
 pub fn load_base_rootfs_product_spec(
@@ -372,6 +389,36 @@ pub fn load_live_tools_product_spec(
     })
 }
 
+pub fn load_installed_boot_product_spec(
+    repo_root: &Path,
+    variant_dir: &Path,
+    distro_id: &str,
+    layout: DerivedProductLayout,
+) -> Result<InstalledBootProductSpec> {
+    let loaded = load_boot_payload_config(repo_root, variant_dir, distro_id)?;
+
+    let mut add_producers = boot_baseline_producers(match &loaded.overlay {
+        S01OverlayPolicy::Systemd { .. } => "systemd",
+        S01OverlayPolicy::OpenRc { .. } => "openrc",
+    });
+    if loaded.rootfs_source_policy.is_none() {
+        add_producers.retain(|producer| matches!(producer, RootfsProducer::WriteText { .. }));
+    }
+
+    Ok(InstalledBootProductSpec {
+        repo_root: repo_root.to_path_buf(),
+        distro_id: distro_id.to_string(),
+        rootfs_source_dir: layout.rootfs_source_dir,
+        parent_rootfs: layout.parent_rootfs,
+        live_overlay_dir_name: layout.live_overlay.dir_name,
+        add_plan: ProducerPlan {
+            source_rootfs_dir: None,
+            producers: add_producers,
+        },
+        rootfs_source_policy: loaded.rootfs_source_policy,
+    })
+}
+
 pub fn prepare_live_tools_product(
     spec: &LiveToolsProductSpec,
     output_dir: &Path,
@@ -445,6 +492,76 @@ pub fn prepare_live_tools_product(
     })
 }
 
+pub fn prepare_installed_boot_product(
+    spec: &InstalledBootProductSpec,
+    output_dir: &Path,
+) -> Result<InstalledBootProduct> {
+    fs::create_dir_all(output_dir).with_context(|| {
+        format!(
+            "creating installed boot product output directory '{}'",
+            output_dir.display()
+        )
+    })?;
+
+    let rootfs_source_dir = create_unique_output_dir(output_dir, &spec.rootfs_source_dir)?;
+    cleanup_legacy_provider_dir(output_dir).with_context(|| {
+        format!(
+            "cleaning legacy installed boot provider directory under '{}'",
+            output_dir.display()
+        )
+    })?;
+    let parent_rootfs = resolve_parent_product_rootfs_image_for_distro(
+        &spec.repo_root,
+        &spec.distro_id,
+        &spec.parent_rootfs.release_dir_name,
+        &spec.parent_rootfs.producer_label,
+        &spec.parent_rootfs.rootfs_filename,
+    )?;
+    extract_erofs_rootfs(&parent_rootfs, &rootfs_source_dir).with_context(|| {
+        format!(
+            "extracting parent rootfs for installed boot product from '{}'",
+            parent_rootfs.display()
+        )
+    })?;
+
+    let mut add_plan = spec.add_plan.clone();
+    if add_plan.producers.iter().any(|producer| {
+        matches!(
+            producer,
+            RootfsProducer::CopyTree { .. }
+                | RootfsProducer::CopySymlink { .. }
+                | RootfsProducer::CopyFile { .. }
+        )
+    }) {
+        let source_rootfs_dir = materialize_source_rootfs(
+            &spec.repo_root,
+            &spec.distro_id,
+            &spec.rootfs_source_policy,
+        )?;
+        add_plan.source_rootfs_dir = Some(source_rootfs_dir);
+    }
+
+    apply_producer_plan(&add_plan, &rootfs_source_dir).with_context(|| {
+        format!(
+            "applying installed boot product additive producers for '{}'",
+            spec.distro_id
+        )
+    })?;
+
+    let live_overlay_dir = create_empty_overlay_dir(output_dir, &spec.live_overlay_dir_name)
+        .with_context(|| {
+            format!(
+                "creating empty installed boot overlay for {}",
+                spec.distro_id
+            )
+        })?;
+
+    Ok(InstalledBootProduct {
+        rootfs_source_dir,
+        live_overlay_dir,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -481,6 +598,21 @@ mod tests {
             live_overlay: OverlayLayout {
                 issue_banner_label: "Live Tools".to_string(),
                 dir_name: "live-overlay".to_string(),
+            },
+        }
+    }
+
+    fn installed_boot_layout() -> DerivedProductLayout {
+        DerivedProductLayout {
+            rootfs_source_dir: PathBuf::from("installed-boot-rootfs"),
+            parent_rootfs: ParentRootfsInput {
+                release_dir_name: "base-rootfs".to_string(),
+                producer_label: "base-rootfs".to_string(),
+                rootfs_filename: "filesystem.erofs".to_string(),
+            },
+            live_overlay: OverlayLayout {
+                issue_banner_label: "Installed Boot".to_string(),
+                dir_name: "boot-overlay".to_string(),
             },
         }
     }
@@ -531,6 +663,11 @@ extends = "product.rootfs.base"
 logical_name = "product.payload.live_tools"
 description = "Live tools payload tree"
 extends = "product.payload.boot.live"
+
+[ring2_products.boot_installed]
+logical_name = "product.payload.boot.installed"
+description = "Installed-system boot payload inputs"
+extends = "product.rootfs.base"
 
 [ring2_products.kernel_staging]
 logical_name = "product.kernel.staging"
@@ -634,6 +771,35 @@ install_experience = "automated_ssh"
             format!("{err:#}").contains("scenario/live-tools parity mismatch"),
             "unexpected error: {err:#}"
         );
+
+        fs::remove_dir_all(repo_root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn installed_boot_product_spec_loads_from_ring_boot_payload_owners() {
+        let repo_root = temp_repo_root("installed-boot-no-stage04");
+        let variant_dir = repo_root.join("distro-variants/levitate");
+        write_live_tools_ring_scaffold(&variant_dir);
+
+        let spec = load_installed_boot_product_spec(
+            &repo_root,
+            &variant_dir,
+            "levitate",
+            installed_boot_layout(),
+        )
+        .expect("load installed boot spec from ring owners");
+
+        assert_eq!(
+            spec.rootfs_source_dir,
+            PathBuf::from("installed-boot-rootfs")
+        );
+        assert_eq!(spec.parent_rootfs.release_dir_name, "base-rootfs");
+        assert_eq!(spec.live_overlay_dir_name, "boot-overlay");
+        assert!(spec
+            .add_plan
+            .producers
+            .iter()
+            .any(|producer| matches!(producer, RootfsProducer::WriteText { .. })));
 
         fs::remove_dir_all(repo_root).expect("cleanup temp root");
     }

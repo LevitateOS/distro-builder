@@ -560,14 +560,58 @@ Acceptance:
 
 ### Phase 7. Convert install-tests from stage runner to scenario runner
 
-- [ ] Refactor `testing/install-tests/src/stages/mod.rs` so "stage" is only a scenario label.
-- [ ] Make scenario execution consume explicit products/artifacts.
-- [ ] Update `xtask/src/cli/types.rs` and `xtask/src/tasks/testing/stages.rs` to reflect that model.
+- [x] Replace the canonical numeric-stage runner API in `testing/install-tests/src/stages/mod.rs`.
+- [x] Introduce canonical scenario identities such as `build_preflight`, `live_boot`, `live_tools`, `install`, `installed_boot`, `automated_login`, and `runtime`.
+- [x] Keep `00Build` / `01Boot` / `02LiveTools` / `03Install` / `04LoginGate` / `05Harness` / `06Runtime` only as CLI aliases at the outer boundary.
+- [x] Replace `run_stage`, `run_stage_forced`, `run_up_to`, and `stage_name(...)` in `testing/install-tests/src/stages/mod.rs` with scenario-native runners and alias translation.
+- [x] Replace `resolve_iso_target_for_stage(...)`, `stage_output_dir_for_stage(...)`, and `derive_stage_iso_filename(...)` in `testing/install-tests/src/stages/mod.rs` with explicit scenario artifact resolution driven by product/release metadata.
+- [x] Make live scenario execution consume explicit ISO/runtime artifacts instead of deriving them from `s01-boot` / `s02-live-tools` directory names.
+- [x] Replace persisted stage-number state in `testing/install-tests/src/stages/state.rs` with scenario identity plus concrete artifact/run identity.
+- [x] Stop invalidating cached results by `runtime_iso_mtime_secs_by_stage`; invalidate by the resolved scenario artifact identity instead.
+- [x] Replace `RuntimeStageRun`, `RuntimeStageRunManifest`, and `resolve_latest_stage03_runtime(...)` in `testing/install-tests/src/stages/mod.rs` with scenario-native installed-runtime ownership.
+- [x] Stop treating `s03-install` as the canonical owner for disk and OVMF runtime artifacts in `testing/install-tests/src/stages/mod.rs` and `xtask/src/tasks/testing/stages.rs`.
+- [x] Remove `default_iso_path()` as a canonical `DistroContext` contract in `testing/install-tests/src/distro/mod.rs`.
+- [x] Replace per-distro hardcoded `s01-boot` ISO paths in:
+  `testing/install-tests/src/distro/levitate.rs`,
+  `testing/install-tests/src/distro/ralph.rs`,
+  `testing/install-tests/src/distro/acorn.rs`,
+  `testing/install-tests/src/distro/iuppiter.rs`.
+- [x] Make `testing/install-tests/src/qemu/session.rs` consume explicitly resolved scenario artifacts instead of calling `ctx.default_iso_path()`.
+- [x] Update `testing/install-tests/src/bin/stages.rs` so the internal semantics are scenario-first even if `--stage` remains as a compatibility flag.
+- [x] Replace `xtask` stage-native testing/boot routing in:
+  `xtask/src/cli/types.rs`,
+  `xtask/src/app.rs`,
+  `xtask/src/tasks/testing/stages.rs`.
+- [x] Replace `StagesCmd` / `BootConfig { stage01_root, stage02_root, stage03_root, ... }` with scenario/product-aware resolution while keeping stage-number aliases only at the CLI edge.
+- [x] Replace `resolve_stage_iso(...)` and `resolve_stage03_runtime(...)` in `xtask/src/tasks/testing/stages.rs` with scenario-native artifact/runtime resolvers.
+- [x] Remove remaining deep stage-path heuristics such as the `s01-boot` / `s02-live-tools` fallback in `testing/install-tests/src/preflight.rs` once scenario metadata is fully authoritative.
+
+Implemented:
+
+- `testing/install-tests/src/stages/mod.rs`
+  - adds canonical `ScenarioId`
+  - runs scenarios directly and keeps stage numbers only as compatibility aliases
+  - resolves live artifacts from release-product run metadata
+  - writes installed-runtime outputs under `.artifacts/out/<distro>/scenarios/...`
+- `testing/install-tests/src/stages/state.rs`
+  - tracks scenario results by canonical scenario name
+  - invalidates by resolved input fingerprint, not stage-numbered ISO mtimes
+- `testing/install-tests/src/bin/stages.rs`
+  - accepts `--scenario` / `--up-to-scenario`
+  - keeps `--stage` / `--up-to` as compatibility aliases
+- `xtask`
+  - parses scenario targets and stage-number aliases
+  - resolves boot/test artifacts from `install-tests` scenario helpers instead of hardcoded stage roots
 
 Acceptance:
 
-- install tests no longer own the build graph
-- scenario execution is artifact-aware without stage-path assumptions
+- [x] install tests no longer own the build graph
+- [x] the canonical runner is keyed by scenario identity, not stage number
+- [x] live scenarios resolve ISO/runtime artifacts from explicit product/release metadata
+- [x] installed scenarios resolve disk/OVMF/runtime artifacts from explicit install-scenario outputs
+- [x] `DistroContext` no longer encodes canonical stage-owned ISO paths
+- [x] `xtask` testing/boot paths are scenario-native internally and use stage numbers only as aliases
+- [x] no canonical logic below the alias boundary depends on `s01-boot`, `s02-live-tools`, `s03-install`, or numeric stage ids
 
 ### Phase 8. Clean names, paths, and compatibility shims
 

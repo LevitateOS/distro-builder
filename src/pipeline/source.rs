@@ -74,7 +74,7 @@ pub(crate) fn load_rootfs_source_policy(
         parsed.ring3_sources.rootfs_source.clone(),
     )?;
 
-    if ring_policy != legacy_policy {
+    if legacy_source.is_some() && ring_policy != legacy_policy {
         bail!(
             "Ring 3 source parity mismatch for '{}': legacy 01Boot rootfs_source {:?} does not match ring3-sources rootfs_source {:?}",
             variant_dir.display(),

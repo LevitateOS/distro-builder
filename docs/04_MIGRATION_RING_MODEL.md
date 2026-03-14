@@ -146,7 +146,7 @@ Acceptance:
 - new manifest skeletons exist for all owner families
 - no behavior changes are required yet
 
-#### Phase 1 Pilot Census: Levitate
+#### Phase 1 Baseline Census: Shared Fields
 
 | Current source | Current field | Canonical owner | Pilot target |
 |---|---|---|---|
@@ -170,14 +170,43 @@ Acceptance:
 | `02LiveTools.toml` | `stage_02.live_tools.os_name` | compatibility duplication of `identity` | delete after migration |
 | `02LiveTools.toml` | `stage_02.live_tools.install_experience` | `scenarios` | `scenarios.toml` |
 
-Notes:
-- the Phase 1 pilot ring family is additive only
-- canonical contract loading still comes from `00Build.toml`
-- the new ring files exist to prove owner-scoped layout and loader scaffolding before any behavior flip
+#### Phase 1 Repo-Wide Variant Deltas
 
-Pilot status:
-- `levitate` now has a complete ring-manifest scaffold
+The shared table above covers the common manifest surface.
+These variant deltas are the remaining currently loaded fields that differ by distro:
+
+| Variant | Current source | Current field | Canonical owner | Target owner file |
+|---|---|---|---|---|
+| `ralph` | `00Build.toml` | no `initramfs_installed_output` / no `installed_uki_outputs` | not present for this variant | none |
+| `ralph` | `02LiveTools.toml` | `install_experience = "automated_ssh"` | `scenarios` | `scenarios.toml` |
+| `acorn` | `00Build.toml` | `artifacts.installed_uki_outputs` | `ring1_transforms` | `ring1-transforms.toml` |
+| `acorn` | `01Boot.toml` | `rootfs_source.defines.*` | `ring3_sources` | `ring3-sources.toml` |
+| `acorn` | `01Boot.toml` | `openrc_inittab`, `profile_overlay` | `ring2_products` | `ring2-products.toml` |
+| `iuppiter` | `00Build.toml` | `artifacts.installed_uki_outputs` | `ring1_transforms` | `ring1-transforms.toml` |
+| `iuppiter` | `00Build.toml` | `artifacts.disk_image_output` | `ring0_release` | `ring0-release.toml` |
+| `iuppiter` | `01Boot.toml` | `rootfs_source.defines.*` | `ring3_sources` | `ring3-sources.toml` |
+| `iuppiter` | `01Boot.toml` | `openrc_inittab`, `profile_overlay` | `ring2_products` | `ring2-products.toml` |
+| `acorn`, `iuppiter` | `02LiveTools.toml` | variant-specific `install_experience` | `scenarios` | `scenarios.toml` |
+
+Notes:
+- the ring family remains additive during the migration window
+- canonical contract loading is no longer `levitate`-only for scaffold/parity detection
+- the new ring files now exist for all four variants so owner-scoped layout is proved repo-wide before the later destructive cleanup phases
+
+Current reality:
+- all four variants now have a complete ring-manifest scaffold
 - `variant.rs` parses the full ring family all-or-none and rejects partial scaffold sets
+- `distro-contract` has a workspace test proving the ring scaffold set is complete and parseable for every variant
+
+Honest completion estimate:
+- repo-wide: `100%`
+- `levitate` pilot only: `100%`
+
+Remaining work before this phase is truly done:
+- [x] extend the ownership census beyond `levitate` to `ralph`, `acorn`, and `iuppiter`
+- [x] add complete ring-manifest scaffold files for the remaining variants
+- [x] prove the field census covers every currently loaded manifest field repo-wide, not just the `levitate` slice
+- [ ] keep the census current if new manifest fields are introduced later in Track 04
 
 ### Phase 2. Identity And Build-Host Ownership Migration
 
@@ -198,10 +227,20 @@ Acceptance:
 - no build-host fact remains in ring or scenario manifests
 - host/build policy is loadable independently of artifact rings
 
-Pilot status:
-- when a complete ring family is present, `identity` and `build_host` now load canonically from `identity.toml` and `build-host.toml`
+Current reality:
+- when a complete ring family is present, `identity` and `build_host` now load canonically from `identity.toml` and `build-host.toml` for all four variants
 - `00Build.toml` copies of those owners are still validated in parallel and must stay byte-for-byte equivalent at the canonical contract level
 - parity drift is a hard failure during the migration window
+
+Honest completion estimate:
+- repo-wide: `80%`
+- `levitate` pilot only: `85%`
+
+Remaining work before this phase is truly done:
+- [x] add `identity.toml` and `build-host.toml` for `ralph`, `acorn`, and `iuppiter`
+- [ ] move any remaining identity/build-host consumers outside `distro-contract` onto the new owner files where appropriate
+- [ ] stop treating `00Build.toml` as the long-term canonical home for these owners once parity coverage exists for all variants
+- [ ] reduce `00Build.toml` copies of identity/build-host facts to temporary compatibility only, then delete them in the later cleanup phase
 
 ### Phase 3. Ring 3 Source Ownership Migration
 
@@ -218,10 +257,20 @@ Acceptance:
 - no source/provenance fact remains in product, transform, or scenario manifests
 - Ring 3 can be loaded and validated independently
 
-Pilot status:
-- `levitate` now loads `rootfs_source.*` canonically from `ring3-sources.toml`
+Current reality:
+- all four variants now provide `ring3-sources.toml`, and `distro-builder` loads `rootfs_source.*` canonically from Ring 3 when present
 - legacy `01Boot.toml` source fields are still loaded in parallel and must stay semantically identical during the migration window
 - source-owner drift is a hard failure in `distro-builder`
+
+Honest completion estimate:
+- repo-wide: `65%`
+- `levitate` pilot only: `70%`
+
+Remaining work before this phase is truly done:
+- [x] add `ring3-sources.toml` for `ralph`, `acorn`, and `iuppiter`
+- [ ] move the rest of the source/provenance surface, not just `rootfs_source.*`, into Ring 3 ownership
+- [ ] teach `distro-contract` to consume Ring 3 facts canonically instead of only validating the files in parallel
+- [ ] remove `01Boot.toml` as the canonical source owner once all Ring 3 facts are migrated
 
 ### Phase 4. Ring 2 Base Product Ownership Migration
 
@@ -236,6 +285,44 @@ Scope:
 Acceptance:
 - Ring 2 owns the base/foundation trees exclusively
 - no transform or release facts remain in the migrated Ring 2 base manifests
+
+Current reality:
+- all four variants now provide `ring2-products.toml`
+- `distro-contract` now loads the canonical `ProductContract` from `ring2-products.toml` when the ring family is present
+- `distro-builder` now loads the base live-overlay policy from `ring2-products.toml`
+- legacy `00Build.toml` and `01Boot.toml` copies of those base-product facts are still loaded in parallel and must stay semantically identical during the migration window
+
+Honest completion estimate:
+- repo-wide: `75%`
+- `levitate` pilot only: `80%`
+
+Remaining work before this phase is truly done:
+- [x] add `ring2-products.toml` for `ralph`, `acorn`, and `iuppiter`
+- [x] move the remaining base-product facts out of `01Boot.toml`, not just `overlay_kind`
+- [ ] move builder/runtime consumers of base-product composition onto Ring 2 ownership instead of stage-era manifests
+- [ ] remove `00Build.toml` and `01Boot.toml` as canonical sources of base-product facts once parity coverage exists for all variants
+
+Phase 5 gate decision:
+- Phase 5 must start only after repo-wide Ring 2 base parity exists.
+- A second `levitate`-only pilot slice is explicitly rejected for this track.
+
+Pre-Phase-5 gate status:
+- [x] add `identity.toml`, `build-host.toml`, `ring3-sources.toml`, and `ring2-products.toml` for `ralph`, `acorn`, and `iuppiter`
+- [x] make the new owner files parse cleanly for all four variants under `distro-contract`
+- [x] extend the Phase 1 ownership census beyond `levitate` so every currently loaded field is mapped repo-wide
+- [x] move the remaining Ring 2 base-product facts out of `01Boot.toml`
+  - [x] `os_name` duplication
+  - [x] `issue_message`
+  - [x] `openrc_inittab`
+  - [x] `profile_overlay`
+- [x] make `distro-builder` base-product loading succeed without needing `01Boot.toml` for `levitate`
+- [x] add parity tests for the non-`levitate` variants so their new owner files cannot silently drift from the legacy manifests
+- [x] decide whether Phase 5 will start only after repo-wide Ring 2 base parity exists, or whether it will proceed as a second `levitate`-only pilot slice
+- [x] because the decision is repo-wide, keep Phase 5 blocked until the repo-wide parity work above is finished
+
+Result:
+- the pre-Phase-5 gate is satisfied for the Phase 1-4 scope
+- Phase 5 can now start without another `levitate`-only exception
 
 ### Phase 5. Ring 2 Runtime Product Ownership Migration
 

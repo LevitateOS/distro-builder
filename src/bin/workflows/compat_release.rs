@@ -49,10 +49,10 @@ pub(crate) fn ensure_release_iso_via_compatibility_hook(
                 distro_id
             )
         })?;
-    let iso_filename = crate::workflows::build::iso_filename_for_product(
-        &bundle.contract.artifacts.iso_filename,
-        product,
-    );
+    let base_iso_filename = crate::workflows::canonical_iso_filename(&bundle.contract)
+        .with_context(|| format!("resolving canonical Ring 0 ISO output for '{}'", distro_id))?;
+    let iso_filename =
+        crate::workflows::build::iso_filename_for_product(&base_iso_filename, product);
     let iso_path = output_dir.join(&iso_filename);
     let native_build = bundle.variant_dir.join(compat_stage.native_build_script);
     if !native_build.is_file() {

@@ -161,11 +161,10 @@ pub(crate) fn build_one(distro_id: &str, product: BuildProduct) -> Result<()> {
             .clone(),
     };
 
+    let base_iso_filename = crate::workflows::canonical_iso_filename(&bundle.contract)
+        .with_context(|| format!("resolving canonical Ring 0 ISO output for '{}'", distro_id))?;
     let created_at_utc = now_utc_compact()?;
-    let iso_path = output_dir.join(iso_filename_for_product(
-        &bundle.contract.artifacts.iso_filename,
-        product,
-    ));
+    let iso_path = output_dir.join(iso_filename_for_product(&base_iso_filename, product));
 
     if let Some(run_id) = build_layout.run_id.as_deref() {
         let metadata_path = crate::stage_runs::run_manifest_path(&output_dir);
@@ -238,10 +237,7 @@ pub(crate) fn build_one(distro_id: &str, product: BuildProduct) -> Result<()> {
                 .stage_00_build
                 .kernel_image_path
                 .clone(),
-            iso_filename: iso_filename_for_product(
-                &bundle.contract.artifacts.iso_filename,
-                product,
-            ),
+            iso_filename: iso_filename_for_product(&base_iso_filename, product),
         };
 
         run_00build_evidence_script(
@@ -257,10 +253,7 @@ pub(crate) fn build_one(distro_id: &str, product: BuildProduct) -> Result<()> {
             "[release:iso:{}:{distro_id}] built at {}",
             product.canonical,
             output_dir
-                .join(iso_filename_for_product(
-                    &bundle.contract.artifacts.iso_filename,
-                    product
-                ))
+                .join(iso_filename_for_product(&base_iso_filename, product))
                 .display()
         );
         Ok(())

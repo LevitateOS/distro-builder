@@ -195,6 +195,7 @@ struct ScenariosToml {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ScenarioSectionsToml {
+    #[allow(dead_code)]
     live_boot: Option<LiveBootScenarioToml>,
     live_environment: Option<LiveEnvironmentScenarioToml>,
     #[allow(dead_code)]
@@ -206,6 +207,7 @@ struct ScenarioSectionsToml {
 struct LiveBootScenarioToml {
     #[allow(dead_code)]
     required_kernel_cmdline: Vec<String>,
+    #[allow(dead_code)]
     required_live_services: Vec<String>,
     #[allow(dead_code)]
     evidence: Option<ScenarioEvidenceToml>,
@@ -755,34 +757,35 @@ fn load_required_services(
     legacy_boot_inputs: Option<&S01BootInputsToml>,
 ) -> Result<Vec<String>> {
     let scenarios_path = variant_dir.join("scenarios.toml");
-    let ring_required_services = if scenarios_path.is_file() {
-        let config_bytes = fs::read_to_string(&scenarios_path)
-            .with_context(|| format!("reading scenarios config '{}'", scenarios_path.display()))?;
-        let parsed: ScenariosToml = toml::from_str(&config_bytes)
-            .with_context(|| format!("parsing scenarios config '{}'", scenarios_path.display()))?;
-        let services = parsed
-            .scenarios
-            .live_environment
-            .map(|env| env.required_services)
-            .or_else(|| {
-                parsed
-                    .scenarios
-                    .live_boot
-                    .map(|boot| boot.required_live_services)
-            });
-        services.map(normalize_services)
-    } else {
-        None
-    };
+    if !scenarios_path.is_file() {
+        bail!(
+            "missing canonical live-environment scenario owner for '{}': expected '{}'",
+            variant_dir.display(),
+            scenarios_path.display()
+        );
+    }
+
+    let config_bytes = fs::read_to_string(&scenarios_path)
+        .with_context(|| format!("reading scenarios config '{}'", scenarios_path.display()))?;
+    let parsed: ScenariosToml = toml::from_str(&config_bytes)
+        .with_context(|| format!("parsing scenarios config '{}'", scenarios_path.display()))?;
+    let ring_required_services = parsed
+        .scenarios
+        .live_environment
+        .map(|env| normalize_services(env.required_services))
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "missing canonical live-environment scenario owner '[scenarios.live_environment]' in '{}'",
+                scenarios_path.display()
+            )
+        })?;
 
     let legacy_required_services = legacy_boot_inputs
         .and_then(|inputs| inputs.required_services.clone())
         .map(normalize_services);
 
-    if let (Some(ring_required_services), Some(legacy_required_services)) =
-        (&ring_required_services, &legacy_required_services)
-    {
-        if ring_required_services != legacy_required_services {
+    if let Some(legacy_required_services) = &legacy_required_services {
+        if ring_required_services != *legacy_required_services {
             bail!(
                 "scenario/base-product parity mismatch for '{}': legacy 01Boot required_services {:?} does not match scenarios.toml required_services {:?}",
                 variant_dir.display(),
@@ -792,9 +795,7 @@ fn load_required_services(
         }
     }
 
-    Ok(ring_required_services
-        .or(legacy_required_services)
-        .unwrap_or_else(|| vec!["sshd".to_string()]))
+    Ok(ring_required_services)
 }
 
 fn load_live_tools_install_experience(variant_dir: &Path) -> Result<InstallExperience> {
@@ -1278,6 +1279,75 @@ overlay_kind = "systemd"
         assert!(
             err.to_string()
                 .contains("missing canonical Ring 2 boot payload owner"),
+            "unexpected error: {err:#}"
+        );
+
+        fs::remove_dir_all(repo_root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn boot_payload_config_requires_canonical_scenarios_owner() {
+        let repo_root = temp_repo_root("boot-payload-needs-scenarios");
+        let variant_dir = repo_root.join("distro-variants/levitate");
+        write_file(
+            &variant_dir.join("identity.toml"),
+            r#"schema_version = 6
+
+[identity]
+os_name = "LevitateOS"
+os_id = "levitateos"
+iso_label = "LEVITATE"
+os_version = "0.1.0"
+default_hostname = "levitate"
+"#,
+        );
+
+        let err = load_boot_config(&repo_root, &variant_dir, "levitate")
+            .expect_err("missing scenarios owner should fail");
+        assert!(
+            err.to_string()
+                .contains("missing canonical live-environment scenario owner"),
+            "unexpected error: {err:#}"
+        );
+
+        fs::remove_dir_all(repo_root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn boot_payload_config_rejects_required_services_drift_against_scenarios_owner() {
+        let repo_root = temp_repo_root("boot-payload-scenarios-drift");
+        let variant_dir = repo_root.join("distro-variants/levitate");
+        write_file(
+            &variant_dir.join("identity.toml"),
+            r#"schema_version = 6
+
+[identity]
+os_name = "LevitateOS"
+os_id = "levitateos"
+iso_label = "LEVITATE"
+os_version = "0.1.0"
+default_hostname = "levitate"
+"#,
+        );
+        write_file(
+            &variant_dir.join("scenarios.toml"),
+            r#"schema_version = 6
+
+[scenarios.live_environment]
+required_services = ["sshd", "auditd"]
+"#,
+        );
+        write_file(
+            &variant_dir.join("01Boot.toml"),
+            r#"[stage_01.boot_inputs]
+required_services = ["sshd"]
+"#,
+        );
+
+        let err = load_boot_config(&repo_root, &variant_dir, "levitate")
+            .expect_err("required_services drift should fail");
+        assert!(
+            err.to_string().contains("legacy 01Boot required_services"),
             "unexpected error: {err:#}"
         );
 

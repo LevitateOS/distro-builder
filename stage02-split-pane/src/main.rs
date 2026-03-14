@@ -285,7 +285,12 @@ fn run_ui(config: &Config) -> Result<()> {
 
     let (tx, rx) = mpsc::channel::<PtyEvent>();
 
-    let left = spawn_raw_pane(PaneId::Left, build_left_pane_command(config), left_size, tx.clone())?;
+    let left = spawn_raw_pane(
+        PaneId::Left,
+        build_left_pane_command(config),
+        left_size,
+        tx.clone(),
+    )?;
     let right = spawn_raw_pane(
         PaneId::Right,
         build_shell_script_command(&right_launch_script(config.right_command.as_deref())),
@@ -634,11 +639,7 @@ fn render_pane(frame: &mut Frame, area: Rect, pane: &PaneState, focused: bool) {
     frame.render_widget(paragraph, area);
 }
 
-fn render_styled_rows(
-    parser: &vt100::Parser,
-    max_rows: u16,
-    max_cols: u16,
-) -> Vec<Line<'static>> {
+fn render_styled_rows(parser: &vt100::Parser, max_rows: u16, max_cols: u16) -> Vec<Line<'static>> {
     let screen = parser.screen();
     let (rows, cols) = screen.size();
     let rows_to_render = rows.min(max_rows);

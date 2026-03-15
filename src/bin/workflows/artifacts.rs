@@ -2,17 +2,14 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use anyhow::{bail, Context, Result};
-use distro_builder::compat_inputs::live_boot_inputs::{
-    load_s01_boot_input_spec, materialize_s01_source_rootfs,
-};
 use distro_builder::recipe::alpine_rootfs_source::preseed_alpine_rootfs_source_assets;
 use distro_builder::recipe::rootfs_source::preseed_rootfs_source_dvd;
 use distro_builder::{build_erofs_default, build_overlayfs_default};
 use distro_builder::{
     load_base_rootfs_product_spec, load_installed_boot_product_spec, load_live_boot_product_spec,
-    load_live_tools_product_spec, prepare_base_rootfs_product, prepare_installed_boot_product,
-    prepare_live_boot_product, prepare_live_tools_product, BaseProductLayout, DerivedProductLayout,
-    OverlayLayout, ParentRootfsInput,
+    load_live_tools_product_spec, materialize_live_boot_source_rootfs, prepare_base_rootfs_product,
+    prepare_installed_boot_product, prepare_live_boot_product, prepare_live_tools_product,
+    BaseProductLayout, DerivedProductLayout, OverlayLayout, ParentRootfsInput,
 };
 use distro_contract::{
     load_variant_contract_bundle_for_distro_from, ConformanceContract, LoadedVariantContract,
@@ -268,10 +265,10 @@ pub(crate) fn preseed_rootfs_source_cmd(distro_id: &str, refresh: bool) -> Resul
     let cwd = std::env::current_dir().context("resolving current directory")?;
     let bundle = load_variant_contract_bundle_for_distro_from(&cwd, distro_id)
         .with_context(|| format!("loading canonical variant contract for '{}'", distro_id))?;
-    let s01_spec = load_s01_boot_input_spec(&bundle.repo_root, &bundle.variant_dir, distro_id)
+    let live_boot_spec = canonical_live_boot_product_spec(&bundle, distro_id)
         .with_context(|| format!("loading canonical rootfs source policy for '{}'", distro_id))?;
 
-    if let Some(preseed_recipe_script) = s01_spec.rpm_dvd_preseed_recipe_script() {
+    if let Some(preseed_recipe_script) = live_boot_spec.rpm_dvd_preseed_recipe_script() {
         let iso_path =
             preseed_rootfs_source_dvd(&bundle.repo_root, distro_id, preseed_recipe_script, refresh)
                 .with_context(|| format!("preseeding rootfs source for '{}'", distro_id))?;
@@ -292,7 +289,7 @@ pub(crate) fn preseed_rootfs_source_cmd(distro_id: &str, refresh: bool) -> Resul
         return Ok(());
     }
 
-    if s01_spec.uses_alpine_stage01_rootfs_source() {
+    if live_boot_spec.uses_alpine_stage01_rootfs_source() {
         let output = preseed_alpine_rootfs_source_assets(&bundle.repo_root, distro_id, refresh)
             .with_context(|| format!("preseeding rootfs source for '{}'", distro_id))?;
         let trust_dir = output
@@ -325,13 +322,22 @@ pub(crate) fn materialize_rootfs_source_cmd(distro_id: &str) -> Result<()> {
     let cwd = std::env::current_dir().context("resolving current directory")?;
     let bundle = load_variant_contract_bundle_for_distro_from(&cwd, distro_id)
         .with_context(|| format!("loading canonical variant contract for '{}'", distro_id))?;
-    let s01_spec = load_s01_boot_input_spec(&bundle.repo_root, &bundle.variant_dir, distro_id)
+    let live_boot_spec = canonical_live_boot_product_spec(&bundle, distro_id)
         .with_context(|| format!("loading canonical rootfs source policy for '{}'", distro_id))?;
 
-    let source_rootfs_dir = materialize_s01_source_rootfs(&s01_spec)
+    let source_rootfs_dir = materialize_live_boot_source_rootfs(&live_boot_spec)
         .with_context(|| format!("materializing canonical rootfs source for '{}'", distro_id))?;
 
     println!("rootfs source ready for {}:", distro_id);
     println!("  rootfs source: {}", source_rootfs_dir.display());
     Ok(())
+}
+
+fn canonical_live_boot_product_spec(
+    bundle: &LoadedVariantContract,
+    distro_id: &str,
+) -> Result<distro_builder::LiveBootProductSpec> {
+    let product = crate::workflows::parse_product(Some(crate::PRODUCT_LIVE_BOOT))?;
+    let layout = canonical_derived_product_layout(&bundle.contract, product)?;
+    load_live_boot_product_spec(&bundle.repo_root, &bundle.variant_dir, distro_id, layout)
 }

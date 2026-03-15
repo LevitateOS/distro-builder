@@ -1,7 +1,7 @@
 use anyhow::{bail, Context, Result};
-use distro_builder::compat_inputs::build_capability::{
-    ensure_kernel_installed_via_recipe, run_00build_evidence_script, S00BuildEvidenceSpec,
-    S00BuildKernelEnsureOutcome, S00BuildKernelSpec,
+use distro_builder::build_host::{
+    ensure_kernel_preinstalled_via_recipe, run_build_host_evidence_script, BuildHostEvidenceSpec,
+    BuildHostKernelEnsureOutcome, BuildHostKernelSpec,
 };
 use distro_contract::{load_variant_contract_bundle_for_distro_from, require_valid_contract};
 use std::path::Path;
@@ -147,7 +147,7 @@ pub(crate) fn build_one(distro_id: &str, product: BuildProduct) -> Result<()> {
 
     let output_dir = build_layout.output_dir.clone();
 
-    let kernel_spec = S00BuildKernelSpec {
+    let kernel_spec = BuildHostKernelSpec {
         recipe_kernel_script: bundle
             .contract
             .stages
@@ -187,7 +187,7 @@ pub(crate) fn build_one(distro_id: &str, product: BuildProduct) -> Result<()> {
     }
 
     let build_result = (|| -> Result<()> {
-        match ensure_kernel_installed_via_recipe(
+        match ensure_kernel_preinstalled_via_recipe(
             &bundle.repo_root,
             &bundle.variant_dir,
             distro_id,
@@ -196,14 +196,14 @@ pub(crate) fn build_one(distro_id: &str, product: BuildProduct) -> Result<()> {
         )
         .with_context(|| format!("ensuring kernel artifacts for '{distro_id}'"))?
         {
-            S00BuildKernelEnsureOutcome::AlreadyInstalled => {
+            BuildHostKernelEnsureOutcome::AlreadyInstalled => {
                 println!(
                     "[release:iso:{}:{distro_id}] kernel already installed",
                     product.canonical
                 );
             }
         }
-        crate::workflows::ensure_release_iso_via_compatibility_hook(
+        crate::workflows::ensure_release_iso_via_variant_hook(
             &bundle,
             distro_id,
             &kernel_output_dir,
@@ -211,7 +211,7 @@ pub(crate) fn build_one(distro_id: &str, product: BuildProduct) -> Result<()> {
             product,
         )?;
 
-        let evidence_spec = S00BuildEvidenceSpec {
+        let evidence_spec = BuildHostEvidenceSpec {
             script_path: bundle
                 .contract
                 .stages
@@ -241,7 +241,7 @@ pub(crate) fn build_one(distro_id: &str, product: BuildProduct) -> Result<()> {
             iso_filename: iso_filename_for_product(&base_iso_filename, product),
         };
 
-        run_00build_evidence_script(
+        run_build_host_evidence_script(
             &bundle.repo_root,
             &bundle.variant_dir,
             &kernel_output_dir,
@@ -288,7 +288,7 @@ pub(crate) fn build_one(distro_id: &str, product: BuildProduct) -> Result<()> {
                 return Err(err);
             }
             eprintln!(
-                "[release:iso:{}:{distro_id}] warning: failed to persist stage run metadata: {err:#}",
+                "[release:iso:{}:{distro_id}] warning: failed to persist release run metadata: {err:#}",
                 product.canonical
             );
         }
@@ -296,7 +296,7 @@ pub(crate) fn build_one(distro_id: &str, product: BuildProduct) -> Result<()> {
         if build_result.is_ok() {
             crate::run_history::prune_old_runs(
                 &build_layout.root_dir,
-                crate::S00_RUN_RETENTION_COUNT,
+                crate::RELEASE_RUN_RETENTION_COUNT,
             )?;
         }
     }

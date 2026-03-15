@@ -59,8 +59,8 @@ pub mod alpine;
 pub mod artifact;
 pub mod artifact_store;
 pub mod build;
+pub mod build_host;
 pub mod cache;
-pub mod compat_inputs;
 pub mod component;
 pub mod contracts;
 pub mod executor;
@@ -96,9 +96,9 @@ pub use artifact::overlayfs::{build_overlayfs_default, create_overlayfs_erofs};
 pub use artifact::rootfs::{build_erofs_default, create_erofs};
 pub use pipeline::products::{
     load_base_rootfs_product_spec, load_installed_boot_product_spec, load_live_boot_product_spec,
-    load_live_tools_product_spec, prepare_base_rootfs_product, prepare_installed_boot_product,
-    prepare_live_boot_product, prepare_live_tools_product, BaseProductLayout, DerivedProductLayout,
-    OverlayLayout, ParentRootfsInput,
+    load_live_tools_product_spec, materialize_live_boot_source_rootfs, prepare_base_rootfs_product,
+    prepare_installed_boot_product, prepare_live_boot_product, prepare_live_tools_product,
+    BaseProductLayout, DerivedProductLayout, LiveBootProductSpec, OverlayLayout, ParentRootfsInput,
 };
 
 // Re-export process utilities

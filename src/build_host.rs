@@ -2,16 +2,16 @@ use anyhow::Result;
 use std::path::Path;
 
 pub use crate::pipeline::kernel::{
-    EvidenceSpec as S00BuildEvidenceSpec, KernelEnsureOutcome as S00BuildKernelEnsureOutcome,
-    KernelSpec as S00BuildKernelSpec,
+    EvidenceSpec as BuildHostEvidenceSpec, KernelEnsureOutcome as BuildHostKernelEnsureOutcome,
+    KernelSpec as BuildHostKernelSpec,
 };
 
-pub fn check_kernel_installed_via_recipe(
+pub fn check_kernel_preinstalled_via_recipe(
     repo_root: &Path,
     variant_dir: &Path,
     distro_id: &str,
     kernel_output_dir: &Path,
-    spec: &S00BuildKernelSpec,
+    spec: &BuildHostKernelSpec,
 ) -> Result<()> {
     crate::pipeline::kernel::check_kernel_installed_with_recipe(
         repo_root,
@@ -22,13 +22,13 @@ pub fn check_kernel_installed_via_recipe(
     )
 }
 
-pub fn ensure_kernel_installed_via_recipe(
+pub fn ensure_kernel_preinstalled_via_recipe(
     repo_root: &Path,
     variant_dir: &Path,
     distro_id: &str,
     kernel_output_dir: &Path,
-    spec: &S00BuildKernelSpec,
-) -> Result<S00BuildKernelEnsureOutcome> {
+    spec: &BuildHostKernelSpec,
+) -> Result<BuildHostKernelEnsureOutcome> {
     crate::pipeline::kernel::ensure_kernel_preinstalled_with_recipe(
         repo_root,
         variant_dir,
@@ -38,18 +38,18 @@ pub fn ensure_kernel_installed_via_recipe(
     )
 }
 
-pub fn run_00build_evidence_script(
+pub fn run_build_host_evidence_script(
     repo_root: &Path,
     variant_dir: &Path,
     kernel_output_dir: &Path,
-    stage_output_dir: &Path,
-    spec: &S00BuildEvidenceSpec,
+    release_output_dir: &Path,
+    spec: &BuildHostEvidenceSpec,
 ) -> Result<()> {
     crate::pipeline::kernel::run_build_evidence_script(
         repo_root,
         variant_dir,
         kernel_output_dir,
-        stage_output_dir,
+        release_output_dir,
         spec,
     )
 }

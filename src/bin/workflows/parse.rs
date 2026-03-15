@@ -2,22 +2,6 @@ use anyhow::{bail, Context, Result};
 use std::fs;
 use std::path::Path;
 
-const STAGE00_CANONICAL: &str = "00Build";
-const STAGE00_SLUG: &str = "s00_build";
-const STAGE00_DIRNAME: &str = "s00-build";
-const STAGE00_ARTIFACT_TAG: &str = "s00";
-const STAGE00_NATIVE_BUILD_SCRIPT: &str = "build-release.sh";
-const STAGE01_CANONICAL: &str = "01Boot";
-const STAGE01_SLUG: &str = "s01_boot";
-const STAGE01_DIRNAME: &str = "s01-boot";
-const STAGE01_ARTIFACT_TAG: &str = "s01";
-const STAGE01_NATIVE_BUILD_SCRIPT: &str = "boot-release.sh";
-const STAGE02_CANONICAL: &str = "02LiveTools";
-const STAGE02_SLUG: &str = "s02_live_tools";
-const STAGE02_DIRNAME: &str = "s02-live-tools";
-const STAGE02_ARTIFACT_TAG: &str = "s02";
-const STAGE02_NATIVE_BUILD_SCRIPT: &str = "live-tools-release.sh";
-
 pub(crate) fn parse_release_build_command(
     args: Vec<&String>,
     repo_root: &Path,
@@ -138,39 +122,11 @@ pub(crate) fn product_for_logical_name(logical_name: &str) -> Result<crate::Buil
     }
 }
 
-pub(crate) fn compatibility_stage_for_product(
-    product: crate::BuildProduct,
-) -> crate::CompatibilityBuildStage {
-    match product.canonical {
-        crate::PRODUCT_BASE_ROOTFS => crate::CompatibilityBuildStage {
-            canonical: STAGE00_CANONICAL,
-            slug: STAGE00_SLUG,
-            dir_name: STAGE00_DIRNAME,
-            artifact_tag: STAGE00_ARTIFACT_TAG,
-            native_build_script: STAGE00_NATIVE_BUILD_SCRIPT,
-        },
-        crate::PRODUCT_LIVE_BOOT => crate::CompatibilityBuildStage {
-            canonical: STAGE01_CANONICAL,
-            slug: STAGE01_SLUG,
-            dir_name: STAGE01_DIRNAME,
-            artifact_tag: STAGE01_ARTIFACT_TAG,
-            native_build_script: STAGE01_NATIVE_BUILD_SCRIPT,
-        },
-        crate::PRODUCT_LIVE_TOOLS => crate::CompatibilityBuildStage {
-            canonical: STAGE02_CANONICAL,
-            slug: STAGE02_SLUG,
-            dir_name: STAGE02_DIRNAME,
-            artifact_tag: STAGE02_ARTIFACT_TAG,
-            native_build_script: STAGE02_NATIVE_BUILD_SCRIPT,
-        },
-        _ => unreachable!("validated in parse_product"),
-    }
-}
-
 fn product_base_rootfs() -> crate::BuildProduct {
     crate::BuildProduct {
         canonical: crate::PRODUCT_BASE_ROOTFS,
         release_dir_name: crate::PRODUCT_BASE_ROOTFS,
+        release_hook_script_name: Some("build-release.sh"),
         iso_suffix: "base-rootfs",
         live_overlay_dir_name: "live-overlay",
         rootfs_source_pointer_filename: ".live-rootfs-source.path",
@@ -182,6 +138,7 @@ fn product_live_boot() -> crate::BuildProduct {
     crate::BuildProduct {
         canonical: crate::PRODUCT_LIVE_BOOT,
         release_dir_name: crate::PRODUCT_LIVE_BOOT,
+        release_hook_script_name: Some("boot-release.sh"),
         iso_suffix: "live-boot",
         live_overlay_dir_name: "live-overlay",
         rootfs_source_pointer_filename: ".live-rootfs-source.path",
@@ -193,6 +150,7 @@ fn product_live_tools() -> crate::BuildProduct {
     crate::BuildProduct {
         canonical: crate::PRODUCT_LIVE_TOOLS,
         release_dir_name: crate::PRODUCT_LIVE_TOOLS,
+        release_hook_script_name: Some("live-tools-release.sh"),
         iso_suffix: "live-tools",
         live_overlay_dir_name: "live-overlay",
         rootfs_source_pointer_filename: ".live-rootfs-source.path",
@@ -204,6 +162,7 @@ fn product_installed_boot() -> crate::BuildProduct {
     crate::BuildProduct {
         canonical: crate::PRODUCT_INSTALLED_BOOT,
         release_dir_name: crate::PRODUCT_INSTALLED_BOOT,
+        release_hook_script_name: None,
         iso_suffix: "installed-boot",
         live_overlay_dir_name: "boot-overlay",
         rootfs_source_pointer_filename: ".rootfs-source.path",
@@ -284,7 +243,7 @@ mod tests {
 
     #[test]
     fn product_parser_rejects_stage_aliases() {
-        let err = parse_product(Some(STAGE01_CANONICAL)).expect_err("stage alias must be rejected");
+        let err = parse_product(Some("01Boot")).expect_err("stage alias must be rejected");
         assert!(
             err.to_string().contains("unsupported product"),
             "unexpected error: {err:#}"

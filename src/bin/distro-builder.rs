@@ -11,21 +11,13 @@ const PRODUCT_LIVE_BOOT: &str = "live-boot";
 const PRODUCT_LIVE_TOOLS: &str = "live-tools";
 const PRODUCT_INSTALLED_BOOT: &str = "installed-boot";
 const DEFAULT_DISTRO_ID: &str = "levitate";
-const S00_RUN_RETENTION_COUNT: usize = 5;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct CompatibilityBuildStage {
-    canonical: &'static str,
-    slug: &'static str,
-    dir_name: &'static str,
-    artifact_tag: &'static str,
-    native_build_script: &'static str,
-}
+const RELEASE_RUN_RETENTION_COUNT: usize = 5;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct BuildProduct {
     canonical: &'static str,
     release_dir_name: &'static str,
+    release_hook_script_name: Option<&'static str>,
     iso_suffix: &'static str,
     live_overlay_dir_name: &'static str,
     rootfs_source_pointer_filename: &'static str,

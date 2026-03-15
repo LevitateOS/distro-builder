@@ -4,16 +4,15 @@ use std::process::Command;
 use anyhow::{bail, Context, Result};
 use distro_contract::LoadedVariantContract;
 
-use crate::{BuildOutputLayout, BuildProduct, CompatibilityBuildStage};
+use crate::{BuildOutputLayout, BuildProduct};
 
-pub(crate) fn ensure_release_iso_via_compatibility_hook(
+pub(crate) fn ensure_release_iso_via_variant_hook(
     bundle: &LoadedVariantContract,
     distro_id: &str,
     kernel_output_dir: &Path,
     build_layout: &BuildOutputLayout,
     product: BuildProduct,
 ) -> Result<()> {
-    let compat_stage = crate::workflows::compatibility_stage_for_product(product);
     let output_dir = &build_layout.output_dir;
     let live_uki = &bundle.contract.transforms.live_uki;
     let [live_uki_filename, emergency_uki_filename, debug_uki_filename] =
@@ -54,7 +53,13 @@ pub(crate) fn ensure_release_iso_via_compatibility_hook(
     let iso_filename =
         crate::workflows::build::iso_filename_for_product(&base_iso_filename, product);
     let iso_path = output_dir.join(&iso_filename);
-    let native_build = bundle.variant_dir.join(compat_stage.native_build_script);
+    let release_hook_script = product.release_hook_script_name.ok_or_else(|| {
+        anyhow::anyhow!(
+            "missing canonical release hook for product '{}': this product is not a release ISO target",
+            product.canonical
+        )
+    })?;
+    let native_build = bundle.variant_dir.join(release_hook_script);
     if !native_build.is_file() {
         bail!(
             "missing variant release build hook for product '{}' on '{}': {}\n\
@@ -62,7 +67,7 @@ pub(crate) fn ensure_release_iso_via_compatibility_hook(
             product.canonical,
             distro_id,
             native_build.display(),
-            compat_stage.native_build_script,
+            release_hook_script,
             bundle.variant_dir.display()
         );
     }
@@ -100,7 +105,9 @@ pub(crate) fn ensure_release_iso_via_compatibility_hook(
         .env("ISO_PATH", &iso_path)
         .env("ISO_FILENAME", &iso_filename)
         .env("PRODUCT_NAME", product.canonical)
-        .env("BUILD_TARGET_LABEL", product.issue_banner_label)
+        .env("PRODUCT_DIRNAME", product.release_dir_name)
+        .env("PRODUCT_ARTIFACT_TAG", product.release_dir_name)
+        .env("PRODUCT_BOOT_LABEL", product.issue_banner_label)
         .env("ROOTFS_FILENAME", &rootfs_filename)
         .env("INITRAMFS_LIVE_FILENAME", &initramfs_live_filename)
         .env("LIVE_OVERLAY_DIRNAME", product.live_overlay_dir_name)
@@ -109,19 +116,15 @@ pub(crate) fn ensure_release_iso_via_compatibility_hook(
             "ROOTFS_SOURCE_POINTER_FILENAME",
             product.rootfs_source_pointer_filename,
         )
-        .env("RUN_ROOT_DIR", &build_layout.root_dir)
-        .env("RUN_OUTPUT_DIR", output_dir)
-        .env("RUN_OUTPUT_ROOT", output_dir)
+        .env("RELEASE_ROOT_DIR", &build_layout.root_dir)
+        .env("RELEASE_RUN_DIR", output_dir)
+        .env("RELEASE_OUTPUT_DIR", output_dir)
         .env("BUILD_RUN_ID", build_layout.run_id.as_deref().unwrap_or(""))
         .env("DISTRO_BUILDER_BIN", &distro_builder_bin)
         .env("KERNEL_OUTPUT_DIR", kernel_output_dir)
-        .env("COMPAT_BUILD_STAGE_NAME", compat_stage.canonical)
-        .env("COMPAT_BUILD_STAGE_SLUG", compat_stage.slug)
-        .env("COMPAT_BUILD_STAGE_DIRNAME", compat_stage.dir_name)
-        .env("COMPAT_STAGE_ARTIFACT_TAG", compat_stage.artifact_tag)
         .env(
-            "COMPAT_STAGE_REQUIRED_KERNEL_CMDLINE",
-            stage_required_kernel_cmdline(bundle, compat_stage),
+            "PRODUCT_REQUIRED_KERNEL_CMDLINE",
+            product_required_kernel_cmdline(bundle, product),
         )
         .status()
         .with_context(|| {
@@ -148,12 +151,12 @@ pub(crate) fn ensure_release_iso_via_compatibility_hook(
     Ok(())
 }
 
-fn stage_required_kernel_cmdline(
+fn product_required_kernel_cmdline(
     bundle: &LoadedVariantContract,
-    compat_stage: CompatibilityBuildStage,
+    product: BuildProduct,
 ) -> String {
-    match compat_stage.slug {
-        "s01_boot" | "s02_live_tools" => bundle
+    match product.canonical {
+        crate::PRODUCT_LIVE_BOOT | crate::PRODUCT_LIVE_TOOLS => bundle
             .contract
             .stages
             .stage_01_live_boot

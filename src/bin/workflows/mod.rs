@@ -1,10 +1,10 @@
 mod artifacts;
 mod build;
 mod commands;
-mod compat_release;
 mod layout;
 mod parse;
 mod prepared_products;
+mod release_hook;
 
 pub(crate) use artifacts::{
     build_overlayfs_erofs, build_prepared_product_erofs_cmd, build_rootfs_erofs,
@@ -16,13 +16,13 @@ pub(crate) use build::{
 pub(crate) use commands::{
     dispatch_non_release_command, is_release_build_invocation, run_release_build_command,
 };
-pub(crate) use compat_release::ensure_release_iso_via_compatibility_hook;
 pub(crate) use layout::locate_repo_root;
 pub(crate) use parse::{
-    compatibility_stage_for_product, discover_distro_ids, parse_product,
-    parse_release_build_command, parse_release_product, product_for_logical_name,
+    discover_distro_ids, parse_product, parse_release_build_command, parse_release_product,
+    product_for_logical_name,
 };
 pub(crate) use prepared_products::{
     canonical_initramfs_live_filename, canonical_iso_filename, canonical_overlay_erofs_filename,
     canonical_rootfs_erofs_filename,
 };
+pub(crate) use release_hook::ensure_release_iso_via_variant_hook;

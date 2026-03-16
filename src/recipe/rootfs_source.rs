@@ -109,7 +109,7 @@ pub fn preseed_rootfs_source_dvd(
     })?;
 
     let envs = if refresh {
-        vec![("STAGE01_SOURCE_FORCE_REFRESH", "1")]
+        vec![("ROOTFS_SOURCE_FORCE_REFRESH", "1")]
     } else {
         Vec::new()
     };

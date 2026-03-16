@@ -1,4 +1,4 @@
-// Stage 01 RPM/DVD source recipe build dependencies
+// Canonical RPM/DVD source recipe build dependencies
 //
 // Provides: 7zz (as 7z)
 // All downloaded/built from source by recipe — no system package manager.
@@ -6,8 +6,8 @@
 // - 7zz: static binary from 7-zip.org
 
 let ctx = #{
-    description: "Stage 01 RPM/DVD source build dependencies",
-    name: "stage01-dvd-deps",
+    description: "Canonical RPM/DVD source build dependencies",
+    name: "dvd-source-deps",
     sevenz_url: "https://7-zip.org/a/7z2501-linux-x64.tar.xz",
 };
 

@@ -619,10 +619,10 @@ fn install_bun_docs_tui_payload(
     rootfs_source_dir: &Path,
     docs_cmd_path: &Path,
 ) -> Result<()> {
-    let docs_app_dir = repo_root.join("tui/apps/s02-live-tools/install-docs");
+    let docs_app_dir = repo_root.join("tui/apps/live-tools/install-docs");
     if !docs_app_dir.is_dir() {
         bail!(
-            "live install docs app source missing at '{}'. Expected workspace path 'tui/apps/s02-live-tools/install-docs'.",
+            "live install docs app source missing at '{}'. Expected workspace path 'tui/apps/live-tools/install-docs'.",
             docs_app_dir.display()
         );
     }

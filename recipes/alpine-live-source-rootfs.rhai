@@ -1,9 +1,9 @@
-// Alpine Stage 01 rootfs source producer for OpenRC variants.
+// Alpine live rootfs source producer for OpenRC variants.
 //
 // Produces:
 // - BUILD_DIR/rootfs
 //
-// This recipe intentionally keeps all outputs under BUILD_DIR so Stage 01 can
+// This recipe intentionally keeps all outputs under BUILD_DIR so live boot can
 // consume it through non-legacy rootfs_source wiring.
 // Stage builds never download/redownload Alpine assets.
 
@@ -13,7 +13,7 @@ fn _work_root(build_dir) {
 
 fn _downloads_dir(build_dir) {
     let parent = dirname(build_dir);
-    if basename(parent) == "stage01-rootfs-provider" {
+    if basename(parent) == "rootfs-source-provider" {
         return join_path(dirname(parent), "downloads");
     }
     join_path(parent, "downloads")
@@ -33,15 +33,15 @@ let ctx = #{
     apk_tools_preseed_path: join_path(_downloads_dir(BUILD_DIR), "apk-tools-static-3.0.5-r0.apk"),
     apk_tools_sha256: "6e832468b4efebd6ab7245e4989ca38b6e4589a9772d52a03b58c690a7aeacbe",
     apk_tools_version: "3.0.5-r0",
-    description: "Alpine Stage 01 rootfs source producer",
+    description: "Alpine live rootfs source producer",
     iso_path: "",
     iso_preseed_path: join_path(_downloads_dir(BUILD_DIR), "alpine-extended-3.23.2-x86_64.iso"),
     iso_sha256: "8d50854936dba58e7616ac3bfa07ad67dac0347305fec1cba6d288cf5df1577d",
-    name: "alpine-stage01-rootfs",
+    name: "alpine-live-source-rootfs",
     profile: _default_profile(BUILD_DIR),
     release_branch: "v3.23",
     rootfs_path: "",
-    rootfs_recipe_version: "alpine-stage01-v5",
+    rootfs_recipe_version: "alpine-live-source-v5",
     trust_dir: _downloads_dir(BUILD_DIR),
 };
 
@@ -54,7 +54,7 @@ fn _apk_tools_name(ctx) {
 }
 
 fn _verify_marker_path(trust_dir) {
-    join_path(trust_dir, ".alpine-stage01-preseed.marker")
+    join_path(trust_dir, ".alpine-source-preseed.marker")
 }
 
 fn _fingerprint(path) {
@@ -121,7 +121,7 @@ fn _require_trusted_preseed_assets(ctx, remediation) {
         ctx.apk_tools_preseed_path,
         ctx.apk_tools_sha256
     ) {
-        throw "Alpine Stage 01 trust marker missing/stale under '" + ctx.trust_dir + "'.\n" +
+        throw "Alpine rootfs source trust marker missing/stale under '" + ctx.trust_dir + "'.\n" +
               remediation;
     }
 }
@@ -145,7 +145,7 @@ fn _profile_packages(profile) {
 }
 
 fn _network_interfaces() {
-    "# /etc/network/interfaces - Stage 01 OpenRC live\n" +
+    "# /etc/network/interfaces - OpenRC live source boot\n" +
     "auto lo\n" +
     "iface lo inet loopback\n\n" +
     "# QEMU slirp default interface\n" +
@@ -154,7 +154,7 @@ fn _network_interfaces() {
 }
 
 fn _rootfs_marker(rootfs) {
-    join_path(rootfs, ".stage01-rootfs.recipe-version")
+    join_path(rootfs, ".source-rootfs.recipe-version")
 }
 
 fn _resolve_apk_static(apk_tools_dir) {
@@ -233,7 +233,7 @@ fn _normalize_rootfs_permissions(rootfs, context) {
         return;
     }
 
-    // Stage 01 rootfs is copied via rsync; source files must be owner-readable.
+    // The source rootfs is copied via rsync; source files must be owner-readable.
     let chmod_cmd = "chmod -R u+rX '" + rootfs + "'";
     if shell_status(chmod_cmd) != 0 {
         throw "failed to normalize rootfs permissions during " + context +
@@ -248,7 +248,7 @@ fn _normalize_rootfs_permissions(rootfs, context) {
     }
 }
 
-fn _ensure_openrc_stage01_completeness(rootfs) {
+fn _ensure_openrc_live_source_completeness(rootfs) {
     mkdir(join_path(rootfs, "usr/share/empty.sshd"));
     shell("chmod 755 '" + join_path(rootfs, "usr/share/empty.sshd") + "'");
     write_file(join_path(rootfs, "etc/locale.conf"), "LANG=C.UTF-8\n");
@@ -259,7 +259,7 @@ fn _ensure_openrc_stage01_completeness(rootfs) {
 }
 
 fn is_acquired(ctx) {
-    let remediation = "Run 'cargo run -p distro-builder --bin distro-builder -- artifact preseed-stage01-source " + ctx.profile + " --refresh'";
+    let remediation = "Run 'cargo run -p distro-builder --bin distro-builder -- artifact preseed-rootfs-source " + ctx.profile + " --refresh'";
     let iso_path = join_path(BUILD_DIR, _iso_name(ctx));
     _require_preseeded_asset(iso_path, ctx.iso_preseed_path, "Alpine ISO", remediation);
     _require_trusted_preseed_assets(ctx, remediation);
@@ -283,7 +283,7 @@ fn is_acquired(ctx) {
 }
 
 fn acquire(ctx) {
-    let remediation = "Run 'cargo run -p distro-builder --bin distro-builder -- artifact preseed-stage01-source " + ctx.profile + " --refresh'";
+    let remediation = "Run 'cargo run -p distro-builder --bin distro-builder -- artifact preseed-rootfs-source " + ctx.profile + " --refresh'";
     mkdir(BUILD_DIR);
     let iso_dest = join_path(BUILD_DIR, _iso_name(ctx));
     _require_preseeded_asset(iso_dest, ctx.iso_preseed_path, "Alpine ISO", remediation);
@@ -353,7 +353,7 @@ fn build(ctx) {
         _normalize_rootfs_permissions(rootfs, "cached rootfs preflight");
     }
     if _rootfs_valid(rootfs, ctx.rootfs_recipe_version) {
-        log("Stage 01 Alpine rootfs already current; skipping rebuild");
+        log("Alpine live source rootfs already current; skipping rebuild");
         ctx.rootfs_path = rootfs;
         return ctx;
     }
@@ -372,12 +372,12 @@ fn build(ctx) {
     write_file(join_path(rootfs, "etc/apk/repositories"), repositories);
 
     let packages = _profile_packages(ctx.profile);
-    log("Installing Alpine Stage 01 package baseline (" + ctx.profile + ")...");
+    log("Installing Alpine live source package baseline (" + ctx.profile + ")...");
     let apk_cmd = "'" + ctx.apk_static_path + "' --root '" + rootfs + "' " +
         "--usermode --initdb --no-progress --allow-untrusted add " + packages;
     shell(apk_cmd);
     _normalize_rootfs_permissions(rootfs, "post-apk install");
-    _ensure_openrc_stage01_completeness(rootfs);
+    _ensure_openrc_live_source_completeness(rootfs);
 
     if !is_file(join_path(rootfs, "bin/busybox")) {
         throw "invalid rootfs: missing /bin/busybox after apk install";

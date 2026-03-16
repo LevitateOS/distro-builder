@@ -1,4 +1,4 @@
-// Generic Stage 01 rootfs source producer for custom distro payloads.
+// Generic rootfs source producer for custom distro payloads.
 //
 // Produces:
 // - BUILD_DIR/rootfs (copied from CUSTOM_ROOTFS_DIR)
@@ -7,8 +7,8 @@
 // - CUSTOM_ROOTFS_DIR (absolute or repo-relative path, resolved by caller)
 
 let ctx = #{
-    name: "custom-stage01-rootfs",
-    description: "Custom rootfs producer for Stage 01",
+    name: "custom-source-rootfs",
+    description: "Custom rootfs source producer",
     source_rootfs: CUSTOM_ROOTFS_DIR,
     rootfs_path: "",
 };

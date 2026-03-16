@@ -26,7 +26,7 @@ use crate::pipeline::plan::{
 };
 use crate::pipeline::scripts::install_stage_test_scripts;
 use crate::pipeline::source::{
-    cleanup_legacy_provider_dir, materialize_source_rootfs, S01RootfsSourcePolicy,
+    cleanup_legacy_provider_dir, materialize_source_rootfs, RootfsSourcePolicy,
 };
 use crate::recipe::alpine_rootfs_source::is_alpine_rootfs_source_recipe;
 
@@ -100,7 +100,7 @@ pub struct LiveBootProductSpec {
     live_overlay: OverlayLayout,
     add_plan: ProducerPlan,
     required_services: Vec<String>,
-    rootfs_source_policy: Option<S01RootfsSourcePolicy>,
+    rootfs_source_policy: Option<RootfsSourcePolicy>,
     pub overlay: S01OverlayPolicy,
 }
 
@@ -112,12 +112,12 @@ impl LiveBootProductSpec {
     pub fn uses_rpm_dvd_rootfs_source(&self) -> bool {
         matches!(
             self.rootfs_source_policy,
-            Some(S01RootfsSourcePolicy::RecipeRpmDvd { .. })
+            Some(RootfsSourcePolicy::RecipeRpmDvd { .. })
         )
     }
 
     pub fn rpm_dvd_preseed_recipe_script(&self) -> Option<&Path> {
-        let Some(S01RootfsSourcePolicy::RecipeRpmDvd {
+        let Some(RootfsSourcePolicy::RecipeRpmDvd {
             preseed_recipe_script,
             ..
         }) = &self.rootfs_source_policy
@@ -127,8 +127,8 @@ impl LiveBootProductSpec {
         Some(preseed_recipe_script.as_path())
     }
 
-    pub fn uses_alpine_stage01_rootfs_source(&self) -> bool {
-        let Some(S01RootfsSourcePolicy::RecipeCustom { recipe_script, .. }) =
+    pub fn uses_alpine_live_source_rootfs(&self) -> bool {
+        let Some(RootfsSourcePolicy::RecipeCustom { recipe_script, .. }) =
             &self.rootfs_source_policy
         else {
             return false;
@@ -159,7 +159,7 @@ pub struct InstalledBootProductSpec {
     parent_rootfs: ParentRootfsInput,
     live_overlay_dir_name: String,
     add_plan: ProducerPlan,
-    rootfs_source_policy: Option<S01RootfsSourcePolicy>,
+    rootfs_source_policy: Option<RootfsSourcePolicy>,
 }
 
 pub fn load_base_rootfs_product_spec(
@@ -720,7 +720,7 @@ ux_docs_frontend = "bun_bundle"
 [ring2_runtime_profiles.live_tools_ux]
 [[ring2_runtime_profiles.live_tools_ux.actions]]
 kind = "rootfs_workspace_binary"
-package = "stage02-split-pane"
+package = "install-split-pane"
 binary = "levitate-install-docs-split"
 destination = "usr/local/bin/levitate-install-docs-split"
 
@@ -735,7 +735,7 @@ description = "Kernel image and modules staging product"
 
 [ring3_sources.rootfs_source]
 kind = "recipe_rpm_dvd"
-recipe_script = "distro-builder/recipes/fedora-stage01-rootfs.rhai"
+recipe_script = "distro-builder/recipes/fedora-dvd-source-rootfs.rhai"
 preseed_recipe_script = "distro-builder/recipes/fedora-preseed-iso.rhai"
 "#,
         );

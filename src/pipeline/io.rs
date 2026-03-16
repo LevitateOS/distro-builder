@@ -7,18 +7,18 @@ pub(crate) fn create_unique_output_dir(output_dir: &Path, logical_name: &Path) -
     let stem = logical_name
         .file_name()
         .and_then(|part| part.to_str())
-        .unwrap_or("sxx-rootfs-source");
+        .unwrap_or("rootfs-source");
     let path = output_dir.join(stem);
     if path.exists() {
         fs::remove_dir_all(&path).with_context(|| {
             format!(
-                "removing existing stage rootfs directory before recreation '{}'",
+                "removing existing product rootfs directory before recreation '{}'",
                 path.display()
             )
         })?;
     }
     fs::create_dir_all(&path)
-        .with_context(|| format!("creating stage rootfs directory '{}'", path.display()))?;
+        .with_context(|| format!("creating product rootfs directory '{}'", path.display()))?;
     Ok(path)
 }
 
@@ -53,7 +53,7 @@ pub(crate) fn rename_live_overlay_dir(
     if target_overlay.exists() {
         fs::remove_dir_all(&target_overlay).with_context(|| {
             format!(
-                "removing pre-existing stage live overlay '{}'",
+                "removing pre-existing live overlay '{}'",
                 target_overlay.display()
             )
         })?;

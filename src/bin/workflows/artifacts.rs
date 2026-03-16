@@ -292,7 +292,7 @@ pub(crate) fn preseed_rootfs_source_cmd(distro_id: &str, refresh: bool) -> Resul
         return Ok(());
     }
 
-    if live_boot_spec.uses_alpine_stage01_rootfs_source() {
+    if live_boot_spec.uses_alpine_live_source_rootfs() {
         let output = preseed_alpine_rootfs_source_assets(&bundle.repo_root, distro_id, refresh)
             .with_context(|| format!("preseeding rootfs source for '{}'", distro_id))?;
         let trust_dir = output

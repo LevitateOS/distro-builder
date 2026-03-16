@@ -11,14 +11,14 @@ use crate::pipeline::paths::resolve_repo_path;
 use crate::pipeline::plan::RootfsProducer;
 #[cfg(test)]
 use crate::pipeline::source::load_rootfs_source_policy;
-use crate::pipeline::source::{rootfs_source_policy_from_contract, S01RootfsSourcePolicy};
+use crate::pipeline::source::{rootfs_source_policy_from_contract, RootfsSourcePolicy};
 use crate::InittabVariant;
 
 #[derive(Debug, Clone)]
 pub(crate) struct S01LoadedConfig {
     pub(crate) os_name: String,
     pub(crate) required_services: Vec<String>,
-    pub(crate) rootfs_source_policy: Option<S01RootfsSourcePolicy>,
+    pub(crate) rootfs_source_policy: Option<RootfsSourcePolicy>,
     pub(crate) overlay: S01OverlayPolicy,
     pub(crate) payload_producers: Vec<RootfsProducer>,
 }
@@ -335,7 +335,7 @@ fn load_boot_payload_config_with_rootfs_source_policy(
     repo_root: &Path,
     variant_dir: &Path,
     distro_id: &str,
-    rootfs_source_policy: Option<S01RootfsSourcePolicy>,
+    rootfs_source_policy: Option<RootfsSourcePolicy>,
 ) -> Result<S01LoadedConfig> {
     let os_name = load_identity_os_name(variant_dir)?;
     let required_services = load_required_services(variant_dir)?;
@@ -984,7 +984,7 @@ fn normalize_services(raw_services: Vec<String>) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pipeline::source::S01RootfsSourcePolicy;
+    use crate::pipeline::source::RootfsSourcePolicy;
     use std::path::Component;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -1014,17 +1014,17 @@ mod tests {
         assert!(result.is_err());
     }
 
-    fn assert_uses_fedora_stage01_recipes(repo_root: &Path, distro_id: &str) {
+    fn assert_uses_fedora_dvd_source_recipes(repo_root: &Path, distro_id: &str) {
         let variant_dir = repo_root.join(format!("distro-variants/{distro_id}"));
         let loaded = load_boot_config(repo_root, &variant_dir, distro_id)
             .unwrap_or_else(|err| panic!("load {distro_id} live-boot config: {err:#}"));
         match loaded.rootfs_source_policy {
-            Some(S01RootfsSourcePolicy::RecipeRpmDvd {
+            Some(RootfsSourcePolicy::RecipeRpmDvd {
                 recipe_script,
                 preseed_recipe_script,
             }) => {
                 assert!(
-                    recipe_script.ends_with("distro-builder/recipes/fedora-stage01-rootfs.rhai"),
+                    recipe_script.ends_with("distro-builder/recipes/fedora-dvd-source-rootfs.rhai"),
                     "unexpected live-boot recipe: {}",
                     recipe_script.display()
                 );
@@ -1040,21 +1040,21 @@ mod tests {
     }
 
     #[test]
-    fn levitate_boot_config_uses_fedora_stage01_recipes() {
+    fn levitate_boot_config_uses_fedora_dvd_source_recipes() {
         let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .expect("repo root")
             .to_path_buf();
-        assert_uses_fedora_stage01_recipes(&repo_root, "levitate");
+        assert_uses_fedora_dvd_source_recipes(&repo_root, "levitate");
     }
 
     #[test]
-    fn ralph_boot_config_uses_fedora_stage01_recipes() {
+    fn ralph_boot_config_uses_fedora_dvd_source_recipes() {
         let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .expect("repo root")
             .to_path_buf();
-        assert_uses_fedora_stage01_recipes(&repo_root, "ralph");
+        assert_uses_fedora_dvd_source_recipes(&repo_root, "ralph");
     }
 
     fn temp_repo_root(test_name: &str) -> PathBuf {
@@ -1262,7 +1262,7 @@ required_live_services = ["sshd"]
         ));
         assert!(matches!(
             loaded.rootfs_source_policy,
-            Some(S01RootfsSourcePolicy::RecipeRpmDvd { .. })
+            Some(RootfsSourcePolicy::RecipeRpmDvd { .. })
         ));
         assert!(!loaded.payload_producers.is_empty());
         assert!(loaded
@@ -1384,8 +1384,8 @@ required_live_services = ["sshd"]
             }
 
             match (&loaded.rootfs_source_policy, distro_id) {
-                (Some(S01RootfsSourcePolicy::RecipeRpmDvd { .. }), "levitate" | "ralph") => {}
-                (Some(S01RootfsSourcePolicy::RecipeCustom { .. }), "acorn" | "iuppiter") => {}
+                (Some(RootfsSourcePolicy::RecipeRpmDvd { .. }), "levitate" | "ralph") => {}
+                (Some(RootfsSourcePolicy::RecipeCustom { .. }), "acorn" | "iuppiter") => {}
                 (other, _) => panic!("unexpected rootfs source policy for {distro_id}: {other:?}"),
             }
         }

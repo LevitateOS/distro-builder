@@ -1,4 +1,4 @@
-// Canonical Alpine Stage 01 preseed recipe.
+// Canonical Alpine rootfs source preseed recipe.
 //
 // This recipe performs explicit trusted acquisition into the canonical cache:
 //   BUILD_DIR/
@@ -19,11 +19,11 @@ let ctx = #{
     apk_tools_path: join_path(BUILD_DIR, "apk-tools-static-3.0.5-r0.apk"),
     apk_tools_sha256: "6e832468b4efebd6ab7245e4989ca38b6e4589a9772d52a03b58c690a7aeacbe",
     apk_tools_version: "3.0.5-r0",
-    description: "Canonical Alpine Stage 01 preseed",
+    description: "Canonical Alpine rootfs source preseed",
     iso_path: join_path(BUILD_DIR, "alpine-extended-3.23.2-x86_64.iso"),
     iso_sha256: "8d50854936dba58e7616ac3bfa07ad67dac0347305fec1cba6d288cf5df1577d",
     iso_version: "3.23.2",
-    name: "alpine-preseed-stage01-assets",
+    name: "alpine-preseed-source-assets",
     release_branch: "v3.23",
     trust_dir: BUILD_DIR,
 };
@@ -51,7 +51,7 @@ fn _apk_tools_url(ctx) {
 }
 
 fn _verify_marker_path(trust_dir) {
-    join_path(trust_dir, ".alpine-stage01-preseed.marker")
+    join_path(trust_dir, ".alpine-source-preseed.marker")
 }
 
 fn _fingerprint(path) {
@@ -100,15 +100,15 @@ fn is_acquired(ctx) {
         throw "forced refresh";
     }
     if !is_file(ctx.iso_path) {
-        throw "Alpine Stage 01 ISO missing at " + ctx.iso_path;
+        throw "Alpine rootfs source ISO missing at " + ctx.iso_path;
     }
     if !is_file(ctx.apk_tools_path) {
-        throw "Alpine Stage 01 apk-tools package missing at " + ctx.apk_tools_path;
+        throw "Alpine rootfs source apk-tools package missing at " + ctx.apk_tools_path;
     }
     verify_sha256(ctx.iso_path, ctx.iso_sha256);
     verify_sha256(ctx.apk_tools_path, ctx.apk_tools_sha256);
     if !_marker_is_valid(ctx) {
-        throw "Alpine Stage 01 trust marker missing/stale under " + ctx.trust_dir;
+        throw "Alpine rootfs source trust marker missing/stale under " + ctx.trust_dir;
     }
     ctx
 }
@@ -119,7 +119,7 @@ fn acquire(ctx) {
     _ensure_parent_dir(ctx.apk_tools_path);
 
     if _refresh_requested() {
-        log("ALPINE_FORCE_REFRESH=1: removing existing Alpine Stage 01 preseed assets");
+        log("ALPINE_FORCE_REFRESH=1: removing existing Alpine rootfs source preseed assets");
         if is_file(ctx.iso_path) { rm(ctx.iso_path); }
         if is_file(ctx.apk_tools_path) { rm(ctx.apk_tools_path); }
         _remove_marker(ctx);
@@ -156,15 +156,15 @@ fn is_built(ctx) {
         throw "forced refresh";
     }
     if !is_file(ctx.iso_path) {
-        throw "Alpine Stage 01 ISO missing at " + ctx.iso_path;
+        throw "Alpine rootfs source ISO missing at " + ctx.iso_path;
     }
     if !is_file(ctx.apk_tools_path) {
-        throw "Alpine Stage 01 apk-tools package missing at " + ctx.apk_tools_path;
+        throw "Alpine rootfs source apk-tools package missing at " + ctx.apk_tools_path;
     }
     verify_sha256(ctx.iso_path, ctx.iso_sha256);
     verify_sha256(ctx.apk_tools_path, ctx.apk_tools_sha256);
     if !_marker_is_valid(ctx) {
-        throw "Alpine Stage 01 trust marker missing/stale under " + ctx.trust_dir;
+        throw "Alpine rootfs source trust marker missing/stale under " + ctx.trust_dir;
     }
     ctx
 }
@@ -175,13 +175,13 @@ fn build(ctx) {
 
 fn is_installed(ctx) {
     if !is_file(ctx.iso_path) {
-        throw "Alpine Stage 01 ISO missing at " + ctx.iso_path;
+        throw "Alpine rootfs source ISO missing at " + ctx.iso_path;
     }
     if !is_file(ctx.apk_tools_path) {
-        throw "Alpine Stage 01 apk-tools package missing at " + ctx.apk_tools_path;
+        throw "Alpine rootfs source apk-tools package missing at " + ctx.apk_tools_path;
     }
     if !_marker_is_valid(ctx) {
-        throw "Alpine Stage 01 trust marker missing/stale under " + ctx.trust_dir;
+        throw "Alpine rootfs source trust marker missing/stale under " + ctx.trust_dir;
     }
     ctx
 }

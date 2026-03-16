@@ -12,7 +12,7 @@ use crate::pipeline::plan::ensure_non_legacy_rootfs_source;
 use crate::recipe::rootfs_source::{materialize_rootfs_from_recipe, RootfsSourceRecipeSpec};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum S01RootfsSourcePolicy {
+pub(crate) enum RootfsSourcePolicy {
     RecipeRpmDvd {
         recipe_script: PathBuf,
         preseed_recipe_script: PathBuf,
@@ -26,7 +26,7 @@ pub(crate) enum S01RootfsSourcePolicy {
 #[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct S01RootfsSourceToml {
+pub(crate) struct RootfsSourceToml {
     kind: String,
     recipe_script: String,
     preseed_recipe_script: Option<String>,
@@ -46,14 +46,14 @@ struct Ring3SourcesToml {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Ring3SourcesSectionToml {
-    rootfs_source: Option<S01RootfsSourceToml>,
+    rootfs_source: Option<RootfsSourceToml>,
 }
 
 #[cfg(test)]
 pub(crate) fn load_rootfs_source_policy(
     repo_root: &Path,
     variant_dir: &Path,
-) -> Result<Option<S01RootfsSourcePolicy>> {
+) -> Result<Option<RootfsSourcePolicy>> {
     let ring3_config_path = variant_dir.join("ring3-sources.toml");
     if !ring3_config_path.is_file() {
         bail!(
@@ -89,8 +89,8 @@ pub(crate) fn load_rootfs_source_policy(
 pub(crate) fn parse_rootfs_source_policy(
     repo_root: &Path,
     config_path: &Path,
-    source: Option<S01RootfsSourceToml>,
-) -> Result<Option<S01RootfsSourcePolicy>> {
+    source: Option<RootfsSourceToml>,
+) -> Result<Option<RootfsSourcePolicy>> {
     let Some(source) = source else {
         return Ok(None);
     };
@@ -105,14 +105,14 @@ pub(crate) fn parse_rootfs_source_policy(
                     config_path.display()
                 ),
             };
-            Ok(Some(S01RootfsSourcePolicy::RecipeRpmDvd {
+            Ok(Some(RootfsSourcePolicy::RecipeRpmDvd {
                 recipe_script,
                 preseed_recipe_script,
             }))
         }
         "recipe_custom" => {
             let recipe_script = resolve_repo_path(repo_root, source.recipe_script.trim());
-            Ok(Some(S01RootfsSourcePolicy::RecipeCustom {
+            Ok(Some(RootfsSourcePolicy::RecipeCustom {
                 recipe_script,
                 defines: source.defines.unwrap_or_default(),
             }))
@@ -128,7 +128,7 @@ pub(crate) fn parse_rootfs_source_policy(
 pub(crate) fn rootfs_source_policy_from_contract(
     repo_root: &Path,
     contract: &ConformanceContract,
-) -> Result<Option<S01RootfsSourcePolicy>> {
+) -> Result<Option<RootfsSourcePolicy>> {
     Ok(Some(rootfs_source_policy_from_source_contract(
         repo_root,
         &contract.sources.rootfs_source,
@@ -138,7 +138,7 @@ pub(crate) fn rootfs_source_policy_from_contract(
 fn rootfs_source_policy_from_source_contract(
     repo_root: &Path,
     source: &RootfsSourceContract,
-) -> Result<S01RootfsSourcePolicy> {
+) -> Result<RootfsSourcePolicy> {
     match source.kind {
         RootfsSourceKind::RecipeRpmDvd => {
             let recipe_script = resolve_repo_path(repo_root, source.recipe_script.trim());
@@ -147,12 +147,12 @@ fn rootfs_source_policy_from_source_contract(
                     "invalid canonical Ring 3 contract: sources.rootfs_source.preseed_recipe_script is required for kind='recipe_rpm_dvd'"
                 );
             };
-            Ok(S01RootfsSourcePolicy::RecipeRpmDvd {
+            Ok(RootfsSourcePolicy::RecipeRpmDvd {
                 recipe_script,
                 preseed_recipe_script: resolve_repo_path(repo_root, preseed_recipe_script.trim()),
             })
         }
-        RootfsSourceKind::RecipeCustom => Ok(S01RootfsSourcePolicy::RecipeCustom {
+        RootfsSourceKind::RecipeCustom => Ok(RootfsSourcePolicy::RecipeCustom {
             recipe_script: resolve_repo_path(repo_root, source.recipe_script.trim()),
             defines: source.defines.clone(),
         }),
@@ -162,11 +162,12 @@ fn rootfs_source_policy_from_source_contract(
 pub(crate) fn materialize_source_rootfs(
     repo_root: &Path,
     distro_id: &str,
-    source_policy: &Option<S01RootfsSourcePolicy>,
+    source_policy: &Option<RootfsSourcePolicy>,
 ) -> Result<PathBuf> {
     match source_policy {
-        Some(S01RootfsSourcePolicy::RecipeRpmDvd { recipe_script, .. }) => {
-            let build_dir = rootfs_provider_recipe_work_dir(repo_root, distro_id, recipe_script)?;
+        Some(RootfsSourcePolicy::RecipeRpmDvd { recipe_script, .. }) => {
+            let build_dir =
+                rootfs_source_provider_recipe_work_dir(repo_root, distro_id, recipe_script)?;
             fs::create_dir_all(&build_dir).with_context(|| {
                 format!(
                     "creating rootfs source recipe provider directory '{}'",
@@ -190,11 +191,12 @@ pub(crate) fn materialize_source_rootfs(
             ensure_non_legacy_rootfs_source(&source_rootfs_dir)?;
             Ok(source_rootfs_dir)
         }
-        Some(S01RootfsSourcePolicy::RecipeCustom {
+        Some(RootfsSourcePolicy::RecipeCustom {
             recipe_script,
             defines,
         }) => {
-            let build_dir = rootfs_provider_recipe_work_dir(repo_root, distro_id, recipe_script)?;
+            let build_dir =
+                rootfs_source_provider_recipe_work_dir(repo_root, distro_id, recipe_script)?;
             fs::create_dir_all(&build_dir).with_context(|| {
                 format!(
                     "creating rootfs source recipe provider directory '{}'",
@@ -226,30 +228,47 @@ pub(crate) fn materialize_source_rootfs(
 }
 
 pub(crate) fn cleanup_legacy_provider_dir(output_dir: &Path) -> Result<()> {
-    let legacy = output_dir.join("stage01-rootfs-provider");
-    if legacy.is_dir() {
-        fs::remove_dir_all(&legacy)
-            .with_context(|| format!("removing legacy provider dir '{}'", legacy.display()))?;
+    let entries = fs::read_dir(output_dir)
+        .with_context(|| format!("reading output directory '{}'", output_dir.display()))?;
+    for entry in entries {
+        let entry = entry.with_context(|| {
+            format!(
+                "reading legacy provider directory entry under '{}'",
+                output_dir.display()
+            )
+        })?;
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        if !name.ends_with("-rootfs-provider") {
+            continue;
+        }
+        fs::remove_dir_all(&path)
+            .with_context(|| format!("removing legacy provider dir '{}'", path.display()))?;
     }
     Ok(())
 }
 
-fn rootfs_provider_work_dir(repo_root: &Path, distro_id: &str) -> Result<PathBuf> {
-    let normalized = normalize_distro_id(distro_id, "rootfs provider work directory")?;
+fn rootfs_source_provider_work_dir(repo_root: &Path, distro_id: &str) -> Result<PathBuf> {
+    let normalized = normalize_distro_id(distro_id, "rootfs source provider work directory")?;
     let provider_dir = repo_root
         .join(".artifacts/work")
         .join(normalized)
-        .join("stage01-rootfs-provider");
+        .join("rootfs-source-provider");
     fs::create_dir_all(&provider_dir).with_context(|| {
         format!(
-            "creating rootfs provider work directory '{}'",
+            "creating rootfs source provider work directory '{}'",
             provider_dir.display()
         )
     })?;
     Ok(provider_dir)
 }
 
-fn rootfs_provider_recipe_work_dir(
+fn rootfs_source_provider_recipe_work_dir(
     repo_root: &Path,
     distro_id: &str,
     recipe_script: &Path,
@@ -259,7 +278,7 @@ fn rootfs_provider_recipe_work_dir(
         .and_then(|stem| stem.to_str())
         .filter(|stem| !stem.is_empty())
         .unwrap_or("recipe");
-    Ok(rootfs_provider_work_dir(repo_root, distro_id)?.join(recipe_dir_name))
+    Ok(rootfs_source_provider_work_dir(repo_root, distro_id)?.join(recipe_dir_name))
 }
 
 #[cfg(test)]
@@ -305,9 +324,9 @@ mod tests {
 
     #[test]
     fn rootfs_source_policy_accepts_custom_recipe_for_any_distro() {
-        let source = S01RootfsSourceToml {
+        let source = RootfsSourceToml {
             kind: "recipe_custom".to_string(),
-            recipe_script: "distro-builder/recipes/custom-stage01-rootfs.rhai".to_string(),
+            recipe_script: "distro-builder/recipes/custom-source-rootfs.rhai".to_string(),
             preseed_recipe_script: None,
             defines: Some(BTreeMap::from([(
                 "CUSTOM_ROOTFS_DIR".to_string(),
@@ -323,15 +342,15 @@ mod tests {
 
         assert!(matches!(
             policy,
-            Some(S01RootfsSourcePolicy::RecipeCustom { .. })
+            Some(RootfsSourcePolicy::RecipeCustom { .. })
         ));
     }
 
     #[test]
     fn rootfs_source_policy_accepts_neutral_rpm_dvd_kind() {
-        let source = S01RootfsSourceToml {
+        let source = RootfsSourceToml {
             kind: "recipe_rpm_dvd".to_string(),
-            recipe_script: "distro-builder/recipes/fedora-stage01-rootfs.rhai".to_string(),
+            recipe_script: "distro-builder/recipes/fedora-dvd-source-rootfs.rhai".to_string(),
             preseed_recipe_script: Some(
                 "distro-builder/recipes/fedora-preseed-iso.rhai".to_string(),
             ),
@@ -346,15 +365,15 @@ mod tests {
 
         assert!(matches!(
             policy,
-            Some(S01RootfsSourcePolicy::RecipeRpmDvd { .. })
+            Some(RootfsSourcePolicy::RecipeRpmDvd { .. })
         ));
     }
 
     #[test]
     fn rootfs_source_policy_rejects_legacy_recipe_rocky_kind() {
-        let source = S01RootfsSourceToml {
+        let source = RootfsSourceToml {
             kind: "recipe_rocky".to_string(),
-            recipe_script: "distro-builder/recipes/rocky-stage01-rootfs.rhai".to_string(),
+            recipe_script: "distro-builder/recipes/rocky-dvd-source-rootfs.rhai".to_string(),
             preseed_recipe_script: None,
             defines: None,
         };
@@ -382,7 +401,7 @@ mod tests {
 
 [ring3_sources.rootfs_source]
 kind = "recipe_rpm_dvd"
-recipe_script = "distro-builder/recipes/fedora-stage01-rootfs.rhai"
+recipe_script = "distro-builder/recipes/fedora-dvd-source-rootfs.rhai"
 preseed_recipe_script = "distro-builder/recipes/fedora-preseed-iso.rhai"
 "#,
         );
@@ -391,7 +410,7 @@ preseed_recipe_script = "distro-builder/recipes/fedora-preseed-iso.rhai"
             .expect("load ring3 rootfs source policy");
         assert!(matches!(
             loaded,
-            Some(S01RootfsSourcePolicy::RecipeRpmDvd { .. })
+            Some(RootfsSourcePolicy::RecipeRpmDvd { .. })
         ));
 
         fs::remove_dir_all(repo_root).expect("cleanup temp root");

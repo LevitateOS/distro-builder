@@ -911,7 +911,7 @@ Recommended batch order:
     - `distro-builder/src/bin/stage_runs.rs`
     - `distro-builder/src/stage_runs.rs`
     - `distro-builder/src/stages/`
-    - `distro-builder/stage02-split-pane/`
+    - `distro-builder/install-split-pane/`
     - `testing/install-tests/src/bin/stages.rs`
     - `testing/install-tests/src/stages/`
     - `testing/install-tests/test-scripts/stage-*.sh`

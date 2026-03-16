@@ -1,11 +1,11 @@
-// Fedora Server 43 Stage 01 rootfs source producer for Levitate/Ralph.
+// Fedora Server 43 DVD rootfs source producer for Levitate/Ralph.
 //
 // Rule boundary (strict):
 // - This recipe never downloads/re-downloads the Fedora Server DVD in stage builds.
 // - It requires a preseeded ISO in the canonical sibling downloads cache.
 // - It requires a trust marker; no repeated checksum in normal iterations.
 //
-let deps = ["stage01-dvd-deps"];
+let deps = ["dvd-source-deps"];
 
 fn _work_root(build_dir) {
     dirname(dirname(build_dir))
@@ -13,7 +13,7 @@ fn _work_root(build_dir) {
 
 fn _downloads_dir(build_dir) {
     let parent = dirname(build_dir);
-    if basename(parent) == "stage01-rootfs-provider" {
+    if basename(parent) == "rootfs-source-provider" {
         return join_path(dirname(parent), "downloads");
     }
     join_path(parent, "downloads")
@@ -21,14 +21,14 @@ fn _downloads_dir(build_dir) {
 
 let ctx = #{
     checksum_url: "https://download.fedoraproject.org/pub/fedora/linux/releases/43/Server/x86_64/iso/Fedora-Server-43-1.6-x86_64-CHECKSUM",
-    description: "Fedora Server 43 Stage 01 rootfs producer",
+    description: "Fedora Server 43 DVD rootfs source producer",
     iso_contents_path: join_path(BUILD_DIR, "iso-contents"),
     iso_name: "Fedora-Server-dvd-x86_64-43-1.6.iso",
     iso_path: join_path(BUILD_DIR, "Fedora-Server-dvd-x86_64-43-1.6.iso"),
-    name: "fedora-stage01-rootfs",
+    name: "fedora-dvd-source-rootfs",
     preseed_iso_path: join_path(_downloads_dir(BUILD_DIR), "Fedora-Server-dvd-x86_64-43-1.6.iso"),
     rootfs_path: join_path(BUILD_DIR, "rootfs-minimal"),
-    rootfs_recipe_version: "fedora-stage01-v1",
+    rootfs_recipe_version: "fedora-dvd-source-v1",
     sha256: "aca06983bef83da9b43144c1a2ff4c8483e4745167c17f53725c16a16742e643",
     torrent_url: "https://torrent.fedoraproject.org/torrents/Fedora-Server-dvd-x86_64-43.torrent",
     trust_dir: _downloads_dir(BUILD_DIR),
@@ -144,7 +144,7 @@ fn is_built(ctx) {
     if !is_dir(join_path(rootfs, "usr")) {
         throw "rootfs not built";
     }
-    let marker_path = join_path(rootfs, ".stage01-rootfs.recipe-version");
+    let marker_path = join_path(rootfs, ".source-rootfs.recipe-version");
     let marker = trim(read_file_or_empty(marker_path));
     if marker != ctx.rootfs_recipe_version {
         throw "rootfs recipe version mismatch (" + marker + " != " + ctx.rootfs_recipe_version + ")";
@@ -197,7 +197,7 @@ fn is_built(ctx) {
     for rel in required_paths {
         let full = join_path(rootfs, rel);
         if !exists(full) {
-            throw "minimal Stage 01 rootfs incomplete: missing " + rel;
+            throw "minimal source rootfs incomplete: missing " + rel;
         }
     }
 
@@ -227,7 +227,7 @@ fn build(ctx) {
         throw "Fedora ISO package repositories missing after extraction (expected Packages/ and repodata/, or os/Packages and os/repodata under " + iso_contents + ")";
     }
 
-    // Build Stage 01 source rootfs from ISO RPMs via recipe-native extraction.
+    // Build the source rootfs from ISO RPMs via recipe-native extraction.
     // No dnf/microdnf/yum in stage builds.
     shell("chmod -R u+rwX " + rootfs + " >/dev/null 2>&1 || true");
     shell("rm -rf " + rootfs);
@@ -246,7 +246,7 @@ fn build(ctx) {
         "ncurses-libs",
         "sed",
         "diffutils",
-        // System boot/service runtime for Stage 01.
+        // System boot/service runtime for live boot.
         "systemd",
         "systemd-libs",
         "systemd-udev",
@@ -325,11 +325,11 @@ fn build(ctx) {
         "xz-libs",
         "procps-ng",
     ];
-    log("Extracting Stage 01 package set into rootfs...");
+    log("Extracting DVD source package set into rootfs...");
     for pkg in packages {
         let rpm_path = _find_rpm_path(iso_contents, pkg);
         if rpm_path == "" {
-            throw "required Stage 01 package missing from Fedora ISO repos: " + pkg;
+            throw "required source package missing from Fedora ISO repos: " + pkg;
         }
         if !is_file(rpm_path) {
             throw "resolved RPM path is not a file: " + rpm_path;
@@ -381,7 +381,7 @@ fn build(ctx) {
     ln_force("/usr/lib/systemd/system/dbus.socket", join_path(rootfs, "etc/systemd/system/sockets.target.wants/dbus.socket"));
 
     // RPM scriptlets are not executed in this producer path. Ensure OpenSSH
-    // privilege-separation account entries exist so sshd can start in Stage 01.
+    // Privilege-separation account entries must exist so sshd can start in live boot.
     let group_file = join_path(rootfs, "etc/group");
     let gshadow_file = join_path(rootfs, "etc/gshadow");
     let passwd_file = join_path(rootfs, "etc/passwd");
@@ -425,7 +425,7 @@ fn build(ctx) {
         );
     }
 
-    // Enforce merged-usr symlink contract expected by Stage 01 envelope.
+    // Enforce the merged-usr symlink contract expected by live boot.
     shell("mkdir -p '" + join_path(rootfs, "usr/bin") + "' '" + join_path(rootfs, "usr/sbin") + "' '" + join_path(rootfs, "usr/lib") + "' '" + join_path(rootfs, "usr/lib64") + "'");
     ln_force("usr/bin", join_path(rootfs, "bin"));
     ln_force("usr/sbin", join_path(rootfs, "sbin"));
@@ -479,7 +479,7 @@ fn build(ctx) {
     shell("rm -rf '" + join_path(rootfs, "var/cache") + "' '" + join_path(rootfs, "var/log") + "'");
     shell("mkdir -p '" + join_path(rootfs, "var/cache") + "' '" + join_path(rootfs, "var/log") + "' '" + join_path(rootfs, "var/log/audit") + "'");
     shell("chmod 0700 '" + join_path(rootfs, "var/log/audit") + "' >/dev/null 2>&1 || true");
-    write_file(join_path(rootfs, ".stage01-rootfs.recipe-version"), ctx.rootfs_recipe_version + "\n");
+    write_file(join_path(rootfs, ".source-rootfs.recipe-version"), ctx.rootfs_recipe_version + "\n");
 
     ctx.iso_path = iso;
     ctx.iso_contents_path = iso_contents;
@@ -505,7 +505,7 @@ fn install(ctx) {
 
 fn cleanup(ctx, reason) {
     if reason == "manual" {
-        let marker = join_path(join_path(BUILD_DIR, "rootfs-minimal"), ".stage01-rootfs.recipe-version");
+        let marker = join_path(join_path(BUILD_DIR, "rootfs-minimal"), ".source-rootfs.recipe-version");
         if is_file(marker) {
             rm(marker);
         }

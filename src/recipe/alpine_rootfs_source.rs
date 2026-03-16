@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use super::{find_recipe, run_recipe_phase_json_with_defines_and_env};
 use crate::pipeline::paths::normalize_distro_id;
 
-pub const ALPINE_ROOTFS_SOURCE_RECIPE_FILENAME: &str = "alpine-stage01-rootfs.rhai";
+pub const ALPINE_ROOTFS_SOURCE_RECIPE_FILENAME: &str = "alpine-live-source-rootfs.rhai";
 
 #[derive(Debug, Clone)]
 pub struct AlpineRootfsSourcePreseedOutput {
@@ -33,7 +33,7 @@ pub fn preseed_alpine_rootfs_source_assets(
         )
     })?;
 
-    let recipe_path = repo_root.join("distro-builder/recipes/alpine-preseed-stage01-assets.rhai");
+    let recipe_path = repo_root.join("distro-builder/recipes/alpine-preseed-source-assets.rhai");
     if !recipe_path.is_file() {
         bail!(
             "Alpine preseed recipe script not found: '{}'",

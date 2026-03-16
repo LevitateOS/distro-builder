@@ -222,8 +222,9 @@ Acceptance:
 
 Current reality:
 - when a complete ring family is present, `identity` and `build_host` now load canonically from `identity.toml` and `build-host.toml` for all four variants
-- `00Build.toml` copies of those owners are still validated in parallel and must stay byte-for-byte equivalent at the canonical contract level
-- parity drift is a hard failure during the migration window
+- `distro-builder` variant discovery now starts from `identity.toml`, not `00Build.toml`
+- active source no longer loads `00Build.toml` as the canonical owner for identity/build-host facts
+- some downstream consumers still read derived `contract.stages.stage_00_build` compatibility fields instead of `contract.build`
 
 Honest completion estimate:
 - repo-wide: `80%`
@@ -231,9 +232,9 @@ Honest completion estimate:
 
 Remaining work before this phase is truly done:
 - [x] add `identity.toml` and `build-host.toml` for `ralph`, `acorn`, and `iuppiter`
-- [ ] move any remaining identity/build-host consumers outside `distro-contract` onto the new owner files where appropriate
-- [ ] stop treating `00Build.toml` as the long-term canonical home for these owners once parity coverage exists for all variants
-- [ ] reduce `00Build.toml` copies of identity/build-host facts to temporary compatibility only, then delete them in the later cleanup phase
+- [ ] move any remaining identity/build-host consumers outside `distro-contract` off `contract.stages.stage_00_build` and onto `contract.build` where appropriate
+- [x] stop treating `00Build.toml` as the long-term canonical home for these owners
+- [x] delete `00Build.toml` copies of identity/build-host facts from the active canonical path
 
 ### Phase 3. Ring 3 Source Ownership Migration
 
@@ -252,8 +253,8 @@ Acceptance:
 
 Current reality:
 - all four variants now provide `ring3-sources.toml`, and `distro-builder` loads `rootfs_source.*` canonically from Ring 3 when present
-- legacy `01Boot.toml` source fields are still loaded in parallel and must stay semantically identical during the migration window
-- source-owner drift is a hard failure in `distro-builder`
+- active source no longer loads `01Boot.toml` as the canonical source owner
+- `distro-contract` requires `ring3-sources.toml` as part of the canonical manifest bundle, but does not yet project Ring 3 facts into `ConformanceContract`
 
 Honest completion estimate:
 - repo-wide: `65%`
@@ -262,8 +263,8 @@ Honest completion estimate:
 Remaining work before this phase is truly done:
 - [x] add `ring3-sources.toml` for `ralph`, `acorn`, and `iuppiter`
 - [ ] move the rest of the source/provenance surface, not just `rootfs_source.*`, into Ring 3 ownership
-- [ ] teach `distro-contract` to consume Ring 3 facts canonically instead of only validating the files in parallel
-- [ ] remove `01Boot.toml` as the canonical source owner once all Ring 3 facts are migrated
+- [ ] teach `distro-contract` to surface and consume Ring 3 facts canonically instead of only requiring the file in the bundle
+- [x] remove `01Boot.toml` as the canonical source owner
 
 ### Phase 4. Ring 2 Base Product Ownership Migration
 
@@ -282,8 +283,9 @@ Acceptance:
 Current reality:
 - all four variants now provide `ring2-products.toml`
 - `distro-contract` now loads the canonical `ProductContract` from `ring2-products.toml` when the ring family is present
-- `distro-builder` now loads the base live-overlay policy from `ring2-products.toml`
-- legacy `00Build.toml` and `01Boot.toml` copies of those base-product facts are still loaded in parallel and must stay semantically identical during the migration window
+- `distro-builder` now loads the base live-overlay policy, payload producers, and live-tools runtime actions from `ring2-products.toml`
+- active source no longer loads `00Build.toml` or `01Boot.toml` as base-product owners
+- some runtime/test/build consumers still rely on stage-derived compatibility fields and stage-named artifacts
 
 Honest completion estimate:
 - repo-wide: `75%`
@@ -292,8 +294,9 @@ Honest completion estimate:
 Remaining work before this phase is truly done:
 - [x] add `ring2-products.toml` for `ralph`, `acorn`, and `iuppiter`
 - [x] move the remaining base-product facts out of `01Boot.toml`, not just `overlay_kind`
-- [ ] move builder/runtime consumers of base-product composition onto Ring 2 ownership instead of stage-era manifests
-- [ ] remove `00Build.toml` and `01Boot.toml` as canonical sources of base-product facts once parity coverage exists for all variants
+- [x] move builder/runtime consumers of base-product composition onto Ring 2 ownership instead of stage-era manifests
+- [x] remove `00Build.toml` and `01Boot.toml` as canonical sources of base-product facts once parity coverage exists for all variants
+- [ ] remove remaining stage-derived compatibility consumers where direct Ring 2/scenario fields already exist
 
 Phase 5 gate decision:
 - Phase 5 must start only after repo-wide Ring 2 base parity exists.
@@ -409,6 +412,18 @@ Acceptance:
 - no tracked active path contains `stage`
 - no tracked active path contains `00Build`, `01Boot`, `02LiveTools`, `s00`, `s01`, or `s02`
 - no canonical command/help/doc surface uses stage-era naming
+
+Current reality:
+- stage-era manifest families are already gone from `distro-variants/*` in active source
+- canonical owner/ring manifests still contain stage-era names such as `s00-*`, `STAGE 01 PASSED`, `fedora-stage01-rootfs.rhai`, and `stage02-split-pane`
+- executable/test code still exports and consumes stage-derived compatibility fields and wrappers
+
+Remaining work before this phase is truly done:
+- [x] remove canonical use of `00Build.toml`, `01Boot.toml`, and `02LiveTools.toml`
+- [ ] remove remaining stage-derived `contract.stages.*` consumers from executable/test paths
+- [ ] rename stage-era artifact outputs and supporting-artifact metadata
+- [ ] rename stage-era evidence markers
+- [ ] rename stage-era recipe, package, and work-path references
 
 ## Proposed Manifest Family
 

@@ -146,20 +146,11 @@ pub(crate) fn build_one(distro_id: &str, product: BuildProduct) -> Result<()> {
     let build_layout = product_release_output_layout_for(&bundle.repo_root, distro_id, product)?;
 
     let output_dir = build_layout.output_dir.clone();
+    let build = &bundle.contract.build;
 
     let kernel_spec = BuildHostKernelSpec {
-        recipe_kernel_script: bundle
-            .contract
-            .stages
-            .stage_00_build
-            .recipe_kernel_script
-            .clone(),
-        kernel_kconfig_path: bundle
-            .contract
-            .stages
-            .stage_00_build
-            .kernel_kconfig_path
-            .clone(),
+        recipe_kernel_script: build.kernel.recipe_script.clone(),
+        kernel_kconfig_path: build.kernel.kconfig_path.clone(),
     };
 
     let base_iso_filename = crate::workflows::canonical_iso_filename(&bundle.contract)
@@ -212,32 +203,10 @@ pub(crate) fn build_one(distro_id: &str, product: BuildProduct) -> Result<()> {
         )?;
 
         let evidence_spec = BuildHostEvidenceSpec {
-            script_path: bundle
-                .contract
-                .stages
-                .stage_00_build
-                .evidence
-                .script_path
-                .clone(),
-            pass_marker: bundle
-                .contract
-                .stages
-                .stage_00_build
-                .evidence
-                .pass_marker
-                .clone(),
-            kernel_release_path: bundle
-                .contract
-                .stages
-                .stage_00_build
-                .kernel_release_path
-                .clone(),
-            kernel_image_path: bundle
-                .contract
-                .stages
-                .stage_00_build
-                .kernel_image_path
-                .clone(),
+            script_path: build.evidence.script_path.clone(),
+            pass_marker: build.evidence.pass_marker.clone(),
+            kernel_release_path: build.kernel.release_path.clone(),
+            kernel_image_path: build.kernel.image_path.clone(),
             iso_filename: iso_filename_for_product(&base_iso_filename, product),
         };
 

@@ -72,10 +72,8 @@ pub(crate) fn ensure_release_iso_via_variant_hook(
         );
     }
 
-    let kernel_release_path =
-        kernel_output_dir.join(&bundle.contract.stages.stage_00_build.kernel_release_path);
-    let kernel_image_path =
-        kernel_output_dir.join(&bundle.contract.stages.stage_00_build.kernel_image_path);
+    let kernel_release_path = kernel_output_dir.join(&bundle.contract.build.kernel.release_path);
+    let kernel_image_path = kernel_output_dir.join(&bundle.contract.build.kernel.image_path);
 
     println!(
         "[release:iso:{}:{distro_id}] building release run {} via variant release hook {} (output: {})",
@@ -96,10 +94,10 @@ pub(crate) fn ensure_release_iso_via_variant_hook(
         .env("IDENTITY_OS_ID", &bundle.contract.identity.os_id)
         .env("IDENTITY_OS_VERSION", &bundle.contract.identity.os_version)
         .env("IDENTITY_ISO_LABEL", &bundle.contract.identity.iso_label)
-        .env("S00_LIVE_UKI_FILENAME", live_uki_filename)
-        .env("S00_EMERGENCY_UKI_FILENAME", emergency_uki_filename)
-        .env("S00_DEBUG_UKI_FILENAME", debug_uki_filename)
-        .env("S00_LIVE_CMDLINE", &live_cmdline)
+        .env("LIVE_UKI_FILENAME", live_uki_filename)
+        .env("EMERGENCY_UKI_FILENAME", emergency_uki_filename)
+        .env("DEBUG_UKI_FILENAME", debug_uki_filename)
+        .env("LIVE_UKI_CMDLINE", &live_cmdline)
         .env("KERNEL_RELEASE_PATH", &kernel_release_path)
         .env("KERNEL_IMAGE_PATH", &kernel_image_path)
         .env("ISO_PATH", &iso_path)

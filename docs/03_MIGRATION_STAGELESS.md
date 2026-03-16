@@ -257,7 +257,7 @@ The main blockers are not cosmetic. They are ownership bugs.
   - stage-tagged names remain only as compatibility discovery, not as rewritten contract truth
 - `distro-contract/src/runtime.rs`
   - canonical runtime validation now consumes explicit artifact paths
-  - `validate_stage_01_runtime(..., stage_artifact_tag)` remains only as a compatibility wrapper
+  - the old stage-named runtime wrappers have been removed from the canonical surface
 
 ### 3. Builder execution is stage-first instead of product-first
 

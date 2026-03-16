@@ -210,6 +210,7 @@ fn prepare_product_inputs(
             let spec = load_live_boot_product_spec(
                 &bundle.repo_root,
                 &bundle.variant_dir,
+                &bundle.contract,
                 distro_id,
                 layout,
             )
@@ -227,6 +228,7 @@ fn prepare_product_inputs(
             let spec = load_live_tools_product_spec(
                 &bundle.repo_root,
                 &bundle.variant_dir,
+                &bundle.contract,
                 distro_id,
                 layout,
             )
@@ -244,6 +246,7 @@ fn prepare_product_inputs(
             let spec = load_installed_boot_product_spec(
                 &bundle.repo_root,
                 &bundle.variant_dir,
+                &bundle.contract,
                 distro_id,
                 layout,
             )
@@ -339,5 +342,11 @@ fn canonical_live_boot_product_spec(
 ) -> Result<distro_builder::LiveBootProductSpec> {
     let product = crate::workflows::parse_product(Some(crate::PRODUCT_LIVE_BOOT))?;
     let layout = canonical_derived_product_layout(&bundle.contract, product)?;
-    load_live_boot_product_spec(&bundle.repo_root, &bundle.variant_dir, distro_id, layout)
+    load_live_boot_product_spec(
+        &bundle.repo_root,
+        &bundle.variant_dir,
+        &bundle.contract,
+        distro_id,
+        layout,
+    )
 }

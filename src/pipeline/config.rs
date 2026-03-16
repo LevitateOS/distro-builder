@@ -1,4 +1,5 @@
 use anyhow::{bail, Context, Result};
+use distro_contract::ConformanceContract;
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::fs;
@@ -8,7 +9,9 @@ use crate::pipeline::live_tools::{InstallDocsFrontend, InstallExperience, LiveTo
 use crate::pipeline::overlay::S01OverlayPolicy;
 use crate::pipeline::paths::resolve_repo_path;
 use crate::pipeline::plan::RootfsProducer;
-use crate::pipeline::source::{load_rootfs_source_policy, S01RootfsSourcePolicy};
+#[cfg(test)]
+use crate::pipeline::source::load_rootfs_source_policy;
+use crate::pipeline::source::{rootfs_source_policy_from_contract, S01RootfsSourcePolicy};
 use crate::InittabVariant;
 
 #[derive(Debug, Clone)]
@@ -328,18 +331,17 @@ struct ScenarioEvidenceToml {
     pass_marker: String,
 }
 
-pub(crate) fn load_boot_payload_config(
+fn load_boot_payload_config_with_rootfs_source_policy(
     repo_root: &Path,
     variant_dir: &Path,
     distro_id: &str,
+    rootfs_source_policy: Option<S01RootfsSourcePolicy>,
 ) -> Result<S01LoadedConfig> {
     let os_name = load_identity_os_name(variant_dir)?;
     let required_services = load_required_services(variant_dir)?;
     let overlay = load_ring2_overlay_policy(repo_root, variant_dir, distro_id)?;
     let payload_producers =
         load_boot_payload_producers(variant_dir, BootPayloadProduct::Live, &overlay)?;
-
-    let rootfs_source_policy = load_rootfs_source_policy(repo_root, variant_dir)?;
 
     Ok(S01LoadedConfig {
         os_name,
@@ -350,6 +352,39 @@ pub(crate) fn load_boot_payload_config(
     })
 }
 
+#[cfg(test)]
+pub(crate) fn load_boot_payload_config(
+    repo_root: &Path,
+    variant_dir: &Path,
+    distro_id: &str,
+) -> Result<S01LoadedConfig> {
+    let mut loaded = load_boot_payload_config_with_rootfs_source_policy(
+        repo_root,
+        variant_dir,
+        distro_id,
+        None,
+    )?;
+    let rootfs_source_policy = load_rootfs_source_policy(repo_root, variant_dir)?;
+    loaded.rootfs_source_policy = rootfs_source_policy;
+    Ok(loaded)
+}
+
+pub(crate) fn load_boot_payload_config_from_contract(
+    repo_root: &Path,
+    variant_dir: &Path,
+    distro_id: &str,
+    contract: &ConformanceContract,
+) -> Result<S01LoadedConfig> {
+    let rootfs_source_policy = rootfs_source_policy_from_contract(repo_root, contract)?;
+    load_boot_payload_config_with_rootfs_source_policy(
+        repo_root,
+        variant_dir,
+        distro_id,
+        rootfs_source_policy,
+    )
+}
+
+#[cfg(test)]
 pub(crate) fn load_boot_config(
     repo_root: &Path,
     variant_dir: &Path,
@@ -365,12 +400,43 @@ pub(crate) fn load_boot_config(
     Ok(loaded)
 }
 
+pub(crate) fn load_boot_config_from_contract(
+    repo_root: &Path,
+    variant_dir: &Path,
+    distro_id: &str,
+    contract: &ConformanceContract,
+) -> Result<S01LoadedConfig> {
+    let loaded =
+        load_boot_payload_config_from_contract(repo_root, variant_dir, distro_id, contract)?;
+    if !loaded.required_services.iter().any(|svc| svc == "sshd") {
+        bail!(
+            "invalid live boot config for '{}': required_services must include 'sshd' (OpenSSH is first-class in live boot)",
+            distro_id
+        );
+    }
+    Ok(loaded)
+}
+
+#[cfg(test)]
 pub(crate) fn load_installed_boot_payload_config(
     repo_root: &Path,
     variant_dir: &Path,
     distro_id: &str,
 ) -> Result<S01LoadedConfig> {
     let mut loaded = load_boot_payload_config(repo_root, variant_dir, distro_id)?;
+    loaded.payload_producers =
+        load_boot_payload_producers(variant_dir, BootPayloadProduct::Installed, &loaded.overlay)?;
+    Ok(loaded)
+}
+
+pub(crate) fn load_installed_boot_payload_config_from_contract(
+    repo_root: &Path,
+    variant_dir: &Path,
+    distro_id: &str,
+    contract: &ConformanceContract,
+) -> Result<S01LoadedConfig> {
+    let mut loaded =
+        load_boot_payload_config_from_contract(repo_root, variant_dir, distro_id, contract)?;
     loaded.payload_producers =
         load_boot_payload_producers(variant_dir, BootPayloadProduct::Installed, &loaded.overlay)?;
     Ok(loaded)

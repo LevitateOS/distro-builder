@@ -1,8 +1,11 @@
 use anyhow::{bail, Context, Result};
-use serde::Deserialize;
+use distro_contract::{ConformanceContract, RootfsSourceContract, RootfsSourceKind};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+
+#[cfg(test)]
+use serde::Deserialize;
 
 use crate::pipeline::paths::{normalize_distro_id, resolve_repo_path};
 use crate::pipeline::plan::ensure_non_legacy_rootfs_source;
@@ -20,6 +23,7 @@ pub(crate) enum S01RootfsSourcePolicy {
     },
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct S01RootfsSourceToml {
@@ -29,6 +33,7 @@ pub(crate) struct S01RootfsSourceToml {
     defines: Option<BTreeMap<String, String>>,
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Ring3SourcesToml {
@@ -37,12 +42,14 @@ struct Ring3SourcesToml {
     ring3_sources: Ring3SourcesSectionToml,
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Ring3SourcesSectionToml {
     rootfs_source: Option<S01RootfsSourceToml>,
 }
 
+#[cfg(test)]
 pub(crate) fn load_rootfs_source_policy(
     repo_root: &Path,
     variant_dir: &Path,
@@ -78,6 +85,7 @@ pub(crate) fn load_rootfs_source_policy(
     parse_rootfs_source_policy(repo_root, &ring3_config_path, Some(source))
 }
 
+#[cfg(test)]
 pub(crate) fn parse_rootfs_source_policy(
     repo_root: &Path,
     config_path: &Path,
@@ -114,6 +122,40 @@ pub(crate) fn parse_rootfs_source_policy(
             config_path.display(),
             other
         ),
+    }
+}
+
+pub(crate) fn rootfs_source_policy_from_contract(
+    repo_root: &Path,
+    contract: &ConformanceContract,
+) -> Result<Option<S01RootfsSourcePolicy>> {
+    Ok(Some(rootfs_source_policy_from_source_contract(
+        repo_root,
+        &contract.sources.rootfs_source,
+    )?))
+}
+
+fn rootfs_source_policy_from_source_contract(
+    repo_root: &Path,
+    source: &RootfsSourceContract,
+) -> Result<S01RootfsSourcePolicy> {
+    match source.kind {
+        RootfsSourceKind::RecipeRpmDvd => {
+            let recipe_script = resolve_repo_path(repo_root, source.recipe_script.trim());
+            let Some(preseed_recipe_script) = source.preseed_recipe_script.as_deref() else {
+                bail!(
+                    "invalid canonical Ring 3 contract: sources.rootfs_source.preseed_recipe_script is required for kind='recipe_rpm_dvd'"
+                );
+            };
+            Ok(S01RootfsSourcePolicy::RecipeRpmDvd {
+                recipe_script,
+                preseed_recipe_script: resolve_repo_path(repo_root, preseed_recipe_script.trim()),
+            })
+        }
+        RootfsSourceKind::RecipeCustom => Ok(S01RootfsSourcePolicy::RecipeCustom {
+            recipe_script: resolve_repo_path(repo_root, source.recipe_script.trim()),
+            defines: source.defines.clone(),
+        }),
     }
 }
 

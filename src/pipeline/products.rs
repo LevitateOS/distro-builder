@@ -1,9 +1,11 @@
 use anyhow::{Context, Result};
+use distro_contract::ConformanceContract;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::pipeline::config::{
-    load_boot_config, load_installed_boot_payload_config, load_live_tools_config,
+    load_boot_config_from_contract, load_installed_boot_payload_config_from_contract,
+    load_live_tools_config,
 };
 use crate::pipeline::io::{
     create_empty_overlay_dir, create_unique_output_dir, extract_erofs_rootfs,
@@ -207,10 +209,11 @@ pub fn prepare_base_rootfs_product(
 pub fn load_live_boot_product_spec(
     repo_root: &Path,
     variant_dir: &Path,
+    contract: &ConformanceContract,
     distro_id: &str,
     layout: DerivedProductLayout,
 ) -> Result<LiveBootProductSpec> {
-    let loaded = load_boot_config(repo_root, variant_dir, distro_id)?;
+    let loaded = load_boot_config_from_contract(repo_root, variant_dir, distro_id, contract)?;
 
     let mut add_producers = loaded.payload_producers.clone();
     if loaded.rootfs_source_policy.is_none() {
@@ -362,6 +365,7 @@ pub fn materialize_live_boot_source_rootfs(spec: &LiveBootProductSpec) -> Result
 pub fn load_live_tools_product_spec(
     repo_root: &Path,
     variant_dir: &Path,
+    contract: &ConformanceContract,
     distro_id: &str,
     layout: DerivedProductLayout,
 ) -> Result<LiveToolsProductSpec> {
@@ -369,7 +373,7 @@ pub fn load_live_tools_product_spec(
         .with_context(|| format!("loading live-tools config for '{}'", distro_id))?;
 
     let live_boot_spec =
-        load_live_boot_product_spec(repo_root, variant_dir, distro_id, layout.clone())
+        load_live_boot_product_spec(repo_root, variant_dir, contract, distro_id, layout.clone())
             .with_context(|| {
                 format!(
                     "loading live boot baseline while preparing live tools for '{}'",
@@ -394,10 +398,16 @@ pub fn load_live_tools_product_spec(
 pub fn load_installed_boot_product_spec(
     repo_root: &Path,
     variant_dir: &Path,
+    contract: &ConformanceContract,
     distro_id: &str,
     layout: DerivedProductLayout,
 ) -> Result<InstalledBootProductSpec> {
-    let loaded = load_installed_boot_payload_config(repo_root, variant_dir, distro_id)?;
+    let loaded = load_installed_boot_payload_config_from_contract(
+        repo_root,
+        variant_dir,
+        distro_id,
+        contract,
+    )?;
 
     let mut add_producers = loaded.payload_producers.clone();
     if loaded.rootfs_source_policy.is_none() {
@@ -565,6 +575,7 @@ pub fn prepare_installed_boot_product(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use distro_contract::load_variant_contract_for_distro_from;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn temp_repo_root(test_name: &str) -> PathBuf {
@@ -585,6 +596,15 @@ mod tests {
             fs::create_dir_all(parent).expect("create parent");
         }
         fs::write(path, content).expect("write file");
+    }
+
+    fn workspace_contract(distro_id: &str) -> ConformanceContract {
+        let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .canonicalize()
+            .expect("canonicalize workspace root");
+        load_variant_contract_for_distro_from(&repo_root, distro_id)
+            .unwrap_or_else(|err| panic!("failed to load {distro_id} contract: {err}"))
     }
 
     fn live_tools_layout() -> DerivedProductLayout {
@@ -773,10 +793,16 @@ preseed_recipe_script = "distro-builder/recipes/fedora-preseed-iso.rhai"
         let repo_root = temp_repo_root("live-tools-canonical-owners");
         let variant_dir = repo_root.join("distro-variants/levitate");
         write_live_tools_ring_scaffold(&variant_dir);
+        let contract = workspace_contract("levitate");
 
-        let spec =
-            load_live_tools_product_spec(&repo_root, &variant_dir, "levitate", live_tools_layout())
-                .expect("load live tools spec from ring owners");
+        let spec = load_live_tools_product_spec(
+            &repo_root,
+            &variant_dir,
+            &contract,
+            "levitate",
+            live_tools_layout(),
+        )
+        .expect("load live tools spec from ring owners");
 
         assert_eq!(spec.os_name, "LevitateOS");
         assert_eq!(spec.install_experience, InstallExperience::Ux);
@@ -804,6 +830,7 @@ preseed_recipe_script = "distro-builder/recipes/fedora-preseed-iso.rhai"
         let repo_root = temp_repo_root("live-tools-missing-scenarios-owner");
         let variant_dir = repo_root.join("distro-variants/levitate");
         write_live_tools_ring_scaffold(&variant_dir);
+        let contract = workspace_contract("levitate");
         write_file(
             &variant_dir.join("scenarios.toml"),
             r#"schema_version = 6
@@ -813,9 +840,14 @@ required_services = ["sshd"]
 "#,
         );
 
-        let err =
-            load_live_tools_product_spec(&repo_root, &variant_dir, "levitate", live_tools_layout())
-                .expect_err("missing canonical scenarios live-tools owner should fail");
+        let err = load_live_tools_product_spec(
+            &repo_root,
+            &variant_dir,
+            &contract,
+            "levitate",
+            live_tools_layout(),
+        )
+        .expect_err("missing canonical scenarios live-tools owner should fail");
         assert!(
             format!("{err:#}").contains("missing canonical live-tools scenario owner"),
             "unexpected error: {err:#}"
@@ -829,10 +861,12 @@ required_services = ["sshd"]
         let repo_root = temp_repo_root("installed-boot-no-stage04");
         let variant_dir = repo_root.join("distro-variants/levitate");
         write_live_tools_ring_scaffold(&variant_dir);
+        let contract = workspace_contract("levitate");
 
         let spec = load_installed_boot_product_spec(
             &repo_root,
             &variant_dir,
+            &contract,
             "levitate",
             installed_boot_layout(),
         )

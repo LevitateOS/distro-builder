@@ -428,14 +428,14 @@ Current reality:
 - canonical `ConformanceContract` no longer stores `stages`, and the explicit stage-shaped compatibility facade has now been removed from `distro-contract`
 - stage-shaped contract types and stage-named runtime wrappers are no longer part of the canonical contract surface
 - canonical validation/runtime diagnostics now use `build.*`, `transforms.*`, and `scenarios.live_boot.*` field names instead of `stage_*` field strings
-- remaining active stage-era residue is now mostly naming such as `STAGE 01 PASSED`, `fedora-stage01-rootfs.rhai`, `stage02-split-pane`, `s02-live-tools`, and `s02-install-docs`
+- remaining active stage-era residue is now mostly naming such as `fedora-stage01-rootfs.rhai`, `stage02-split-pane`, `s02-live-tools`, and `s02-install-docs`
 
 Remaining work before this phase is truly done:
 - [x] remove canonical use of `00Build.toml`, `01Boot.toml`, and `02LiveTools.toml`
 - [x] remove remaining stage-derived `contract.stages.*` consumers from executable/test paths
 - [x] retire or rename the explicit `distro_contract::compatibility` stage facade and deprecated stage-named runtime wrappers once no compatibility callers remain
 - [x] rename stage-era artifact outputs and supporting-artifact metadata
-- [ ] rename stage-era evidence markers
+- [x] rename stage-era evidence markers
 - [ ] rename stage-era recipe, package, and work-path references
 - [ ] rename residual stage-era workspace/app identifiers such as `stage02-split-pane`, `s02-live-tools`, and `s02-install-docs`
 

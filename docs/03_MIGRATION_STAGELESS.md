@@ -249,7 +249,7 @@ The main blockers are not cosmetic. They are ownership bugs.
 - `distro-builder/src/bin/workflows/build.rs`
   - still writes ISO outputs into stage-owned run roots
 - `distro-builder/src/bin/workflows/artifacts.rs`
-  - still produces `s00-filesystem.erofs`, `s01-filesystem.erofs`, `s02-filesystem.erofs`, etc.
+  - compatibility-scoped stage-tagged artifact names still exist in some older paths and fixtures
 - `distro-builder/src/pipeline/io.rs`
   - still names overlays and rootfs-source pointers using stage tags
 - `testing/install-tests/src/preflight.rs`

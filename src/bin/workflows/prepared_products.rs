@@ -198,8 +198,8 @@ mod tests {
             names.rootfs_source_pointer_filename,
             ".live-rootfs-source.path"
         );
-        assert_eq!(names.rootfs_erofs_filename, "s00-filesystem.erofs");
-        assert_eq!(names.overlay_erofs_filename, "s00-overlayfs.erofs");
+        assert_eq!(names.rootfs_erofs_filename, "filesystem.erofs");
+        assert_eq!(names.overlay_erofs_filename, "overlayfs.erofs");
     }
 
     #[test]
@@ -207,7 +207,7 @@ mod tests {
         let contract = workspace_contract("levitate");
         let filename = canonical_initramfs_live_filename(&contract)
             .expect("resolve canonical initramfs-live filename");
-        assert_eq!(filename, "s00-initramfs-live.cpio.gz");
+        assert_eq!(filename, "initramfs-live.cpio.gz");
     }
 
     #[test]

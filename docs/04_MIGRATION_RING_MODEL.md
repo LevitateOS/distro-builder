@@ -68,14 +68,15 @@ Examples of the original mixed-owner problem:
   - Ring 3 source ownership
   - scenario runtime requirements
 
-That ownership redistribution is now mostly complete in active source:
+That ownership redistribution is now complete across the canonical active source path:
 
 - stage-era manifest families are no longer canonical owners in the active path
 - `ConformanceContract` no longer stores a stage-shaped `stages` bundle
-- the remaining work is now explicit compatibility quarantine plus stage-era naming cleanup
+- builder/test/release consumers now read canonical ring/owner fields directly
+- the remaining work is now ownership-census maintenance plus a decision about which historical migration docs stay as archival exceptions
 
 So the remaining work is no longer “move normal code off the old manifests”.
-It is “finish retiring stage-era compatibility residue and rename the old stage-era surfaces”.
+It is “keep the ownership census honest and decide how much historical migration terminology should remain in archival docs”.
 
 ## Ring Ownership Rules
 
@@ -260,19 +261,24 @@ Acceptance:
 - Ring 3 can be loaded and validated independently
 
 Current reality:
-- all four variants now provide `ring3-sources.toml`, and `distro-builder` loads `rootfs_source.*` canonically from Ring 3 when present
+- all four variants now provide `ring3-sources.toml`
+- `distro-contract` now surfaces `sources.rootfs_source.*` canonically in `ConformanceContract`
+- `distro-contract` validates Ring 3 canonically through `sources.rootfs_source.*` field rules
+- `distro-builder` contract-backed product/config loading now consumes Ring 3 from the canonical contract
 - active source no longer loads `01Boot.toml` as the canonical source owner
-- `distro-contract` requires `ring3-sources.toml` as part of the canonical manifest bundle, but does not yet project Ring 3 facts into `ConformanceContract`
 
 Honest completion estimate:
-- repo-wide: `65%`
-- `levitate` pilot only: `70%`
+- repo-wide: `100%`
+- `levitate` pilot only: `100%`
 
 Remaining work before this phase is truly done:
 - [x] add `ring3-sources.toml` for `ralph`, `acorn`, and `iuppiter`
-- [ ] move the rest of the source/provenance surface, not just `rootfs_source.*`, into Ring 3 ownership
-- [ ] teach `distro-contract` to surface and consume Ring 3 facts canonically instead of only requiring the file in the bundle
+- [x] move the currently loaded source/provenance surface into Ring 3 ownership
+- [x] teach `distro-contract` to surface and validate Ring 3 facts canonically
 - [x] remove `01Boot.toml` as the canonical source owner
+
+Any future Ring 3 fields are no longer migration debt.
+They fall under normal Phase 1 ownership-census maintenance.
 
 ### Phase 4. Ring 2 Base Product Ownership Migration
 
@@ -328,7 +334,7 @@ Pre-Phase-5 gate status:
 
 Result:
 - the pre-Phase-5 gate is satisfied for the Phase 1-4 scope
-- Phase 5 can now start without another `levitate`-only exception
+- later phases have since landed without another `levitate`-only exception
 
 ### Phase 5. Ring 2 Runtime Product Ownership Migration
 
@@ -345,6 +351,22 @@ Acceptance:
 - Ring 2 owns runtime/live/install payload trees exclusively
 - runtime-facing product ownership is separate from Ring 1 transforms and Ring 0 release outputs
 
+Current reality:
+- `distro-contract` now loads the canonical runtime-facing product DAG from `ring2-products.toml`
+- `contract.products.boot_live`, `contract.products.live_tools`, and `contract.products.boot_installed` are now the canonical runtime product identities
+- `distro-builder` product preparation/build flows now resolve runtime product composition from canonical Ring 2 contract fields
+- executable/test consumers no longer treat stage-era manifests as the canonical home for runtime product declarations
+
+Honest completion estimate:
+- repo-wide: `100%`
+- `levitate` pilot only: `100%`
+
+Remaining work before this phase is truly done:
+- [x] move live boot payload ownership into `ring2_products`
+- [x] move live tools payload ownership into `ring2_products`
+- [x] move installed boot payload ownership into `ring2_products`
+- [x] make builder/runtime/test consumers read runtime product declarations from canonical `contract.products`
+
 ### Phase 6. Ring 1 Filesystem Transform Ownership Migration
 
 Goal:
@@ -358,6 +380,20 @@ Acceptance:
 - filesystem image transforms are owned only by Ring 1
 - no final release outputs are declared in this slice
 
+Current reality:
+- `distro-contract` now loads canonical filesystem transform ownership into `contract.transforms.rootfs_image` and `contract.transforms.overlay_image`
+- prepared-product, preflight, and validation paths now consume those canonical Ring 1 transform outputs directly
+- filesystem-image output declarations no longer live in stage-era manifest owners
+
+Honest completion estimate:
+- repo-wide: `100%`
+- `levitate` pilot only: `100%`
+
+Remaining work before this phase is truly done:
+- [x] move EROFS/rootfs transform ownership into `ring1_transforms`
+- [x] move overlay-image transform ownership into `ring1_transforms`
+- [x] make builder/test consumers read filesystem transform outputs from canonical `contract.transforms`
+
 ### Phase 7. Ring 1 Boot Transform Ownership Migration
 
 Goal:
@@ -370,6 +406,20 @@ Scope:
 Acceptance:
 - boot transforms are owned only by Ring 1
 - Ring 1 is now complete across filesystem and boot artifacts
+
+Current reality:
+- `distro-contract` now loads canonical boot transform ownership into `contract.transforms.initramfs_live`, `initramfs_installed`, `live_uki`, and `installed_uki`
+- build/release/preflight paths consume canonical boot transform outputs directly
+- stage-named wrapper/runtime surfaces are no longer part of the canonical contract API
+
+Honest completion estimate:
+- repo-wide: `100%`
+- `levitate` pilot only: `100%`
+
+Remaining work before this phase is truly done:
+- [x] move initramfs ownership into `ring1_transforms`
+- [x] move UKI ownership into `ring1_transforms`
+- [x] make build/release/test consumers read boot transform outputs from canonical `contract.transforms`
 
 ### Phase 8. Ring 0 Release And Scenario Ownership Migration
 
@@ -391,6 +441,21 @@ Acceptance:
 - ISO/disk/checksum naming no longer lives in lower rings
 - no scenario behavior remains in ring manifests
 - scenario ownership is independent of artifact-ring ownership
+
+Current reality:
+- `distro-contract` now loads `contract.release` canonically from `ring0-release.toml`
+- `distro-contract` now loads `contract.scenarios` canonically from `scenarios.toml`
+- release hooks, preflight checks, and scenario execution paths now consume canonical release/scenario fields directly
+- evidence markers and validation/runtime diagnostics are now scenario-native rather than stage-numbered at the canonical surface
+
+Honest completion estimate:
+- repo-wide: `100%`
+- `levitate` pilot only: `100%`
+
+Remaining work before this phase is truly done:
+- [x] move ISO/disk/checksum/release metadata ownership into `ring0_release`
+- [x] move live boot/install/runtime behavior ownership into `scenarios`
+- [x] make release/test/runtime consumers read canonical `contract.release` and `contract.scenarios`
 
 ### Phase 9. Delete Stage-Era Manifest Families And Purge Stage Numbering
 
@@ -419,8 +484,9 @@ Scope:
 
 Acceptance:
 - no canonical manifest family is stage-era
-- no tracked active path contains `stage`
-- no tracked active path contains `00Build`, `01Boot`, `02LiveTools`, `s00`, `s01`, or `s02`
+- no tracked active build/runtime/test path contains `stage`
+- no tracked active build/runtime/test path contains `00Build`, `01Boot`, `02LiveTools`, `s00`, `s01`, or `s02`
+- historical migration docs may retain legacy names only as archival references
 - no canonical command/help/doc surface uses stage-era naming
 
 Current reality:
@@ -428,7 +494,8 @@ Current reality:
 - canonical `ConformanceContract` no longer stores `stages`, and the explicit stage-shaped compatibility facade has now been removed from `distro-contract`
 - stage-shaped contract types and stage-named runtime wrappers are no longer part of the canonical contract surface
 - canonical validation/runtime diagnostics now use `build.*`, `transforms.*`, and `scenarios.live_boot.*` field names instead of `stage_*` field strings
-- remaining active stage-era residue is now mostly historical migration-doc references and a few stage-tagged compatibility notes outside the canonical owner paths
+- canonical command/help/doc surfaces now use the renamed rootfs-source and install-docs paths
+- remaining tracked stage-era residue is now historical migration-doc references plus the ongoing need to keep the ownership census current
 
 Remaining work before this phase is truly done:
 - [x] remove canonical use of `00Build.toml`, `01Boot.toml`, and `02LiveTools.toml`
@@ -438,6 +505,9 @@ Remaining work before this phase is truly done:
 - [x] rename stage-era evidence markers
 - [x] rename stage-era recipe, package, and work-path references
 - [x] rename residual stage-era workspace/app identifiers in canonical owner paths
+- [x] rename or retire the remaining internal `stage00_*` / `stage01_*` helper names, constants, and fixture labels in `distro-contract`
+- [x] rename remaining stage-tagged helper/test names outside canonical APIs, such as install-test helper/report names
+- [ ] decide which historical migration docs remain archival exceptions versus which should be rewritten once the migration record is no longer needed
 
 ## Proposed Manifest Family
 
@@ -477,4 +547,4 @@ This track is complete only when:
 - scenario manifests own only scenario facts
 - identity/build-host are separate from ring ownership
 - stage-era manifest families are gone from canonical ownership
-- literal `stage` and numbered stage artifact families are gone from the active repo surface
+- literal `stage` and numbered stage artifact families are gone from active build/runtime/test surfaces, except archival migration-history references

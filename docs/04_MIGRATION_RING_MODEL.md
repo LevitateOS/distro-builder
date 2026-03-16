@@ -50,13 +50,13 @@ Nothing is allowed to remain in a mixed “old stage file” just because the fi
 
 ## Why This Track Exists
 
-The repo still has a real ownership bug:
+This track started because the repo had a real ownership bug:
 
-- old manifest families such as `00Build.toml` and `01Boot.toml` are mixed-owner files
-- the contents are still partly grouped by historical stage origin rather than by true owner
+- old manifest families such as `00Build.toml` and `01Boot.toml` were mixed-owner files in the canonical path
+- their contents were grouped partly by historical stage origin rather than by true owner
 - Phase 9 in Track 03 exposed that a naming purge alone would be a lie
 
-Examples of the current mixed-owner problem:
+Examples of the original mixed-owner problem:
 
 - `00Build.toml` mixes:
   - identity
@@ -68,8 +68,14 @@ Examples of the current mixed-owner problem:
   - Ring 3 source ownership
   - scenario runtime requirements
 
-So the remaining work is not “remove stage words”.
-It is “move each fact to the correct owner”.
+That ownership redistribution is now mostly complete in active source:
+
+- stage-era manifest families are no longer canonical owners in the active path
+- `ConformanceContract` no longer stores a stage-shaped `stages` bundle
+- the remaining work is now explicit compatibility quarantine plus stage-era naming cleanup
+
+So the remaining work is no longer “move normal code off the old manifests”.
+It is “finish retiring stage-era compatibility residue and rename the old stage-era surfaces”.
 
 ## Ring Ownership Rules
 
@@ -224,17 +230,19 @@ Current reality:
 - when a complete ring family is present, `identity` and `build_host` now load canonically from `identity.toml` and `build-host.toml` for all four variants
 - `distro-builder` variant discovery now starts from `identity.toml`, not `00Build.toml`
 - active source no longer loads `00Build.toml` as the canonical owner for identity/build-host facts
-- some downstream consumers still read derived `contract.stages.stage_00_build` compatibility fields instead of `contract.build`
+- downstream executable/test consumers now read canonical `contract.build`; the remaining stage-shaped build view is explicit compatibility surface inside `distro-contract::compatibility`
 
 Honest completion estimate:
-- repo-wide: `80%`
-- `levitate` pilot only: `85%`
+- repo-wide: `100%`
+- `levitate` pilot only: `100%`
 
 Remaining work before this phase is truly done:
 - [x] add `identity.toml` and `build-host.toml` for `ralph`, `acorn`, and `iuppiter`
-- [ ] move any remaining identity/build-host consumers outside `distro-contract` off `contract.stages.stage_00_build` and onto `contract.build` where appropriate
+- [x] move any remaining identity/build-host consumers outside `distro-contract` off `contract.stages.stage_00_build` and onto `contract.build` where appropriate
 - [x] stop treating `00Build.toml` as the long-term canonical home for these owners
 - [x] delete `00Build.toml` copies of identity/build-host facts from the active canonical path
+
+Residual stage-shaped compatibility cleanup is now Phase 9 work because it is no longer canonical ownership work.
 
 ### Phase 3. Ring 3 Source Ownership Migration
 
@@ -285,18 +293,20 @@ Current reality:
 - `distro-contract` now loads the canonical `ProductContract` from `ring2-products.toml` when the ring family is present
 - `distro-builder` now loads the base live-overlay policy, payload producers, and live-tools runtime actions from `ring2-products.toml`
 - active source no longer loads `00Build.toml` or `01Boot.toml` as base-product owners
-- some runtime/test/build consumers still rely on stage-derived compatibility fields and stage-named artifacts
+- runtime/test/build consumers now use canonical contract fields; the remaining residue here is stage-era naming such as `s00-*` artifact outputs and explicit compatibility-only APIs
 
 Honest completion estimate:
-- repo-wide: `75%`
-- `levitate` pilot only: `80%`
+- repo-wide: `100%`
+- `levitate` pilot only: `100%`
 
 Remaining work before this phase is truly done:
 - [x] add `ring2-products.toml` for `ralph`, `acorn`, and `iuppiter`
 - [x] move the remaining base-product facts out of `01Boot.toml`, not just `overlay_kind`
 - [x] move builder/runtime consumers of base-product composition onto Ring 2 ownership instead of stage-era manifests
 - [x] remove `00Build.toml` and `01Boot.toml` as canonical sources of base-product facts once parity coverage exists for all variants
-- [ ] remove remaining stage-derived compatibility consumers where direct Ring 2/scenario fields already exist
+- [x] remove remaining stage-derived compatibility consumers where direct Ring 2/scenario fields already exist
+
+Residual naming cleanup is now Phase 9 work because it is no longer Ring 2 ownership work.
 
 Phase 5 gate decision:
 - Phase 5 must start only after repo-wide Ring 2 base parity exists.
@@ -415,15 +425,19 @@ Acceptance:
 
 Current reality:
 - stage-era manifest families are already gone from `distro-variants/*` in active source
-- canonical owner/ring manifests still contain stage-era names such as `s00-*`, `STAGE 01 PASSED`, `fedora-stage01-rootfs.rhai`, and `stage02-split-pane`
-- executable/test code still exports and consumes stage-derived compatibility fields and wrappers
+- canonical `ConformanceContract` no longer stores `stages`; the stage-shaped view is now derived explicitly via `compatibility_stage_view()`
+- stage-shaped contract types and stage-named runtime wrappers now live only under `distro_contract::compatibility`, not the canonical `schema` or `runtime` surface
+- canonical validation/runtime diagnostics now use `build.*`, `transforms.*`, and `scenarios.live_boot.*` field names instead of `stage_*` field strings
+- remaining active stage-era residue is mostly naming and explicit compatibility-only APIs such as `s00-*`, `STAGE 01 PASSED`, `fedora-stage01-rootfs.rhai`, `stage02-split-pane`, `s02-live-tools`, and `s02-install-docs`
 
 Remaining work before this phase is truly done:
 - [x] remove canonical use of `00Build.toml`, `01Boot.toml`, and `02LiveTools.toml`
-- [ ] remove remaining stage-derived `contract.stages.*` consumers from executable/test paths
+- [x] remove remaining stage-derived `contract.stages.*` consumers from executable/test paths
+- [ ] retire or rename the explicit `distro_contract::compatibility` stage facade and deprecated stage-named runtime wrappers once no compatibility callers remain
 - [ ] rename stage-era artifact outputs and supporting-artifact metadata
 - [ ] rename stage-era evidence markers
 - [ ] rename stage-era recipe, package, and work-path references
+- [ ] rename residual stage-era workspace/app identifiers such as `stage02-split-pane`, `s02-live-tools`, and `s02-install-docs`
 
 ## Proposed Manifest Family
 

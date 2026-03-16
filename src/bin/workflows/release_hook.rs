@@ -156,8 +156,8 @@ fn product_required_kernel_cmdline(
     match product.canonical {
         crate::PRODUCT_LIVE_BOOT | crate::PRODUCT_LIVE_TOOLS => bundle
             .contract
-            .stages
-            .stage_01_live_boot
+            .scenarios
+            .live_boot
             .required_kernel_cmdline
             .join(" "),
         _ => String::new(),

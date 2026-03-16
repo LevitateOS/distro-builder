@@ -198,11 +198,27 @@ struct ScenarioSectionsToml {
     live_environment: Option<LiveEnvironmentScenarioToml>,
     #[allow(dead_code)]
     live_tools: Option<LiveToolsScenarioToml>,
+    #[allow(dead_code)]
+    install: Option<InstallScenarioToml>,
+    #[allow(dead_code)]
+    installed_boot: Option<BootScenarioToml>,
+    #[allow(dead_code)]
+    automated_login: Option<AutomatedLoginScenarioToml>,
+    #[allow(dead_code)]
+    installed_tools: Option<ToolsScenarioToml>,
+    #[allow(dead_code)]
+    runtime_policy: Option<RuntimePolicyScenarioToml>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct LiveBootScenarioToml {
+    #[allow(dead_code)]
+    #[serde(default)]
+    success_patterns: Vec<String>,
+    #[allow(dead_code)]
+    #[serde(default)]
+    fatal_patterns: Vec<String>,
     #[allow(dead_code)]
     required_kernel_cmdline: Vec<String>,
     #[allow(dead_code)]
@@ -220,9 +236,87 @@ struct LiveEnvironmentScenarioToml {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct LiveToolsScenarioToml {
+    #[allow(dead_code)]
+    #[serde(default)]
+    required_tools: Vec<String>,
     install_experience: InstallExperience,
     #[allow(dead_code)]
     evidence: Option<ScenarioEvidenceToml>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct InstallScenarioToml {
+    #[allow(dead_code)]
+    required_tools: Vec<String>,
+    #[allow(dead_code)]
+    required_services: Vec<String>,
+    #[allow(dead_code)]
+    evidence: Option<ScenarioEvidenceToml>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BootScenarioToml {
+    #[allow(dead_code)]
+    success_patterns: Vec<String>,
+    #[allow(dead_code)]
+    fatal_patterns: Vec<String>,
+    #[allow(dead_code)]
+    required_kernel_cmdline: Vec<String>,
+    #[allow(dead_code)]
+    required_live_services: Vec<String>,
+    #[allow(dead_code)]
+    evidence: Option<ScenarioEvidenceToml>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AutomatedLoginScenarioToml {
+    #[allow(dead_code)]
+    auth_mode: AuthModeToml,
+    #[allow(dead_code)]
+    default_username: Option<String>,
+    #[allow(dead_code)]
+    default_password: Option<String>,
+    #[allow(dead_code)]
+    login_prompt_pattern: String,
+    #[allow(dead_code)]
+    evidence: Option<ScenarioEvidenceToml>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ToolsScenarioToml {
+    #[allow(dead_code)]
+    required_tools: Vec<String>,
+    #[allow(dead_code)]
+    evidence: Option<ScenarioEvidenceToml>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RuntimePolicyScenarioToml {
+    #[allow(dead_code)]
+    rootfs_mutability: RootfsMutabilityToml,
+    #[allow(dead_code)]
+    mutable_required_rw_paths: Vec<String>,
+    #[allow(dead_code)]
+    immutable_required_ro_paths: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum AuthModeToml {
+    DefaultPasswordLogin,
+    ProvisionedCredentials,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum RootfsMutabilityToml {
+    Mutable,
+    Immutable,
 }
 
 #[derive(Debug, Deserialize)]

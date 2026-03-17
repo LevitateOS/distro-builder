@@ -10,9 +10,9 @@ use crate::{
     SystemdLiveOverlayConfig,
 };
 
-const STAGE_MACHINE_ID: &str = "0123456789abcdef0123456789abcdef\n";
+const BOOT_MACHINE_ID: &str = "0123456789abcdef0123456789abcdef\n";
 #[derive(Debug, Clone)]
-pub enum S01OverlayPolicy {
+pub enum BootOverlayPolicy {
     Systemd {
         issue_message: Option<String>,
     },
@@ -28,25 +28,25 @@ pub(crate) fn create_live_overlay(
     os_name: &str,
     overlay_label: &str,
     dir_name: &str,
-    overlay: &S01OverlayPolicy,
+    overlay: &BootOverlayPolicy,
 ) -> Result<PathBuf> {
-    let stage_issue_banner = stage_issue_banner(os_name, overlay_label);
+    let overlay_issue_banner = overlay_issue_banner(os_name, overlay_label);
     let live_overlay_dir = match overlay {
-        S01OverlayPolicy::Systemd { issue_message } => create_systemd_live_overlay(
+        BootOverlayPolicy::Systemd { issue_message } => create_systemd_live_overlay(
             output_dir,
             &SystemdLiveOverlayConfig {
                 os_name,
                 issue_message: issue_message
                     .as_deref()
-                    .or(Some(stage_issue_banner.as_str())),
+                    .or(Some(overlay_issue_banner.as_str())),
                 masked_units: &[],
                 write_serial_test_profile: true,
-                machine_id: Some(STAGE_MACHINE_ID),
+                machine_id: Some(BOOT_MACHINE_ID),
                 enforce_utf8_locale_profile: false,
             },
         )
         .with_context(|| format!("creating systemd live overlay for {}", distro_id))?,
-        S01OverlayPolicy::OpenRc {
+        BootOverlayPolicy::OpenRc {
             inittab,
             profile_overlay,
         } => create_openrc_live_overlay(
@@ -55,7 +55,7 @@ pub(crate) fn create_live_overlay(
                 os_name,
                 inittab: *inittab,
                 profile_overlay: profile_overlay.as_deref(),
-                issue_message: Some(stage_issue_banner.as_str()),
+                issue_message: Some(overlay_issue_banner.as_str()),
             },
         )
         .with_context(|| format!("creating openrc live overlay for {}", distro_id))?,
@@ -167,12 +167,12 @@ pub(crate) fn ensure_systemd_locale_completeness(rootfs_dir: &Path) -> Result<()
 
 pub(crate) fn ensure_required_service_wiring(
     live_overlay_dir: &Path,
-    overlay_policy: &S01OverlayPolicy,
+    overlay_policy: &BootOverlayPolicy,
     required_services: &[String],
 ) -> Result<()> {
     for service in required_services {
         match (overlay_policy, service.as_str()) {
-            (S01OverlayPolicy::Systemd { .. }, service_name) => {
+            (BootOverlayPolicy::Systemd { .. }, service_name) => {
                 if service_name.is_empty()
                     || !service_name
                         .chars()
@@ -206,7 +206,7 @@ pub(crate) fn ensure_required_service_wiring(
                     format!("linking '{}' -> '{}'", wants_link.display(), service_source)
                 })?;
             }
-            (S01OverlayPolicy::OpenRc { .. }, "sshd") => {
+            (BootOverlayPolicy::OpenRc { .. }, "sshd") => {
                 let runlevel_dir = live_overlay_dir.join("etc/runlevels/default");
                 fs::create_dir_all(&runlevel_dir)
                     .with_context(|| format!("creating '{}'", runlevel_dir.display()))?;
@@ -219,7 +219,7 @@ pub(crate) fn ensure_required_service_wiring(
                     format!("linking '{}' -> '/etc/init.d/sshd'", service_link.display())
                 })?;
             }
-            (S01OverlayPolicy::OpenRc { .. }, "networking") => {
+            (BootOverlayPolicy::OpenRc { .. }, "networking") => {
                 let runlevel_dir = live_overlay_dir.join("etc/runlevels/boot");
                 fs::create_dir_all(&runlevel_dir)
                     .with_context(|| format!("creating '{}'", runlevel_dir.display()))?;
@@ -235,7 +235,7 @@ pub(crate) fn ensure_required_service_wiring(
                     )
                 })?;
             }
-            (S01OverlayPolicy::OpenRc { .. }, "dhcpcd") => {
+            (BootOverlayPolicy::OpenRc { .. }, "dhcpcd") => {
                 let runlevel_dir = live_overlay_dir.join("etc/runlevels/default");
                 fs::create_dir_all(&runlevel_dir)
                     .with_context(|| format!("creating '{}'", runlevel_dir.display()))?;
@@ -291,7 +291,7 @@ pub(crate) fn ensure_openrc_shell(
     let inittab_content = match inittab {
         InittabVariant::DesktopWithSerial => format!(
             r#"# /etc/inittab - {os_name} Live
-# Stage 01 boots to minimal interactive shell.
+# Live boot starts in a minimal interactive shell.
 ::sysinit:/sbin/openrc sysinit
 ::sysinit:/sbin/openrc boot
 tty1::respawn:/sbin/getty 38400 tty1
@@ -308,7 +308,7 @@ ttyS0::respawn:/sbin/getty -L -n -l /usr/local/bin/serial-autologin 115200 ttyS0
         ),
         InittabVariant::SerialOnly => format!(
             r#"# /etc/inittab - {os_name} Live
-# Stage 01 boots to minimal interactive shell.
+# Live boot starts in a minimal interactive shell.
 ::sysinit:/sbin/openrc sysinit
 ::sysinit:/sbin/openrc boot
 ttyS0::respawn:/sbin/getty -L -n -l /usr/local/bin/serial-autologin 115200 ttyS0 vt100
@@ -326,7 +326,7 @@ ttyS0::respawn:/sbin/getty -L -n -l /usr/local/bin/serial-autologin 115200 ttyS0
     fs::write(
         &issue_path,
         format!(
-            "\n{} S01 Boot Live - \\l\n\nLogin as 'root' (no password)\n\n",
+            "\n{} Boot Live - \\l\n\nLogin as 'root' (no password)\n\n",
             os_name
         ),
     )
@@ -348,9 +348,9 @@ ttyS0::respawn:/sbin/getty -L -n -l /usr/local/bin/serial-autologin 115200 ttyS0
     Ok(())
 }
 
-fn stage_issue_banner(os_name: &str, stage_label: &str) -> String {
+fn overlay_issue_banner(os_name: &str, overlay_label: &str) -> String {
     format!(
         "\n{} {} Live - \\l\n\nLogin as 'root' (no password)\n\n",
-        os_name, stage_label
+        os_name, overlay_label
     )
 }

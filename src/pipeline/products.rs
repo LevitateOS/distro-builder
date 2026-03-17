@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use crate::pipeline::config::{
     load_boot_config_from_contract, load_installed_boot_payload_config_from_contract,
-    load_live_tools_config,
+    load_live_tools_config_from_contract,
 };
 use crate::pipeline::io::{
     create_empty_overlay_dir, create_unique_output_dir, extract_erofs_rootfs,
@@ -15,7 +15,7 @@ use crate::pipeline::live_tools::{add_required_tools, InstallExperience, LiveToo
 use crate::pipeline::overlay::{
     create_live_overlay, ensure_openrc_shell, ensure_required_service_wiring,
     ensure_systemd_default_target, ensure_systemd_locale_completeness, ensure_systemd_sshd_dirs,
-    S01OverlayPolicy,
+    BootOverlayPolicy,
 };
 #[cfg(test)]
 use crate::pipeline::plan::boot_baseline_producers;
@@ -101,7 +101,7 @@ pub struct LiveBootProductSpec {
     add_plan: ProducerPlan,
     required_services: Vec<String>,
     rootfs_source_policy: Option<RootfsSourcePolicy>,
-    pub overlay: S01OverlayPolicy,
+    pub overlay: BootOverlayPolicy,
 }
 
 impl LiveBootProductSpec {
@@ -147,7 +147,7 @@ pub struct LiveToolsProductSpec {
     pub rootfs_source_dir: PathBuf,
     parent_rootfs: ParentRootfsInput,
     live_overlay: OverlayLayout,
-    overlay: S01OverlayPolicy,
+    overlay: BootOverlayPolicy,
     required_services: Vec<String>,
 }
 
@@ -208,12 +208,12 @@ pub fn prepare_base_rootfs_product(
 
 pub fn load_live_boot_product_spec(
     repo_root: &Path,
-    variant_dir: &Path,
+    _variant_dir: &Path,
     contract: &ConformanceContract,
     distro_id: &str,
     layout: DerivedProductLayout,
 ) -> Result<LiveBootProductSpec> {
-    let loaded = load_boot_config_from_contract(repo_root, variant_dir, distro_id, contract)?;
+    let loaded = load_boot_config_from_contract(repo_root, distro_id, contract)?;
 
     let mut add_producers = loaded.payload_producers.clone();
     if loaded.rootfs_source_policy.is_none() {
@@ -298,7 +298,7 @@ pub fn prepare_live_boot_product(
             spec.distro_id
         )
     })?;
-    if let S01OverlayPolicy::OpenRc { inittab, .. } = spec.overlay {
+    if let BootOverlayPolicy::OpenRc { inittab, .. } = spec.overlay {
         ensure_openrc_shell(&rootfs_source_dir, &spec.os_name, inittab).with_context(|| {
             format!(
                 "ensuring OpenRC live boot serial shell for '{}'",
@@ -306,7 +306,7 @@ pub fn prepare_live_boot_product(
             )
         })?;
     }
-    if matches!(&spec.overlay, S01OverlayPolicy::Systemd { .. }) {
+    if matches!(&spec.overlay, BootOverlayPolicy::Systemd { .. }) {
         ensure_systemd_default_target(&rootfs_source_dir).with_context(|| {
             format!(
                 "ensuring systemd live boot default target for '{}'",
@@ -336,7 +336,7 @@ pub fn prepare_live_boot_product(
         &spec.overlay,
     )?;
 
-    if let S01OverlayPolicy::OpenRc { inittab, .. } = spec.overlay {
+    if let BootOverlayPolicy::OpenRc { inittab, .. } = spec.overlay {
         ensure_openrc_shell(&live_overlay_dir, &spec.os_name, inittab).with_context(|| {
             format!(
                 "ensuring OpenRC live overlay serial shell for '{}'",
@@ -369,7 +369,7 @@ pub fn load_live_tools_product_spec(
     distro_id: &str,
     layout: DerivedProductLayout,
 ) -> Result<LiveToolsProductSpec> {
-    let loaded = load_live_tools_config(variant_dir)
+    let loaded = load_live_tools_config_from_contract(contract)
         .with_context(|| format!("loading live-tools config for '{}'", distro_id))?;
 
     let live_boot_spec =
@@ -397,17 +397,12 @@ pub fn load_live_tools_product_spec(
 
 pub fn load_installed_boot_product_spec(
     repo_root: &Path,
-    variant_dir: &Path,
+    _variant_dir: &Path,
     contract: &ConformanceContract,
     distro_id: &str,
     layout: DerivedProductLayout,
 ) -> Result<InstalledBootProductSpec> {
-    let loaded = load_installed_boot_payload_config_from_contract(
-        repo_root,
-        variant_dir,
-        distro_id,
-        contract,
-    )?;
+    let loaded = load_installed_boot_payload_config_from_contract(repo_root, distro_id, contract)?;
 
     let mut add_producers = loaded.payload_producers.clone();
     if loaded.rootfs_source_policy.is_none() {
@@ -460,7 +455,7 @@ pub fn prepare_live_tools_product(
             spec.distro_id
         )
     })?;
-    if matches!(&spec.overlay, S01OverlayPolicy::Systemd { .. }) {
+    if matches!(&spec.overlay, BootOverlayPolicy::Systemd { .. }) {
         ensure_systemd_locale_completeness(&rootfs_source_dir).with_context(|| {
             format!(
                 "ensuring systemd live tools locale completeness for '{}'",
@@ -806,8 +801,11 @@ preseed_recipe_script = "distro-builder/recipes/fedora-preseed-iso.rhai"
 
         assert_eq!(spec.os_name, "LevitateOS");
         assert_eq!(spec.install_experience, InstallExperience::Ux);
-        assert_eq!(spec.required_services, vec!["sshd".to_string()]);
-        assert!(matches!(spec.overlay, S01OverlayPolicy::Systemd { .. }));
+        assert_eq!(
+            spec.required_services,
+            vec!["auditd".to_string(), "sshd".to_string()]
+        );
+        assert!(matches!(spec.overlay, BootOverlayPolicy::Systemd { .. }));
         assert_eq!(spec.runtime_actions.len(), 5);
         assert!(spec.runtime_actions.iter().any(|action| matches!(
             action,
@@ -826,7 +824,7 @@ preseed_recipe_script = "distro-builder/recipes/fedora-preseed-iso.rhai"
     }
 
     #[test]
-    fn live_tools_product_spec_requires_canonical_scenarios_live_tools_owner() {
+    fn live_tools_product_spec_uses_loaded_contract_instead_of_reparsing_scenarios() {
         let repo_root = temp_repo_root("live-tools-missing-scenarios-owner");
         let variant_dir = repo_root.join("distro-variants/levitate");
         write_live_tools_ring_scaffold(&variant_dir);
@@ -840,17 +838,18 @@ required_services = ["sshd"]
 "#,
         );
 
-        let err = load_live_tools_product_spec(
+        let spec = load_live_tools_product_spec(
             &repo_root,
             &variant_dir,
             &contract,
             "levitate",
             live_tools_layout(),
         )
-        .expect_err("missing canonical scenarios live-tools owner should fail");
-        assert!(
-            format!("{err:#}").contains("missing canonical live-tools scenario owner"),
-            "unexpected error: {err:#}"
+        .expect("live tools spec should use the loaded contract");
+        assert_eq!(spec.install_experience, InstallExperience::Ux);
+        assert_eq!(
+            spec.required_services,
+            vec!["auditd".to_string(), "sshd".to_string()]
         );
 
         fs::remove_dir_all(repo_root).expect("cleanup temp root");

@@ -150,13 +150,13 @@ This section is intentionally blunt.
 
 - canonical ownership is ring-native
 - canonical manifests now live under:
-  - `identity.toml`
-  - `build-host.toml`
-  - `ring3-sources.toml`
-  - `ring2-products.toml`
-  - `ring1-transforms.toml`
-  - `ring0-release.toml`
-  - `scenarios.toml`
+  - `identity/identity.toml`
+  - `build-host/build-host.toml`
+  - `ring3/sources.toml`
+  - `ring2/products.toml`
+  - `ring1/transforms.toml`
+  - `ring0/release.toml`
+  - `scenarios/scenarios.toml`
 - canonical release parsing is product-native
 - canonical product preparation entrypoints exist
 
@@ -180,9 +180,10 @@ be implemented against the actual codepaths.
 ### A. Ownership is already ring-native on the canonical path
 
 - `distro-contract/src/variant.rs`
-  - canonical owner family is now `identity.toml`, `build-host.toml`,
-    `ring3-sources.toml`, `ring2-products.toml`, `ring1-transforms.toml`,
-    `ring0-release.toml`, and `scenarios.toml`
+  - canonical owner family is now `identity/identity.toml`,
+    `build-host/build-host.toml`, `ring3/sources.toml`,
+    `ring2/products.toml`, `ring1/transforms.toml`, `ring0/release.toml`,
+    and `scenarios/scenarios.toml`
 - `distro-builder/src/pipeline/source.rs`
   - Ring 3 rootfs-source policy is loaded from the canonical contract
 - `distro-builder/src/pipeline/config.rs`

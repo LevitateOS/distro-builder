@@ -61,35 +61,38 @@ This track does not:
 
 ## Current Repo Reality
 
-Today each active variant directory is mostly flat:
+Today each active variant already follows the owner-directory model on the
+canonical path:
 
-- root-level owner manifests:
-  - `identity.toml`
-  - `build-host.toml`
-  - `ring3-sources.toml`
-  - `ring2-products.toml`
-  - `ring1-transforms.toml`
-  - `ring0-release.toml`
-  - `scenarios.toml`
-- root-level build/release support files:
-  - `kconfig`
-  - `build-capability.sh`
-  - `build-release.sh`
-  - `boot-release.sh`
-  - `live-tools-release.sh`
-- root-level support folders:
-  - `recipes/`
-  - `profile/` for some variants
+- owner manifests:
+  - `identity/identity.toml`
+  - `build-host/build-host.toml`
+  - `ring3/sources.toml`
+  - `ring2/products.toml`
+  - `ring1/transforms.toml`
+  - `ring0/release.toml`
+  - `scenarios/scenarios.toml`
+- nested build-host support:
+  - `build-host/kernel/kconfig`
+  - `build-host/recipes/kernel.rhai`
+  - `build-host/evidence/build-capability.sh`
+- ring0 hook ownership:
+  - `ring0/hooks/build-release.sh`
+  - `ring0/hooks/boot-release.sh`
+  - `ring0/hooks/live-tools-release.sh`
+- ring2 overlay ownership for OpenRC variants:
+  - `ring2/overlays/live/**`
+- shared release helpers:
+  - `_shared/ring0/hooks/build-release.sh`
+  - `_shared/ring0/hooks/release-artifacts.sh`
 
-Examples in the current tree:
+What remains is mostly compatibility surface and documentation cleanup:
 
-- `distro-variants/levitate/*`
-- `distro-variants/acorn/profile/live-overlay`
-- `distro-variants/iuppiter/profile/live-overlay`
-- `distro-variants/_shared/build-release.sh`
-- `distro-variants/_shared/release-artifacts.sh`
-
-This is workable, but it leaves variant root as a mixed-owner dumping ground.
+- flat-root manifest compatibility still exists in the resolver for legacy
+  scaffolds and tests
+- legacy owner-dir manifest filenames still load temporarily for migration
+  safety
+- some migration docs still describe earlier intermediate layouts
 
 ## Canonical Target Tree
 
@@ -119,21 +122,21 @@ distro-variants/
         build-capability.sh
 
     ring3/
-      ring3-sources.toml
+      sources.toml
       assets/
         rootfs-source/
 
     ring2/
-      ring2-products.toml
+      products.toml
       overlays/
         live/
         installed/
 
     ring1/
-      ring1-transforms.toml
+      transforms.toml
 
     ring0/
-      ring0-release.toml
+      release.toml
       hooks/
         build-release.sh
         boot-release.sh
@@ -195,19 +198,20 @@ It must not become:
 Nested physical rings would falsely imply containment ownership.
 The repo should model rings as layered siblings.
 
-### 3. Preserve existing manifest basenames
+### 3. Canonicalize owner manifest basenames by owner
 
-To minimize loader churn, this track keeps the current manifest filenames:
+The canonical owner filenames are now:
 
 - `identity/identity.toml`
 - `build-host/build-host.toml`
-- `ring3/ring3-sources.toml`
-- `ring2/ring2-products.toml`
-- `ring1/ring1-transforms.toml`
-- `ring0/ring0-release.toml`
+- `ring3/sources.toml`
+- `ring2/products.toml`
+- `ring1/transforms.toml`
+- `ring0/release.toml`
 - `scenarios/scenarios.toml`
 
-This track is about directory structure first, not file-renaming churn.
+Legacy owner-dir ring filenames remain loader-compatible temporarily, but they
+are no longer canonical.
 
 ### 4. Support assets live under their owner
 
@@ -251,10 +255,10 @@ They must not be copied into per-variant tree layout as a second canonical owner
 |---|---|
 | `<variant>/identity.toml` | `<variant>/identity/identity.toml` |
 | `<variant>/build-host.toml` | `<variant>/build-host/build-host.toml` |
-| `<variant>/ring3-sources.toml` | `<variant>/ring3/ring3-sources.toml` |
-| `<variant>/ring2-products.toml` | `<variant>/ring2/ring2-products.toml` |
-| `<variant>/ring1-transforms.toml` | `<variant>/ring1/ring1-transforms.toml` |
-| `<variant>/ring0-release.toml` | `<variant>/ring0/ring0-release.toml` |
+| `<variant>/ring3/sources.toml` | `<variant>/ring3/sources.toml` |
+| `<variant>/ring2/products.toml` | `<variant>/ring2/products.toml` |
+| `<variant>/ring1/transforms.toml` | `<variant>/ring1/transforms.toml` |
+| `<variant>/ring0/release.toml` | `<variant>/ring0/release.toml` |
 | `<variant>/scenarios.toml` | `<variant>/scenarios/scenarios.toml` |
 | `<variant>/kconfig` | `<variant>/build-host/kernel/kconfig` |
 | `<variant>/recipes/kernel.rhai` | `<variant>/build-host/recipes/kernel.rhai` |
@@ -292,10 +296,10 @@ It currently hardcodes flat layout assumptions such as:
 
 - `variant_dir.join("identity.toml")`
 - `variant_dir.join("build-host.toml")`
-- `variant_dir.join("ring3-sources.toml")`
-- `variant_dir.join("ring2-products.toml")`
-- `variant_dir.join("ring1-transforms.toml")`
-- `variant_dir.join("ring0-release.toml")`
+- `variant_dir.join("ring3/sources.toml")`
+- `variant_dir.join("ring2/products.toml")`
+- `variant_dir.join("ring1/transforms.toml")`
+- `variant_dir.join("ring0/release.toml")`
 - `variant_dir.join("scenarios.toml")`
 - `variant_dir.join("kconfig")`
 - `variant_dir.join("recipes/kernel.rhai")`
@@ -433,20 +437,16 @@ Why:
   - `distro-builder`
   - `testing/install-tests`
 
-Current flat-layout assumptions are concentrated there:
+Historical flat-layout assumptions were concentrated there:
 
 - `load_ring_manifest_bundle`
 - top-level `validate_layout` requirements for:
-  - `kconfig`
+  - `kernel/kconfig`
   - `recipes/kernel.rhai`
-  - `build-capability.sh`
+  - `evidence/build-capability.sh`
 - test scaffolds that write ring manifests directly under variant root
 
-This means:
-
-- the best first move is not to touch per-variant files
-- the best first move is to teach `distro-contract` how to resolve both flat and
-  owner-directory layouts
+That was why the resolver-first migration was the correct opening move.
 
 ### B. `distro-builder` has a few high-value open-coded path assumptions
 
@@ -474,20 +474,19 @@ root-level filenames stored on `BuildProduct`.
 That is the exact place where ring0 hook relocation will break unless hook
 resolution is lifted into a canonical path helper first.
 
-#### 3. Build-host asset resolution still joins `variant_dir` with declared paths
+#### 3. Build-host asset resolution has been lifted out of raw `variant_dir` joins
 
-`distro-builder/src/pipeline/kernel.rs` still does both:
+The high-risk consumer path here has already been migrated:
 
-- `variant_dir.join(&spec.kernel_kconfig_path)`
-- `variant_dir.join(&spec.script_path)`
-
-This is a second strong reason to centralize canonical owner paths before moving
-`kconfig` or `build-capability.sh`.
+- build-host support files now live under `build-host/`
+- `distro-builder` resolves declared build-host paths through the canonical
+  contract loader rather than assuming root-level `kconfig` or
+  `build-capability.sh`
 
 #### 4. Some direct ring-file reads are now test-only and should stay secondary
 
 `distro-builder/src/pipeline/source.rs` still reads
-`variant_dir.join("ring3-sources.toml")`, but that path is gated behind
+`variant_dir.join("ring3/sources.toml")`, but that path is gated behind
 `#[cfg(test)]`.
 
 This matters, but it is not on the highest-risk critical path compared to:
@@ -695,10 +694,10 @@ Goal:
 - relocate:
   - `identity.toml`
   - `build-host.toml`
-  - `ring3-sources.toml`
-  - `ring2-products.toml`
-  - `ring1-transforms.toml`
-  - `ring0-release.toml`
+  - `ring3/sources.toml`
+  - `ring2/products.toml`
+  - `ring1/transforms.toml`
+  - `ring0/release.toml`
   - `scenarios.toml`
 
 for all active variants.
@@ -717,12 +716,11 @@ Why now:
 
 Goal:
 
-- relocate:
-  - `kconfig`
-  - `recipes/kernel.rhai`
-  - `build-capability.sh`
-
-under `build-host/`
+- completed
+- build-host support assets now live under:
+  - `build-host/kernel/kconfig`
+  - `build-host/recipes/kernel.rhai`
+  - `build-host/evidence/build-capability.sh`
 
 Required work:
 
@@ -894,9 +892,9 @@ Goal:
 
 Scope:
 
-- `kconfig`
-- `recipes/kernel.rhai`
-- `build-capability.sh`
+- `build-host/kernel/kconfig`
+- `build-host/recipes/kernel.rhai`
+- `build-host/evidence/build-capability.sh`
 - validators/runtime checks/kernel build tooling
 
 Acceptance:

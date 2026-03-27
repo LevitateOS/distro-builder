@@ -158,19 +158,19 @@ Acceptance:
 | `00Build.toml` | `stage_00.required_build_tools` | `build_host` | `build-host.toml` |
 | `00Build.toml` | `stage_00.kernel_*` | `build_host` | `build-host.toml` |
 | `00Build.toml` | `stage_00.evidence.*` | `build_host` | `build-host.toml` |
-| `00Build.toml` | `artifacts.rootfs_name` | `ring1_transforms` | `ring1-transforms.toml` |
-| `00Build.toml` | `artifacts.initramfs_live_output` | `ring1_transforms` | `ring1-transforms.toml` |
-| `00Build.toml` | `artifacts.initramfs_installed_output` | `ring1_transforms` | `ring1-transforms.toml` |
-| `00Build.toml` | `artifacts.installed_uki_outputs` | `ring1_transforms` | `ring1-transforms.toml` |
-| `00Build.toml` | `artifacts.iso_filename` | `ring0_release` | `ring0-release.toml` |
-| `00Build.toml` | `stage_00.iso_assembly.*` | `ring1_transforms` | `ring1-transforms.toml` |
+| `00Build.toml` | `artifacts.rootfs_name` | `ring1_transforms` | `ring1/transforms.toml` |
+| `00Build.toml` | `artifacts.initramfs_live_output` | `ring1_transforms` | `ring1/transforms.toml` |
+| `00Build.toml` | `artifacts.initramfs_installed_output` | `ring1_transforms` | `ring1/transforms.toml` |
+| `00Build.toml` | `artifacts.installed_uki_outputs` | `ring1_transforms` | `ring1/transforms.toml` |
+| `00Build.toml` | `artifacts.iso_filename` | `ring0_release` | `ring0/release.toml` |
+| `00Build.toml` | `stage_00.iso_assembly.*` | `ring1_transforms` | `ring1/transforms.toml` |
 | `00Build.toml` | `stage_00.non_kernel_inputs.*` | derived compatibility view | not stored canonically |
 | `00Build.toml` | `stage_01.required_kernel_cmdline` | `scenarios` | `scenarios.toml` |
 | `00Build.toml` | `stage_01.required_live_services` | `scenarios` | `scenarios.toml` |
 | `01Boot.toml` | `stage_01.boot_inputs.os_name` | compatibility duplication of `identity` | delete after migration |
-| `01Boot.toml` | `stage_01.boot_inputs.overlay_kind` | `ring2_products` | `ring2-products.toml` |
+| `01Boot.toml` | `stage_01.boot_inputs.overlay_kind` | `ring2_products` | `ring2/products.toml` |
 | `01Boot.toml` | `stage_01.boot_inputs.required_services` | `scenarios` | `scenarios.toml` |
-| `01Boot.toml` | `stage_01.boot_inputs.rootfs_source.*` | `ring3_sources` | `ring3-sources.toml` |
+| `01Boot.toml` | `stage_01.boot_inputs.rootfs_source.*` | `ring3_sources` | `ring3/sources.toml` |
 
 #### Phase 1 Repo-Wide Variant Deltas
 
@@ -180,13 +180,13 @@ These variant deltas are the remaining currently loaded fields that differ by di
 | Variant | Current source | Current field | Canonical owner | Target owner file |
 |---|---|---|---|---|
 | `ralph` | `00Build.toml` | no `initramfs_installed_output` / no `installed_uki_outputs` | not present for this variant | none |
-| `acorn` | `00Build.toml` | `artifacts.installed_uki_outputs` | `ring1_transforms` | `ring1-transforms.toml` |
-| `acorn` | `01Boot.toml` | `rootfs_source.defines.*` | `ring3_sources` | `ring3-sources.toml` |
-| `acorn` | `01Boot.toml` | `openrc_inittab`, `seed_overlay` | `ring2_products` | `ring2-products.toml` |
-| `iuppiter` | `00Build.toml` | `artifacts.installed_uki_outputs` | `ring1_transforms` | `ring1-transforms.toml` |
-| `iuppiter` | `00Build.toml` | `artifacts.disk_image_output` | `ring0_release` | `ring0-release.toml` |
-| `iuppiter` | `01Boot.toml` | `rootfs_source.defines.*` | `ring3_sources` | `ring3-sources.toml` |
-| `iuppiter` | `01Boot.toml` | `openrc_inittab`, `seed_overlay` | `ring2_products` | `ring2-products.toml` |
+| `acorn` | `00Build.toml` | `artifacts.installed_uki_outputs` | `ring1_transforms` | `ring1/transforms.toml` |
+| `acorn` | `01Boot.toml` | `rootfs_source.defines.*` | `ring3_sources` | `ring3/sources.toml` |
+| `acorn` | `01Boot.toml` | `openrc_inittab`, `seed_overlay` | `ring2_products` | `ring2/products.toml` |
+| `iuppiter` | `00Build.toml` | `artifacts.installed_uki_outputs` | `ring1_transforms` | `ring1/transforms.toml` |
+| `iuppiter` | `00Build.toml` | `artifacts.disk_image_output` | `ring0_release` | `ring0/release.toml` |
+| `iuppiter` | `01Boot.toml` | `rootfs_source.defines.*` | `ring3_sources` | `ring3/sources.toml` |
+| `iuppiter` | `01Boot.toml` | `openrc_inittab`, `seed_overlay` | `ring2_products` | `ring2/products.toml` |
 
 Notes:
 - the ring family remains additive during the migration window
@@ -261,7 +261,7 @@ Acceptance:
 - Ring 3 can be loaded and validated independently
 
 Current reality:
-- all four variants now provide `ring3-sources.toml`
+- all four variants now provide `ring3/sources.toml`
 - `distro-contract` now surfaces `sources.rootfs_source.*` canonically in `ConformanceContract`
 - `distro-contract` validates Ring 3 canonically through `sources.rootfs_source.*` field rules
 - `distro-builder` contract-backed product/config loading now consumes Ring 3 from the canonical contract
@@ -272,7 +272,7 @@ Honest completion estimate:
 - `levitate` pilot only: `100%`
 
 Remaining work before this phase is truly done:
-- [x] add `ring3-sources.toml` for `ralph`, `acorn`, and `iuppiter`
+- [x] add `ring3/sources.toml` for `ralph`, `acorn`, and `iuppiter`
 - [x] move the currently loaded source/provenance surface into Ring 3 ownership
 - [x] teach `distro-contract` to surface and validate Ring 3 facts canonically
 - [x] remove `01Boot.toml` as the canonical source owner
@@ -295,9 +295,9 @@ Acceptance:
 - no transform or release facts remain in the migrated Ring 2 base manifests
 
 Current reality:
-- all four variants now provide `ring2-products.toml`
-- `distro-contract` now loads the canonical `ProductContract` from `ring2-products.toml` when the ring family is present
-- `distro-builder` now loads the base live-overlay policy, payload producers, and live-tools runtime actions from `ring2-products.toml`
+- all four variants now provide `ring2/products.toml`
+- `distro-contract` now loads the canonical `ProductContract` from `ring2/products.toml` when the ring family is present
+- `distro-builder` now loads the base live-overlay policy, payload producers, and live-tools runtime actions from `ring2/products.toml`
 - active source no longer loads `00Build.toml` or `01Boot.toml` as base-product owners
 - runtime/test/build consumers now use canonical contract fields; the remaining residue here is broader stage-era naming outside canonical artifact outputs
 
@@ -306,7 +306,7 @@ Honest completion estimate:
 - `levitate` pilot only: `100%`
 
 Remaining work before this phase is truly done:
-- [x] add `ring2-products.toml` for `ralph`, `acorn`, and `iuppiter`
+- [x] add `ring2/products.toml` for `ralph`, `acorn`, and `iuppiter`
 - [x] move the remaining base-product facts out of `01Boot.toml`, not just `overlay_kind`
 - [x] move builder/runtime consumers of base-product composition onto Ring 2 ownership instead of stage-era manifests
 - [x] remove `00Build.toml` and `01Boot.toml` as canonical sources of base-product facts once parity coverage exists for all variants
@@ -319,7 +319,7 @@ Phase 5 gate decision:
 - A second `levitate`-only pilot slice is explicitly rejected for this track.
 
 Pre-Phase-5 gate status:
-- [x] add `identity.toml`, `build-host.toml`, `ring3-sources.toml`, and `ring2-products.toml` for `ralph`, `acorn`, and `iuppiter`
+- [x] add `identity.toml`, `build-host.toml`, `ring3/sources.toml`, and `ring2/products.toml` for `ralph`, `acorn`, and `iuppiter`
 - [x] make the new owner files parse cleanly for all four variants under `distro-contract`
 - [x] extend the Phase 1 ownership census beyond `levitate` so every currently loaded field is mapped repo-wide
 - [x] move the remaining Ring 2 base-product facts out of `01Boot.toml`
@@ -352,7 +352,7 @@ Acceptance:
 - runtime-facing product ownership is separate from Ring 1 transforms and Ring 0 release outputs
 
 Current reality:
-- `distro-contract` now loads the canonical runtime-facing product DAG from `ring2-products.toml`
+- `distro-contract` now loads the canonical runtime-facing product DAG from `ring2/products.toml`
 - `contract.products.boot_live`, `contract.products.live_tools`, and `contract.products.boot_installed` are now the canonical runtime product identities
 - `distro-builder` product preparation/build flows now resolve runtime product composition from canonical Ring 2 contract fields
 - executable/test consumers no longer treat stage-era manifests as the canonical home for runtime product declarations
@@ -443,7 +443,7 @@ Acceptance:
 - scenario ownership is independent of artifact-ring ownership
 
 Current reality:
-- `distro-contract` now loads `contract.release` canonically from `ring0-release.toml`
+- `distro-contract` now loads `contract.release` canonically from `ring0/release.toml`
 - `distro-contract` now loads `contract.scenarios` canonically from `scenarios.toml`
 - release hooks, preflight checks, and scenario execution paths now consume canonical release/scenario fields directly
 - evidence markers and validation/runtime diagnostics are now scenario-native rather than stage-numbered at the canonical surface
@@ -517,10 +517,10 @@ Minimum canonical set:
 
 - `identity.toml`
 - `build-host.toml`
-- `ring3-sources.toml`
-- `ring2-products.toml`
-- `ring1-transforms.toml`
-- `ring0-release.toml`
+- `ring3/sources.toml`
+- `ring2/products.toml`
+- `ring1/transforms.toml`
+- `ring0/release.toml`
 - `scenarios.toml`
 
 If some variants need more granularity, split within a ring, but do not reintroduce stage-era grouping.

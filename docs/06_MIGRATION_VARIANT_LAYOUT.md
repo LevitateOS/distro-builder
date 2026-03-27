@@ -1,6 +1,6 @@
 # 06 Variant-Directory Layout Migration
 
-Status: ready
+Status: in_progress
 
 ## Purpose
 
@@ -93,6 +93,40 @@ What remains is mostly compatibility surface and documentation cleanup:
 - legacy owner-dir manifest filenames still load temporarily for migration
   safety
 - some migration docs still describe earlier intermediate layouts
+
+## Audit Snapshot
+
+Date: 2026-03-27
+
+### What is landed
+
+- active variants now use sibling owner directories on disk
+- canonical ring manifest filenames are the short owner basenames:
+  - `ring3/sources.toml`
+  - `ring2/products.toml`
+  - `ring1/transforms.toml`
+  - `ring0/release.toml`
+- canonical `build-host` support and `ring0/hooks` paths are already migrated
+- OpenRC live overlay seeds already live under `ring2/overlays/live/`
+
+### What still remains
+
+1. Compatibility loader removal
+   - `distro-contract/src/variant.rs` still accepts:
+     - flat-root manifests
+     - legacy owner-dir ring filenames such as `ring3-sources.toml`
+2. Legacy key removal
+   - `distro-contract/src/variant.rs` still accepts `profile_overlay` as a
+     compatibility alias for `seed_overlay`
+3. Fixture/doc cleanup
+   - some tests and migration docs still intentionally exercise or describe the
+     older compatibility layouts
+
+### Recommended next slices
+
+1. Update remaining fixtures/docs so canonical owner-layout examples dominate.
+2. Remove flat-root and legacy owner-filename loading from the resolver.
+3. Remove the `profile_overlay` compatibility alias after the resolver cleanup lands.
 
 ## Canonical Target Tree
 

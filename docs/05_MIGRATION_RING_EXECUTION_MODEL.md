@@ -1,6 +1,6 @@
 # 05 Ring-Execution Orchestration Migration
 
-Status: ready
+Status: in_progress
 
 ## Purpose
 
@@ -220,6 +220,28 @@ The core Track 05 execution debt has been reduced substantially.
 The remaining Track 05 debt is now mostly UX and compatibility residue, not the
 canonical planner path itself.
 
+### B1. Audit snapshot: what still remains after the planner landing
+
+The highest-value remaining work for Track 05 is now outside the canonical
+planner itself.
+
+1. Default operator UX still teaches stage-first workflows
+   - `justfile` still exposes `stage`, `stage-ssh`, `test`, `test-up-to`,
+     `build`, and `build-up-to` as prominent compatibility wrappers
+   - `xtask/README.md` still shows `stages boot`, `stages test`, and
+     `stages test-up-to` as usage examples
+   - `testing/install-tests/src/bin/install-tests.rs` still redirects users to
+     `just test` / `just test-up-to`
+2. Stage-attributed reporting still dominates validation surfaces
+   - `distro-contract/src/error.rs`, `validate.rs`, and `runtime.rs` still use
+     `StageId`
+   - `distro-builder/src/bin/artifact_paths.rs` still exports compatibility
+     stage-path helpers
+3. Scenario/test consumption remains intentionally build-free
+   - this is correct by policy, but it means the canonical product/release
+     entrypoints now need to be taught more clearly as the artifact-producing
+     path
+
 ### C. Scenario/test execution is product-aware, but intentionally consume-only
 
 The testing path already resolves canonical release products, but it still
@@ -309,6 +331,14 @@ Current progress:
 
 - steps 1 and 2 are landed on the canonical release/product path
 - the remaining priority is step 3 onward
+
+Recommended next slices:
+
+1. wrapper/doc cleanup in `justfile`, `xtask/README.md`, and
+   `testing/install-tests/src/bin/install-tests.rs`
+2. validation/reporting residue cleanup where stage vocabulary is only
+   compatibility metadata, not orchestration
+3. proof/hardening after the default operator path no longer teaches stages
 
 Do not start by deleting stage words.
 That produces a cosmetic migration and leaves the operator-facing dependency

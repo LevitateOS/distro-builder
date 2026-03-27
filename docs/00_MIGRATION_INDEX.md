@@ -21,11 +21,11 @@ This directory tracks the current high-level distro-builder migration work as nu
    Scope: replace the remaining mixed stage-era manifest ownership with ring-native ownership across `identity`, `build_host`, `ring3_sources`, `ring2_products`, `ring1_transforms`, `ring0_release`, and `scenarios`, then delete the old stage-era manifest families entirely.
 
 5. [05_MIGRATION_RING_EXECUTION_MODEL.md](05_MIGRATION_RING_EXECUTION_MODEL.md)
-   Status: ready
+   Status: in_progress
    Scope: make ring/process orchestration real after ownership migration by requiring outer-target selection, inward dependency resolution, and inner-to-outer materialization without manual stage choreography.
 
 6. [06_MIGRATION_VARIANT_LAYOUT.md](06_MIGRATION_VARIANT_LAYOUT.md)
-   Status: ready
+   Status: in_progress
    Scope: make the per-OS `distro-variants/<distro>` filesystem tree reflect the ring/owner model by moving flat root files into sibling owner directories without turning rings into nested physical containers.
 
 ## Recommended Order
@@ -44,3 +44,42 @@ This directory tracks the current high-level distro-builder migration work as nu
 - The ring-model track exists because Track 03 revealed the remaining problem is mixed ownership, not just leftover stage vocabulary.
 - The ring-execution track exists because ownership migration alone does not guarantee that the real build path stops behaving like a stage-driven system.
 - The variant-layout track exists because even correct ownership and execution still leave the repo hard to reason about if every variant root remains a flat mixed-owner directory.
+
+## Audit Snapshot
+
+Date: 2026-03-27
+
+### Landed on the canonical path
+
+- Track 04 ownership is materially landed for active variants:
+  - owner directories
+  - short ring manifest filenames
+  - nested `build-host` support paths
+  - `ring0/hooks/*`
+  - `ring2/overlays/live/*`
+- Track 05 execution is materially landed on canonical release/product entrypoints:
+  - planner-owned release prerequisite closure
+  - planner-owned resolved parent rootfs inputs for product preparation
+  - canonical scenario script installation
+- Track 06 layout is materially landed for active variants:
+  - active variants visibly follow the sibling owner-directory tree
+
+### Still open
+
+1. Track 05 wrapper/doc cleanup
+   - `justfile` still presents stage-first compatibility wrappers prominently
+   - `xtask/README.md` still teaches `stages ...`
+   - `testing/install-tests/src/bin/install-tests.rs` still points users at `just test` / `just test-up-to`
+2. Track 06 compatibility-window closure
+   - `distro-contract/src/variant.rs` still loads flat-root manifests
+   - `distro-contract/src/variant.rs` still accepts legacy owner-dir ring filenames
+   - `distro-contract/src/variant.rs` still accepts `profile_overlay` as a compatibility key
+3. Track 03/05 stage-residue reduction
+   - `distro-contract` validation/runtime/error surfaces still center `StageId`
+   - `distro-builder/src/bin/artifact_paths.rs` still exposes compatibility stage-path helpers
+
+### Recommended Next Slices
+
+1. Demote or remove stage-first wrapper/doc surfaces from default operator UX.
+2. Close the variant-layout compatibility window in `distro-contract` once fixtures/tests/docs are updated.
+3. Reduce validation/reporting stage residue after the default UX no longer teaches stage-first operation.

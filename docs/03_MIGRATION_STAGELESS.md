@@ -695,8 +695,8 @@ Acceptance:
     - `testing/install-tests/src/stages/mod.rs`
     - `xtask/src/tasks/testing/scenarios.rs`
   - audit and replace names such as:
-    - `stage-02-install-entrypoint`
-    - `30-stage-02-install-ux.sh`
+    - `levitate-install-entrypoint`
+    - `30-install-ux.sh`
     - `stage02-entrypoint-helper=*`
     - `stage02_install_experience()`
     - `Stage 01` / `Stage 02` in canonical diagnostics where scenario/product wording should now be authoritative
@@ -817,7 +817,7 @@ Design:
     - `distro-variants`
   - Ring B: full tracked repo cleanup
     - root docs
-    - `stages.md`
+    - `checkpoints.md`
     - `.teams/`
     - helper scripts and repo notes
   - completion for Phase 9 requires Ring A to be zero first, then Ring B to be zero
@@ -893,7 +893,7 @@ Recommended batch order:
 6. `testing/install-tests/test-scripts/stage-*.sh`
    - rename scripts and their callers
 7. top-level/docs/history sweep
-   - `stages.md`
+   - `checkpoints.md`
    - `.teams/`
    - root docs and migration docs
 
@@ -996,7 +996,7 @@ Recommended batch order:
 - [ ] Remove `stage` from docs and migration filenames.
   - owner paths:
     - `distro-builder/docs/03_MIGRATION_STAGELESS.md`
-    - `stages.md`
+    - `checkpoints.md`
     - team/docs notes under `.teams/` that still carry active references
   - required model:
     - rename the Track 03 document itself to a neutral title such as filesystem-first or product-model migration

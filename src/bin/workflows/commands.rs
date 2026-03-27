@@ -56,8 +56,8 @@ pub(crate) fn dispatch_non_release_command(args: &[String]) -> Result<()> {
         [iso, build_all_cmd] if iso == "iso" && build_all_cmd == "build-all" => {
             crate::workflows::build_all(crate::workflows::parse_release_product(None)?)
         }
-        [iso, build_all_cmd, stage] if iso == "iso" && build_all_cmd == "build-all" => {
-            crate::workflows::build_all(crate::workflows::parse_release_product(Some(stage))?)
+        [iso, build_all_cmd, product] if iso == "iso" && build_all_cmd == "build-all" => {
+            crate::workflows::build_all(crate::workflows::parse_release_product(Some(product))?)
         }
         [product, prepare, product_name, distro, output_dir]
             if product == "product" && prepare == "prepare" =>

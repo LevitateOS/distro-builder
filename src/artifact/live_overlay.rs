@@ -116,10 +116,9 @@ echo "[autologin] Starting login shell..." >/dev/console 2>/dev/null || true
 echo "___SHELL_READY___" >/dev/console 2>/dev/null || true
 echo "___SHELL_READY___" >/dev/kmsg 2>/dev/null || true
 
-if [ "${LEVITATE_INSTALL_SERIAL_UX:-${STAGE02_SERIAL_UX:-0}}" = "1" ] && [ -x /usr/local/bin/levitate-install-entrypoint ]; then
+if [ "${LEVITATE_INSTALL_SERIAL_UX:-0}" = "1" ] && [ -x /usr/local/bin/levitate-install-entrypoint ]; then
     echo "[autologin] Launching install UX on serial console..."
     export LEVITATE_INSTALL_UX_LAUNCHED=1
-    export STAGE02_UX_LAUNCHED=1
     exec /usr/local/bin/levitate-install-entrypoint
 fi
 
@@ -446,7 +445,7 @@ fi
 echo "___SHELL_READY___"
 
 # Keep default serial shell readable, but allow explicit verbose override for debugging.
-if [ "${LEVITATE_INSTALL_SERIAL_VERBOSE:-${STAGE_SERIAL_VERBOSE:-${STAGE02_SERIAL_VERBOSE:-0}}}" = "1" ]; then
+if [ "${LEVITATE_INSTALL_SERIAL_VERBOSE:-0}" = "1" ]; then
     if [ -w /proc/sys/kernel/printk ]; then
         echo 7 >/proc/sys/kernel/printk 2>/dev/null || true
     fi
@@ -462,10 +461,9 @@ else
     fi
 fi
 
-if [ "${LEVITATE_INSTALL_SERIAL_UX:-${STAGE02_SERIAL_UX:-0}}" = "1" ] && [ -x /usr/local/bin/levitate-install-entrypoint ]; then
+if [ "${LEVITATE_INSTALL_SERIAL_UX:-0}" = "1" ] && [ -x /usr/local/bin/levitate-install-entrypoint ]; then
     echo "[autologin] Launching install UX on serial console..."
     export LEVITATE_INSTALL_UX_LAUNCHED=1
-    export STAGE02_UX_LAUNCHED=1
     exec /usr/local/bin/levitate-install-entrypoint
 fi
 

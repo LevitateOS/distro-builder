@@ -405,8 +405,9 @@ pub(crate) fn apply_producer_plan(plan: &ProducerPlan, destination_root: &Path) 
                         )
                     })?;
                 }
-                fs::write(&target, content)
-                    .with_context(|| format!("writing stage rootfs file '{}'", target.display()))?;
+                fs::write(&target, content).with_context(|| {
+                    format!("writing product rootfs file '{}'", target.display())
+                })?;
                 if let Some(mode) = mode {
                     let mut perms = fs::metadata(&target)
                         .with_context(|| format!("reading file metadata '{}'", target.display()))?

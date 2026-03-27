@@ -114,7 +114,7 @@ fn run_sort_key(run: &RunMetadata) -> String {
 fn generate_run_id() -> Result<String> {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .context("system clock before UNIX_EPOCH while generating stage run id")?
+        .context("system clock before UNIX_EPOCH while generating run id")?
         .as_nanos();
     let pid_component = (std::process::id() as u128) << (RUN_ID_SALT_BITS - 16);
     let seq_component = (RUN_ID_COUNTER.fetch_add(1, Ordering::Relaxed) as u128) & 0xFFFF;
@@ -125,7 +125,7 @@ fn generate_run_id() -> Result<String> {
         suffix.push('0');
     }
     if suffix.len() > 20 {
-        bail!("sortable stage run id overflow while generating run identifier")
+        bail!("sortable run id overflow while generating run identifier")
     }
     Ok(suffix)
 }

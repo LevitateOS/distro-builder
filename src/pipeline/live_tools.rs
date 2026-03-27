@@ -57,13 +57,9 @@ pub(crate) enum LiveToolsRuntimeAction {
 }
 
 const CANONICAL_INSTALL_EXPERIENCE_MARKER: &str = "usr/lib/levitate/install-experience";
-const COMPAT_INSTALL_EXPERIENCE_MARKER: &str = "usr/lib/levitate/stage-02/install-experience";
 const CANONICAL_INSTALL_DOCS_TEXT: &str = "usr/local/share/levitate/install-docs.txt";
-const COMPAT_INSTALL_DOCS_TEXT: &str = "usr/local/share/levitate/stage-02-install-docs.txt";
 const CANONICAL_INSTALL_ENTRYPOINT: &str = "usr/local/bin/levitate-install-entrypoint";
-const COMPAT_INSTALL_ENTRYPOINT: &str = "usr/local/bin/stage-02-install-entrypoint";
 const CANONICAL_INSTALL_UX_PROFILE: &str = "etc/profile.d/30-install-ux.sh";
-const COMPAT_INSTALL_UX_PROFILE: &str = "etc/profile.d/30-stage-02-install-ux.sh";
 
 pub(crate) fn add_required_tools(
     repo_root: &Path,
@@ -766,12 +762,6 @@ fn install_mode_payload(
             marker_path.display()
         )
     })?;
-    ensure_symlink(
-        Path::new("/usr/lib/levitate/install-experience"),
-        &rootfs_source_dir.join(COMPAT_INSTALL_EXPERIENCE_MARKER),
-    )
-    .with_context(|| "installing compatibility install-experience marker alias".to_string())?;
-
     install_shell_color_profile(rootfs_source_dir).with_context(|| {
         format!(
             "installing shell color profile defaults under '{}'",
@@ -799,12 +789,6 @@ fn install_mode_payload(
                 docs_text_path.display()
             )
         })?;
-        ensure_symlink(
-            Path::new("/usr/local/share/levitate/install-docs.txt"),
-            &rootfs_source_dir.join(COMPAT_INSTALL_DOCS_TEXT),
-        )
-        .with_context(|| "installing compatibility install-docs alias".to_string())?;
-
         match ux_docs_frontend {
             InstallDocsFrontend::BunBundle => {
                 install_bun_docs_tui_payload(repo_root, rootfs_source_dir, &docs_cmd_path)
@@ -913,7 +897,7 @@ helper=\"$(choose_install_helper || true)\"\n\
 if [ -n \"$helper\" ]; then\n\
     case \"$helper\" in\n\
         */levitate-install-docs-split|levitate-install-docs-split)\n\
-            if [ \"${{LEVITATE_INSTALL_ENTRYPOINT_SMOKE:-${{STAGE02_ENTRYPOINT_SMOKE:-0}}}}\" = \"1\" ]; then\n\
+            if [ \"${{LEVITATE_INSTALL_ENTRYPOINT_SMOKE:-0}}\" = \"1\" ]; then\n\
                 exec \"$helper\" --smoke\n\
             fi\n\
             ;;\n\
@@ -943,12 +927,6 @@ exec \"${{SHELL:-{shell}}}\" -l\n",
             entrypoint_path.display()
         )
     })?;
-    ensure_symlink(
-        Path::new("/usr/local/bin/levitate-install-entrypoint"),
-        &rootfs_source_dir.join(COMPAT_INSTALL_ENTRYPOINT),
-    )
-    .with_context(|| "installing compatibility install entrypoint alias".to_string())?;
-
     if install_experience == InstallExperience::Ux {
         let ux_profile_path = rootfs_source_dir.join(CANONICAL_INSTALL_UX_PROFILE);
         let ux_profile = "#!/bin/sh\n\
@@ -958,7 +936,7 @@ case \"$-\" in\n\
 esac\n\
 \n\
 [ -n \"${TMUX:-}\" ] && return 0\n\
-[ \"${LEVITATE_INSTALL_UX_LAUNCHED:-${STAGE02_UX_LAUNCHED:-0}}\" = \"1\" ] && return 0\n\
+[ \"${LEVITATE_INSTALL_UX_LAUNCHED:-0}\" = \"1\" ] && return 0\n\
 \n\
 if [ -r /run/boot-injection/payload.env ]; then\n\
     while IFS= read -r line; do\n\
@@ -976,7 +954,7 @@ if [ -r /run/boot-injection/payload.env ]; then\n\
 fi\n\
 \n\
 TTY=\"$(tty 2>/dev/null || true)\"\n\
-if [ -z \"${LEVITATE_INSTALL_LEFT_CMD:-${STAGE02_LEFT_CMD:-}}\" ]; then\n\
+if [ -z \"${LEVITATE_INSTALL_LEFT_CMD:-}\" ]; then\n\
     if [ -x /bin/bash ]; then\n\
         LEVITATE_INSTALL_LEFT_CMD=\"/bin/bash -il\"\n\
     else\n\
@@ -984,15 +962,13 @@ if [ -z \"${LEVITATE_INSTALL_LEFT_CMD:-${STAGE02_LEFT_CMD:-}}\" ]; then\n\
     fi\n\
     export LEVITATE_INSTALL_LEFT_CMD\n\
 fi\n\
-export STAGE02_LEFT_CMD=\"${STAGE02_LEFT_CMD:-${LEVITATE_INSTALL_LEFT_CMD:-}}\"\n\
 if [ \"$TTY\" = \"/dev/tty1\" ]; then\n\
     :\n\
-elif [ \"$TTY\" = \"/dev/ttyS0\" ] && [ \"${LEVITATE_INSTALL_SERIAL_UX:-${STAGE02_SERIAL_UX:-0}}\" = \"1\" ]; then\n\
-    if [ -z \"${LEVITATE_INSTALL_RIGHT_CMD:-${STAGE02_RIGHT_CMD:-}}\" ]; then\n\
+elif [ \"$TTY\" = \"/dev/ttyS0\" ] && [ \"${LEVITATE_INSTALL_SERIAL_UX:-0}\" = \"1\" ]; then\n\
+    if [ -z \"${LEVITATE_INSTALL_RIGHT_CMD:-}\" ]; then\n\
         LEVITATE_INSTALL_RIGHT_CMD=\"docs-tui --slug installation\"\n\
         export LEVITATE_INSTALL_RIGHT_CMD\n\
     fi\n\
-    export STAGE02_RIGHT_CMD=\"${STAGE02_RIGHT_CMD:-${LEVITATE_INSTALL_RIGHT_CMD:-}}\"\n\
     export LEVITATE_DOCS_PLAIN=1\n\
     :\n\
 else\n\
@@ -1001,7 +977,6 @@ fi\n\
 \n\
 echo \"[install-ux] Launching install UX on $TTY...\"\n\
 export LEVITATE_INSTALL_UX_LAUNCHED=1\n\
-export STAGE02_UX_LAUNCHED=1\n\
 exec /usr/local/bin/levitate-install-entrypoint\n";
         write_text(&ux_profile_path, ux_profile).with_context(|| {
             format!(
@@ -1009,11 +984,6 @@ exec /usr/local/bin/levitate-install-entrypoint\n";
                 ux_profile_path.display()
             )
         })?;
-        ensure_symlink(
-            Path::new("/etc/profile.d/30-install-ux.sh"),
-            &rootfs_source_dir.join(COMPAT_INSTALL_UX_PROFILE),
-        )
-        .with_context(|| "installing compatibility install UX profile alias".to_string())?;
     }
 
     Ok(())

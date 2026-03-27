@@ -107,12 +107,6 @@ fn resolve_left_command() -> Option<String> {
             return Some(raw.to_string());
         }
     }
-    if let Ok(raw) = env::var("STAGE02_LEFT_CMD") {
-        let raw = raw.trim();
-        if !raw.is_empty() {
-            return Some(raw.to_string());
-        }
-    }
     None
 }
 
@@ -127,17 +121,6 @@ fn resolve_right_command() -> Option<String> {
             }
         }
     }
-    if let Ok(raw) = env::var("STAGE02_RIGHT_CMD") {
-        let raw = raw.trim();
-        if !raw.is_empty() {
-            if let Some(token) = first_token(raw) {
-                if command_exists(token) {
-                    return Some(raw.to_string());
-                }
-            }
-        }
-    }
-
     for candidate in ["levitate-install-docs", "acorn-docs"] {
         if command_exists(candidate) {
             return Some(candidate.to_string());

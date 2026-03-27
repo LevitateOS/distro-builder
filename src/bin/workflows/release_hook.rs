@@ -59,7 +59,7 @@ pub(crate) fn ensure_release_iso_via_variant_hook(
             product.canonical
         )
     })?;
-    let native_build = bundle.variant_dir.join(release_hook_script);
+    let native_build = bundle.paths.ring0_hook_path(release_hook_script);
     if !native_build.is_file() {
         bail!(
             "missing variant release build hook for product '{}' on '{}': {}\n\
@@ -68,7 +68,7 @@ pub(crate) fn ensure_release_iso_via_variant_hook(
             distro_id,
             native_build.display(),
             release_hook_script,
-            bundle.variant_dir.display()
+            bundle.paths.ring0_hooks_dir.display()
         );
     }
 

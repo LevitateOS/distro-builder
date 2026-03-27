@@ -334,7 +334,7 @@ pub(crate) fn preseed_rootfs_source_cmd(distro_id: &str, refresh: bool) -> Resul
     bail!(
         "rootfs source for '{}' does not use a canonical preseedable recipe in '{}'",
         distro_id,
-        bundle.variant_dir.join("ring3-sources.toml").display()
+        bundle.paths.ring3_sources_manifest.display()
     );
 }
 

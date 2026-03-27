@@ -1,4 +1,5 @@
 use anyhow::{bail, Context, Result};
+use distro_contract::VariantOwnerPaths;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -26,7 +27,7 @@ pub enum KernelEnsureOutcome {
 
 pub fn check_kernel_installed_with_recipe(
     repo_root: &Path,
-    variant_dir: &Path,
+    variant_paths: &VariantOwnerPaths,
     distro_id: &str,
     kernel_output_dir: &Path,
     spec: &KernelSpec,
@@ -42,8 +43,8 @@ pub fn check_kernel_installed_with_recipe(
         })?
         .to_path_buf();
     let build_dir = work_dir_for_distro(repo_root, distro_id)?;
-    let kernel_kconfig_path = variant_dir
-        .join(&spec.kernel_kconfig_path)
+    let kernel_kconfig_path = variant_paths
+        .build_host_declared_path(&spec.kernel_kconfig_path)
         .to_string_lossy()
         .to_string();
 
@@ -66,12 +67,18 @@ pub fn check_kernel_installed_with_recipe(
 
 pub fn ensure_kernel_preinstalled_with_recipe(
     repo_root: &Path,
-    variant_dir: &Path,
+    variant_paths: &VariantOwnerPaths,
     distro_id: &str,
     kernel_output_dir: &Path,
     spec: &KernelSpec,
 ) -> Result<KernelEnsureOutcome> {
-    match check_kernel_installed_with_recipe(repo_root, variant_dir, distro_id, kernel_output_dir, spec) {
+    match check_kernel_installed_with_recipe(
+        repo_root,
+        variant_paths,
+        distro_id,
+        kernel_output_dir,
+        spec,
+    ) {
         Ok(()) => Ok(KernelEnsureOutcome::AlreadyInstalled),
         Err(e) => bail!(
             "build-host kernel is not preinstalled for '{}': {}\n\
@@ -86,12 +93,12 @@ pub fn ensure_kernel_preinstalled_with_recipe(
 
 pub fn run_build_evidence_script(
     repo_root: &Path,
-    variant_dir: &Path,
+    variant_paths: &VariantOwnerPaths,
     kernel_output_dir: &Path,
     stage_output_dir: &Path,
     spec: &EvidenceSpec,
 ) -> Result<()> {
-    let script = variant_dir.join(&spec.script_path);
+    let script = variant_paths.build_host_declared_path(&spec.script_path);
     if !script.is_file() {
         bail!("build evidence script not found: {}", script.display());
     }

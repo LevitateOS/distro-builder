@@ -152,7 +152,7 @@ pub(crate) fn build_one(distro_id: &str, product: BuildProduct) -> Result<()> {
     let build_result = (|| -> Result<()> {
         match ensure_kernel_preinstalled_via_recipe(
             &bundle.repo_root,
-            &bundle.variant_dir,
+            &bundle.paths,
             distro_id,
             &kernel_output_dir,
             &kernel_spec,
@@ -184,7 +184,7 @@ pub(crate) fn build_one(distro_id: &str, product: BuildProduct) -> Result<()> {
 
         run_build_host_evidence_script(
             &bundle.repo_root,
-            &bundle.variant_dir,
+            &bundle.paths,
             &kernel_output_dir,
             &output_dir,
             &evidence_spec,

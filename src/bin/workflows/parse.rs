@@ -1,4 +1,5 @@
 use anyhow::{bail, Context, Result};
+use distro_contract::resolve_variant_owner_paths;
 use std::fs;
 use std::path::Path;
 
@@ -188,19 +189,31 @@ pub(crate) fn discover_distro_ids(repo_root: &Path) -> Result<Vec<String>> {
             continue;
         }
 
-        if !path.join("identity.toml").is_file() {
-            continue;
-        }
-
         let Some(name) = path.file_name().and_then(|part| part.to_str()) else {
             continue;
         };
+        if name.starts_with('_') {
+            continue;
+        }
+
+        let has_identity_manifest = path.join("identity.toml").is_file()
+            || path.join("identity").join("identity.toml").is_file();
+        if !has_identity_manifest {
+            continue;
+        }
+
+        resolve_variant_owner_paths(&path).with_context(|| {
+            format!(
+                "validating canonical owner layout for distro variant '{}'",
+                path.display()
+            )
+        })?;
         distro_ids.push(name.to_string());
     }
 
     if distro_ids.is_empty() {
         bail!(
-            "no distro variants discovered under '{}'; expected directories with identity.toml",
+            "no distro variants discovered under '{}'; expected directories with identity.toml or identity/identity.toml",
             variants_dir.display()
         );
     }
@@ -212,6 +225,14 @@ pub(crate) fn discover_distro_ids(repo_root: &Path) -> Result<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+
+    fn write_file(path: &Path, contents: &str) {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("create parent dirs");
+        }
+        fs::write(path, contents).expect("write file");
+    }
 
     #[test]
     fn product_parser_accepts_canonical_names() {
@@ -292,5 +313,147 @@ mod tests {
                 .contains("canonical product preparation target"),
             "unexpected error: {err:#}"
         );
+    }
+
+    #[test]
+    fn discover_distro_ids_accepts_owner_directory_layout() {
+        let repo_root = tempfile::tempdir().expect("temp repo root");
+        let variant_dir = repo_root.path().join("distro-variants/levitate");
+
+        write_file(
+            &variant_dir.join("identity/identity.toml"),
+            r#"schema_version = 6
+
+[identity]
+os_name = "LevitateOS"
+os_id = "levitateos"
+iso_label = "LEVITATE"
+os_version = "0.1.0"
+default_hostname = "levitate"
+"#,
+        );
+        write_file(
+            &variant_dir.join("build-host/build-host.toml"),
+            r#"schema_version = 6
+
+[build_host]
+required_build_tools = ["recipe"]
+kernel_kconfig_path = "kconfig"
+recipe_kernel_script = "distro-builder/recipes/linux.rhai"
+recipe_kernel_invocation = "recipe install"
+kernel_release_path = "boot/vmlinuz-linux"
+kernel_image_path = "boot/vmlinuz-linux"
+kernel_modules_path = "usr/lib/modules/<kernel.release>"
+kernel_version = "6.12.0"
+kernel_sha256 = "abc123"
+kernel_localversion = "-levitate"
+module_install_path = "/usr/lib/modules"
+
+[build_host.evidence]
+script_path = "evidence/build-capability.sh"
+pass_marker = "BUILD_CAPABILITY_PASS"
+"#,
+        );
+        write_file(
+            &variant_dir.join("ring3/ring3-sources.toml"),
+            r#"schema_version = 6
+
+[ring3_sources.rootfs_source]
+kind = "recipe_custom"
+recipe_script = "distro-builder/recipes/fedora-dvd-source-rootfs.rhai"
+"#,
+        );
+        write_file(
+            &variant_dir.join("ring2/ring2-products.toml"),
+            r#"schema_version = 6
+
+[ring2_products.rootfs_base]
+logical_name = "product.rootfs.base"
+description = "Canonical base root filesystem tree"
+
+[ring2_products.live_overlay]
+logical_name = "product.payload.live_overlay"
+description = "Read-only live overlay payload tree"
+overlay_kind = "systemd"
+
+[ring2_products.boot_live]
+logical_name = "product.payload.boot.live"
+description = "Live boot payload inputs"
+extends = "product.rootfs.base"
+
+[ring2_products.live_tools]
+logical_name = "product.payload.live_tools"
+description = "Live tools payload tree"
+extends = "product.payload.boot.live"
+
+[ring2_products.boot_installed]
+logical_name = "product.payload.boot.installed"
+description = "Installed-system boot payload inputs"
+extends = "product.rootfs.base"
+
+[ring2_products.kernel_staging]
+logical_name = "product.kernel.staging"
+description = "Kernel image and modules staging product"
+"#,
+        );
+        write_file(
+            &variant_dir.join("ring1/ring1-transforms.toml"),
+            r#"schema_version = 6
+
+[ring1_transforms.rootfs]
+output_name = "filesystem.erofs"
+
+[ring1_transforms.overlay]
+output_name = "overlayfs.erofs"
+
+[ring1_transforms.initramfs_live]
+output_name = "initramfs-live.img"
+
+[ring1_transforms.live_uki]
+output_names = ["live.efi", "emergency.efi", "debug.efi"]
+"#,
+        );
+        write_file(
+            &variant_dir.join("ring0/ring0-release.toml"),
+            r#"schema_version = 6
+
+[ring0_release.iso]
+output_name = "levitate.iso"
+"#,
+        );
+        write_file(
+            &variant_dir.join("scenarios/scenarios.toml"),
+            r#"schema_version = 6
+
+[scenarios.live_environment]
+required_services = []
+"#,
+        );
+        write_file(&variant_dir.join("build-host/kconfig"), "CONFIG_TEST=y\n");
+        write_file(
+            &variant_dir.join("build-host/recipes/kernel.rhai"),
+            "// recipe decl\n",
+        );
+        write_file(
+            &variant_dir.join("build-host/evidence/build-capability.sh"),
+            "#!/bin/sh\necho BUILD_CAPABILITY_PASS\n",
+        );
+        write_file(
+            &variant_dir.join("ring0/hooks/build-release.sh"),
+            "#!/bin/sh\nexit 0\n",
+        );
+        write_file(
+            &variant_dir.join("ring0/hooks/boot-release.sh"),
+            "#!/bin/sh\nexit 0\n",
+        );
+        write_file(
+            &variant_dir.join("ring0/hooks/live-tools-release.sh"),
+            "#!/bin/sh\nexit 0\n",
+        );
+
+        let distro_ids =
+            discover_distro_ids(repo_root.path()).expect("discover owner-directory distro");
+
+        assert_eq!(distro_ids, vec!["levitate".to_string()]);
     }
 }

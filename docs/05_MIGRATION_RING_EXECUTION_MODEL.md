@@ -162,14 +162,13 @@ This section is intentionally blunt.
 
 ### What is not yet fully true
 
-- release builds still treat some parent-product availability as a precondition instead of recursively materializing the full dependency closure
 - compatibility stage wrappers remain visible in the repo-level `justfile`
 - stage identifiers still exist in validation/reporting surfaces
 
 That means:
 
 - the repo has largely completed ring-native ownership
-- the repo has partially completed ring-native execution
+- the repo has substantially completed ring-native execution on the canonical release/product path
 - the repo has not yet fully completed ring-process-native orchestration
 
 ## Source Audit
@@ -200,29 +199,26 @@ be implemented against the actual codepaths.
 
 This means the ownership migration is not the main blocker anymore.
 
-### B. The biggest remaining blocker is planner ownership of dependency closure
+### B. Planner-owned dependency closure is now landed on the canonical path
 
-The current canonical build path still leaks parent-product sequencing to the
-operator.
+The core Track 05 execution debt has been reduced substantially.
 
+- `distro-builder/src/pipeline/planner.rs`
+  - now owns canonical product-chain closure
+  - now owns release-prerequisite realization planning
+  - now owns resolved parent-rootfs planning for derived product preparation
 - `distro-builder/src/bin/workflows/build.rs`
-  - `preflight_iso_build` resolves the immediate parent product and fails with
-    "build the parent release first" instead of recursively materializing the
-    dependency closure
-- `distro-builder/src/pipeline/io.rs`
-  - `resolve_parent_product_rootfs_image_for_distro` looks only for the latest
-    successful parent release artifact under `.artifacts/out/<distro>/releases/*`
-- `distro-builder/src/pipeline/products.rs`
-  - derived product preparation calls
-    `resolve_parent_product_rootfs_image_for_distro(...)` internally, so product
-    preparation is coupled to existing release artifacts on disk instead of
-    planner-provided resolved inputs
+  - release prerequisite materialization now consumes planner-produced
+    prerequisite state instead of performing workflow-local missing-parent scans
 - `distro-builder/src/bin/workflows/artifacts.rs`
-  - `prepare_product_inputs` already knows the canonical Ring 2 `extends` edge,
-    but still delegates to product preparers that perform parent lookup as a
-    side effect
+  - product preparation now consumes planner-resolved parent rootfs inputs
+    instead of resolving parent release artifacts ad hoc per derived product
+- `distro-builder/src/pipeline/products.rs`
+  - derived product preparers still require explicit parent rootfs injection,
+    which is now the correct lower-level contract rather than a workflow bug
 
-This is the primary Track 05 execution debt.
+The remaining Track 05 debt is now mostly UX and compatibility residue, not the
+canonical planner path itself.
 
 ### C. Scenario/test execution is product-aware, but intentionally consume-only
 
@@ -278,22 +274,16 @@ visible in day-to-day usage.
 This residue is acceptable in the short term if it remains explicitly
 validation-only and does not control build orchestration.
 
-### F. Canonical scenario-script installation still carries a migration bug
+### F. Canonical scenario-script installation is fixed
 
-There is one concrete builder-side inconsistency that should be fixed during
-Track 05 proof/hardening:
+The earlier builder-side scenario-script mismatch has been removed.
 
-- `testing/install-tests/test-scripts/` contains canonical scenario scripts such
-  as `live-boot.sh`, `live-tools.sh`, `install.sh`, `installed-boot.sh`,
-  `automated-login.sh`, and `installed-tools.sh`
-- `distro-builder/src/pipeline/scripts.rs` currently installs only files whose
-  names start with `stage-`
-- the canonical scenario evidence in `distro-variants/*/scenarios.toml` points
-  at `live-boot.sh`, `live-tools.sh`, and related script names
+- `testing/install-tests/test-scripts/` remains the canonical owner for the
+  shared scenario evidence scripts
+- `distro-builder/src/pipeline/scripts.rs` now installs the canonical script
+  names declared by `distro-variants/*/scenarios/scenarios.toml`
 
-That means the canonical builder path does not currently own scenario-script
-installation correctly. This should be fixed as part of Track 05, not left to
-legacy crate behavior.
+This is no longer an open blocker on the canonical builder path.
 
 ## Acceptance Criteria
 
@@ -314,6 +304,11 @@ The best upgrade path is:
 3. then clean up wrapper/docs surfaces
 4. then harden validation/script compatibility residue
 5. then prove the model with tests
+
+Current progress:
+
+- steps 1 and 2 are landed on the canonical release/product path
+- the remaining priority is step 3 onward
 
 Do not start by deleting stage words.
 That produces a cosmetic migration and leaves the operator-facing dependency
@@ -373,6 +368,10 @@ Goal:
 - derived product preparation must consume explicit resolved parent artifacts
   from the planner, not discover "latest successful parent release" by itself
 
+Current status:
+
+- landed on the canonical `distro-builder product prepare ...` path
+
 Recommended file ownership:
 
 - `distro-builder/src/pipeline/products.rs`
@@ -390,7 +389,7 @@ Required changes:
   - parent rootfs image path
   - source product identity
   - source run metadata when needed for reproducibility
-- downgrade `resolve_parent_product_rootfs_image_for_distro` into a lower-level
+- downgrade `resolve_release_product_rootfs_image_for_distro` into a lower-level
   cache/artifact lookup helper or replace it entirely with planner-owned
   resolution
 - make `prepare_product_inputs` in `artifacts.rs` ask the planner for the
@@ -423,7 +422,7 @@ Recommended file ownership:
 
 Required changes:
 
-- replace `preflight_iso_build` as the canonical release dependency gate
+- replace workflow-local prerequisite scans as the canonical release dependency gate
 - add a release-realization path that:
   - resolves target closure through the planner
   - materializes missing lower-ring prerequisites in inner-to-outer order
@@ -547,6 +546,10 @@ Acceptance proof for Phase 6:
 Goal:
 
 - remove a real migration regression and use it as part of Track 05 proof
+
+Current status:
+
+- landed
 
 Recommended file ownership:
 

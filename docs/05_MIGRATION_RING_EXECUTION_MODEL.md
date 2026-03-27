@@ -227,7 +227,7 @@ planner itself.
 
 1. Stage-attributed reporting still dominates validation surfaces
    - `distro-contract/src/error.rs`, `validate.rs`, and `runtime.rs` still use
-     `StageId`
+     `CheckpointId`
 2. Scenario/test consumption remains intentionally build-free
    - this is correct by policy, but it means the canonical product/release
      entrypoints now need to be taught more clearly as the artifact-producing
@@ -278,9 +278,9 @@ without breaking the canonical scenario/release entrypoints.
 ### E. Validation/reporting still uses stage attribution as the main vocabulary
 
 - `distro-contract/src/error.rs`
-  - violation attribution is still `StageId`
+  - violation attribution is still `CheckpointId`
 - `distro-contract/src/validate.rs`
-  - many canonical validation surfaces still report under `Stage00` / `Stage01`
+  - many canonical validation surfaces still report under `Build` / `Boot`
 - `distro-contract/src/runtime.rs`
   - canonical runtime validation exists, but the compatibility entrypoint
     still exposes stage-attributed checkpoint IDs in violation reports
@@ -541,7 +541,7 @@ Recommended file ownership:
 
 Recommended approach:
 
-- do not start by deleting `StageId`
+- do not start by deleting `CheckpointId`
 - first ensure every remaining stage-attributed surface is genuinely
   validation-only
 - then, if needed, introduce a broader attribution model later

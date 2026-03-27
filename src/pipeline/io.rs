@@ -168,12 +168,12 @@ mod tests {
     #[test]
     fn resolve_release_product_rootfs_image_for_distro_uses_repo_layout_not_output_dir_ancestry() {
         let repo_root = tempfile::tempdir().expect("repo tempdir");
-        let stage_root = repo_root
+        let release_root = repo_root
             .path()
             .join(".artifacts/out/levitate/releases/base-rootfs/run-1");
-        fs::create_dir_all(&stage_root).expect("create stage root");
+        fs::create_dir_all(&release_root).expect("create release root");
         fs::write(
-            crate::run_history::manifest_path(&stage_root),
+            crate::run_history::manifest_path(&release_root),
             serde_json::to_vec_pretty(&json!({
                 "run_id": "run-1",
                 "status": "success",
@@ -183,7 +183,7 @@ mod tests {
             .expect("serialize manifest"),
         )
         .expect("write run manifest");
-        let rootfs = stage_root.join("filesystem.erofs");
+        let rootfs = release_root.join("filesystem.erofs");
         fs::write(&rootfs, b"test rootfs").expect("write rootfs file");
 
         let resolved = resolve_release_product_rootfs_image_for_distro(

@@ -69,7 +69,7 @@ Date: 2026-03-27
 ### Still open
 
 1. Track 03/05 stage-residue reduction
-   - `distro-contract` validation/runtime/error surfaces still center `StageId`
+   - `distro-contract` validation/runtime/error surfaces still center `CheckpointId`
 
 ### Recommended Next Slices
 

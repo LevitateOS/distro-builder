@@ -43,12 +43,12 @@ pub struct SystemdLiveOverlayConfig<'a> {
     pub issue_message: Option<&'a str>,
     /// Systemd unit names to mask by linking to `/dev/null`.
     pub masked_units: &'a [&'a str],
-    /// Whether to write serial-console stage test marker profile script.
+    /// Whether to write a serial-console scenario test marker profile script.
     pub write_serial_test_profile: bool,
     /// Optional machine-id content to write at `/etc/machine-id`.
     pub machine_id: Option<&'a str>,
     /// When true, install a strict UTF-8 locale profile for live shells.
-    /// Stage producers must ensure UTF-8 locale payload exists in rootfs.
+    /// Live-rootfs producers must ensure UTF-8 locale payload exists in rootfs.
     pub enforce_utf8_locale_profile: bool,
 }
 
@@ -419,7 +419,7 @@ fi
     )?;
 
     let serial_autologin_script = r#"#!/bin/sh
-# Stage live override: use portable C locale (always available in minimal rootfs).
+# Live override: use portable C locale (always available in minimal rootfs).
 export LANG=C
 unset LC_ALL LC_CTYPE LC_NUMERIC LC_TIME LC_COLLATE LC_MESSAGES \
       LC_MONETARY LC_PAPER LC_NAME LC_ADDRESS LC_TELEPHONE LC_MEASUREMENT \
@@ -651,7 +651,7 @@ WantedBy=multi-user.target
     )?;
 
     if config.write_serial_test_profile {
-        let test_profile = r#"# Stage harness markers (serial console only)
+        let test_profile = r#"# Scenario harness markers (serial console only)
 case "$-" in
     *i*) ;;
     *) return 0 ;;
@@ -668,9 +668,9 @@ fi
     }
 
     if config.enforce_utf8_locale_profile {
-        // Stage live override: use portable C locale for minimal rootfs payloads.
+        // Live override: use portable C locale for minimal rootfs payloads.
         let locale_profile = r#"#!/bin/sh
-# Stage live override: use portable C locale (always available).
+# Live override: use portable C locale (always available).
 export LANG=C
 unset LC_ALL LC_CTYPE LC_NUMERIC LC_TIME LC_COLLATE LC_MESSAGES \
       LC_MONETARY LC_PAPER LC_NAME LC_ADDRESS LC_TELEPHONE LC_MEASUREMENT \

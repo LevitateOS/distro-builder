@@ -811,14 +811,14 @@ preseed_recipe_script = "distro-builder/recipes/fedora-preseed-iso.rhai"
     }
 
     #[test]
-    fn stage_scoped_rootfs_source_is_allowed() {
-        let stage_scoped = Path::new(
+    fn checkpoint_scoped_rootfs_source_is_allowed() {
+        let checkpoint_scoped = Path::new(
             "/data/vince/LevitateOS/.artifacts/out/levitate/s01-boot/s01-rootfs-source-12345-12345",
         );
-        let result = ensure_non_legacy_rootfs_source(stage_scoped);
+        let result = ensure_non_legacy_rootfs_source(checkpoint_scoped);
         assert!(
             result.is_ok(),
-            "stage-scoped rootfs path should be accepted"
+            "checkpoint-scoped rootfs path should be accepted"
         );
     }
 

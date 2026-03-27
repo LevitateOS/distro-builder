@@ -431,8 +431,8 @@ pub(crate) fn ensure_non_legacy_rootfs_source(path: &Path) -> Result<()> {
 
     bail!(
         "policy violation: legacy rootfs source '{}' is forbidden.\n\
-         Legacy distro crate rootfs trees must not be consumed by distro-builder stage inputs.\n\
-         Provide a non-legacy stage source path (for example under '.artifacts/out/<distro>/sNN-*/' or 'distro-variants/<distro>/').",
+         Legacy distro crate rootfs trees must not be consumed by distro-builder checkpoint inputs.\n\
+         Provide a non-legacy checkpoint source path (for example under '.artifacts/out/<distro>/sNN-*/' or 'distro-variants/<distro>/').",
         path.display()
     );
 }

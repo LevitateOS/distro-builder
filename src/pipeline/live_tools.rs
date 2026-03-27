@@ -474,7 +474,7 @@ fn ensure_apk_packages(rootfs_source_dir: &Path, packages: &[String]) -> Result<
     }
     fs::copy("/etc/resolv.conf", &resolv_conf).with_context(|| {
         format!(
-            "copying host resolv.conf into stage rootfs '{}'",
+            "copying host resolv.conf into prepared rootfs '{}'",
             resolv_conf.display()
         )
     })?;

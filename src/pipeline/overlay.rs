@@ -137,7 +137,7 @@ pub(crate) fn ensure_systemd_locale_completeness(rootfs_dir: &Path) -> Result<()
         .any(|rel| rootfs_dir.join(rel).is_file());
     if !has_utf8_payload {
         bail!(
-            "missing UTF-8 locale payload in Stage systemd rootfs '{}'; expected one of: {}",
+            "missing UTF-8 locale payload in live systemd rootfs '{}'; expected one of: {}",
             rootfs_dir.display(),
             locale_payload_candidates.join(", ")
         );

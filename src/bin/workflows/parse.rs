@@ -262,13 +262,14 @@ mod tests {
     }
 
     #[test]
-    fn product_parser_rejects_stage_aliases() {
-        let err = parse_product(Some("01Boot")).expect_err("stage alias must be rejected");
+    fn product_parser_rejects_legacy_checkpoint_aliases() {
+        let err =
+            parse_product(Some("01Boot")).expect_err("legacy checkpoint alias must be rejected");
         assert!(
             err.to_string().contains("unsupported product"),
             "unexpected error: {err:#}"
         );
-        let err = parse_product(Some("02")).expect_err("numeric stage alias must be rejected");
+        let err = parse_product(Some("02")).expect_err("numeric checkpoint alias must be rejected");
         assert!(
             err.to_string().contains("unsupported product"),
             "unexpected error: {err:#}"

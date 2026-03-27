@@ -341,7 +341,7 @@ pub fn test_iso_boot(
     let mut last_output = Instant::now();
     let mut output_buffer: Vec<String> = Vec::new();
 
-    // Boot stage tracking
+    // Boot phase tracking
     let mut saw_uefi = false;
     let mut saw_kernel = false;
     let mut saw_init = false;
@@ -368,7 +368,7 @@ pub fn test_iso_boot(
         // Check stall
         if last_output.elapsed() > stall_timeout {
             let _ = child.kill();
-            let stage = if saw_init {
+            let phase = if saw_init {
                 "Init started but stalled"
             } else if saw_kernel {
                 "Kernel started but init stalled"
@@ -379,7 +379,7 @@ pub fn test_iso_boot(
             };
             bail!(
                 "STALL: {} (no output for {}s)",
-                stage,
+                phase,
                 stall_timeout.as_secs()
             );
         }

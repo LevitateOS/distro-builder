@@ -225,7 +225,15 @@ fn is_built(ctx) {
 fn build(ctx) {
     ctx = _apply_kernel_spec(ctx, BUILD_DIR, KERNEL_KCONFIG_PATH);
     let distro_dir = dirname(BUILD_DIR);
-    let kconfig = join_path(distro_dir, "kconfig");
+    let canonical_kconfig = join_path(distro_dir, "build-host/kernel/kconfig");
+    let legacy_kconfig = join_path(distro_dir, "kconfig");
+    let kconfig = if KERNEL_KCONFIG_PATH != "" {
+        KERNEL_KCONFIG_PATH
+    } else if is_file(canonical_kconfig) {
+        canonical_kconfig
+    } else {
+        legacy_kconfig
+    };
     let build_dir = join_path(distro_dir, "output/kernel-build");
 
     if !is_file(kconfig) {

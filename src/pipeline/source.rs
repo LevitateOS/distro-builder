@@ -350,7 +350,7 @@ default_hostname = "levitate"
 
 [build_host]
 required_build_tools = ["recipe"]
-kernel_kconfig_path = "kconfig"
+kernel_kconfig_path = "kernel/kconfig"
 recipe_kernel_script = "distro-builder/recipes/linux.rhai"
 recipe_kernel_invocation = "recipe install"
 kernel_release_path = "boot/vmlinuz-linux"
@@ -362,7 +362,7 @@ kernel_localversion = "-levitate"
 module_install_path = "/usr/lib/modules"
 
 [build_host.evidence]
-script_path = "build-capability.sh"
+script_path = "evidence/build-capability.sh"
 pass_marker = "BUILD CAPABILITY PASSED"
 "#,
         );
@@ -551,7 +551,7 @@ default_hostname = "levitate"
 
 [build_host]
 required_build_tools = ["recipe"]
-kernel_kconfig_path = "kconfig"
+kernel_kconfig_path = "kernel/kconfig"
 recipe_kernel_script = "distro-builder/recipes/linux.rhai"
 recipe_kernel_invocation = "recipe install"
 kernel_release_path = "boot/vmlinuz-linux"
@@ -563,7 +563,7 @@ kernel_localversion = "-levitate"
 module_install_path = "/usr/lib/modules"
 
 [build_host.evidence]
-script_path = "build-capability.sh"
+script_path = "evidence/build-capability.sh"
 pass_marker = "BUILD CAPABILITY PASSED"
 "#,
         );
@@ -643,13 +643,16 @@ output_name = "levitate.iso"
 required_services = ["sshd"]
 "#,
         );
-        write_file(&variant_dir.join("build-host/kconfig"), "CONFIG_TEST=y\n");
+        write_file(
+            &variant_dir.join("build-host/kernel/kconfig"),
+            "CONFIG_TEST=y\n",
+        );
         write_file(
             &variant_dir.join("build-host/recipes/kernel.rhai"),
             "// recipe decl\n",
         );
         write_file(
-            &variant_dir.join("build-host/build-capability.sh"),
+            &variant_dir.join("build-host/evidence/build-capability.sh"),
             "#!/bin/sh\necho BUILD CAPABILITY PASSED\n",
         );
         write_file(

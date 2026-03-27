@@ -170,11 +170,17 @@ mod tests {
 
     #[test]
     fn kernel_recipe_defines_exclude_kernel_source_metadata() {
-        let defines = kernel_recipe_defines("distro-variants/levitate/kconfig", "/tmp/kernel");
+        let defines = kernel_recipe_defines(
+            "distro-variants/levitate/build-host/kernel/kconfig",
+            "/tmp/kernel",
+        );
         assert_eq!(
             defines,
             vec![
-                ("KERNEL_KCONFIG_PATH", "distro-variants/levitate/kconfig"),
+                (
+                    "KERNEL_KCONFIG_PATH",
+                    "distro-variants/levitate/build-host/kernel/kconfig"
+                ),
                 ("KERNEL_ARTIFACT_ROOT", "/tmp/kernel"),
             ]
         );

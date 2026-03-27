@@ -66,7 +66,15 @@ pub fn linux(
     }
     let recipe_path = shared_recipe;
 
-    let kconfig_path = base_dir.join("kconfig").to_string_lossy().to_string();
+    let canonical_kconfig_path = base_dir.join("build-host/kernel/kconfig");
+    let legacy_kconfig_path = base_dir.join("kconfig");
+    let kconfig_path = if canonical_kconfig_path.exists() {
+        canonical_kconfig_path
+    } else {
+        legacy_kconfig_path
+    }
+    .to_string_lossy()
+    .to_string();
     let defines: Vec<(&str, &str)> = vec![
         ("KERNEL_KCONFIG_PATH", &kconfig_path),
         ("KERNEL_ARTIFACT_ROOT", &kernel_artifact_root),

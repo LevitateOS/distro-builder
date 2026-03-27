@@ -345,13 +345,14 @@ pub fn get_kernel_version(build_dir: &Path) -> Result<String> {
 ///
 /// This is the standard entry point for distro builders. It:
 /// 1. Cleans up any stale kernel-build symlink (from previous runs)
-/// 2. Reads the kconfig file from `base_dir/kconfig`
+/// 2. Reads the kconfig file from `base_dir/build-host/kernel/kconfig`
+///    or the legacy `base_dir/kconfig`
 /// 3. Delegates to `build_kernel()`
 ///
 /// # Arguments
 /// * `kernel_source` - Path to kernel source tree
 /// * `output_dir` - Directory for build artifacts
-/// * `base_dir` - Project root (must contain a `kconfig` file)
+/// * `base_dir` - Project root (must contain a canonical or legacy kconfig file)
 ///
 /// # Returns
 /// The kernel version string
@@ -376,10 +377,16 @@ pub fn build_kernel_from_kconfig(
         println!("  Removed stale kernel-build symlink");
     }
 
-    let kconfig_path = base_dir.join("kconfig");
+    let canonical_kconfig_path = base_dir.join("build-host/kernel/kconfig");
+    let legacy_kconfig_path = base_dir.join("kconfig");
+    let kconfig_path = if canonical_kconfig_path.exists() {
+        canonical_kconfig_path
+    } else {
+        legacy_kconfig_path
+    };
     if !kconfig_path.exists() {
         bail!(
-            "Kernel config not found at {}\nExpected kconfig file in project root.",
+            "Kernel config not found at {}\nExpected build-host/kernel/kconfig or legacy kconfig file in project root.",
             kconfig_path.display()
         );
     }

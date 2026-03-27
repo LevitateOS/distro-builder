@@ -643,16 +643,25 @@ output_name = "levitate.iso"
 required_services = ["sshd"]
 "#,
         );
-        write_file(&variant_dir.join("kconfig"), "CONFIG_TEST=y\n");
-        write_file(&variant_dir.join("recipes/kernel.rhai"), "// recipe decl\n");
+        write_file(&variant_dir.join("build-host/kconfig"), "CONFIG_TEST=y\n");
         write_file(
-            &variant_dir.join("build-capability.sh"),
+            &variant_dir.join("build-host/recipes/kernel.rhai"),
+            "// recipe decl\n",
+        );
+        write_file(
+            &variant_dir.join("build-host/build-capability.sh"),
             "#!/bin/sh\necho BUILD CAPABILITY PASSED\n",
         );
-        write_file(&variant_dir.join("build-release.sh"), "#!/bin/sh\nexit 0\n");
-        write_file(&variant_dir.join("boot-release.sh"), "#!/bin/sh\nexit 0\n");
         write_file(
-            &variant_dir.join("live-tools-release.sh"),
+            &variant_dir.join("ring0/hooks/build-release.sh"),
+            "#!/bin/sh\nexit 0\n",
+        );
+        write_file(
+            &variant_dir.join("ring0/hooks/boot-release.sh"),
+            "#!/bin/sh\nexit 0\n",
+        );
+        write_file(
+            &variant_dir.join("ring0/hooks/live-tools-release.sh"),
             "#!/bin/sh\nexit 0\n",
         );
 

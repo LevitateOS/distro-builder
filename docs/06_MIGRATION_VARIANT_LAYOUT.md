@@ -411,6 +411,422 @@ After this migration it should either:
 
 The second option is the preferred end state.
 
+## Source Audit Findings
+
+This section records the current code reality so the migration can be done in
+the safest order instead of as a filesystem rename blast radius.
+
+### A. `distro-contract` is already the natural path owner
+
+The strongest signal from the source audit is that `distro-contract` should own
+this migration first.
+
+Why:
+
+- `distro-contract/src/variant.rs` already performs:
+  - repo-root discovery
+  - variant directory discovery
+  - ring-manifest loading
+  - support-file validation
+  - `LoadedVariantContract` construction
+- `LoadedVariantContract` is already the cross-crate object used by:
+  - `distro-builder`
+  - `testing/install-tests`
+
+Current flat-layout assumptions are concentrated there:
+
+- `load_ring_manifest_bundle`
+- top-level `validate_layout` requirements for:
+  - `kconfig`
+  - `recipes/kernel.rhai`
+  - `build-capability.sh`
+- test scaffolds that write ring manifests directly under variant root
+
+This means:
+
+- the best first move is not to touch per-variant files
+- the best first move is to teach `distro-contract` how to resolve both flat and
+  owner-directory layouts
+
+### B. `distro-builder` has a few high-value open-coded path assumptions
+
+The builder is not the best place to define canonical layout, but it has a few
+important consumer assumptions that must be migrated next.
+
+#### 1. Variant discovery is still flat-layout probing
+
+`distro-builder/src/bin/workflows/parse.rs` discovers distros by checking for
+`identity.toml` directly under variant root.
+
+That makes builder discovery a flat-layout owner even though the contract loader
+already exists.
+
+#### 2. Release hook lookup is still root-level and product-local
+
+`distro-builder/src/bin/distro-builder.rs` and
+`distro-builder/src/bin/workflows/parse.rs` still treat release hook identity as
+root-level filenames stored on `BuildProduct`.
+
+`distro-builder/src/bin/workflows/release_hook.rs` then resolves:
+
+- `bundle.variant_dir.join(release_hook_script)`
+
+That is the exact place where ring0 hook relocation will break unless hook
+resolution is lifted into a canonical path helper first.
+
+#### 3. Build-host asset resolution still joins `variant_dir` with declared paths
+
+`distro-builder/src/pipeline/kernel.rs` still does both:
+
+- `variant_dir.join(&spec.kernel_kconfig_path)`
+- `variant_dir.join(&spec.script_path)`
+
+This is a second strong reason to centralize canonical owner paths before moving
+`kconfig` or `build-capability.sh`.
+
+#### 4. Some direct ring-file reads are now test-only and should stay secondary
+
+`distro-builder/src/pipeline/source.rs` still reads
+`variant_dir.join("ring3-sources.toml")`, but that path is gated behind
+`#[cfg(test)]`.
+
+This matters, but it is not on the highest-risk critical path compared to:
+
+- loader path ownership
+- kernel support files
+- release hook lookup
+
+### C. `testing/install-tests` has two different kinds of migration debt
+
+The audit found two categories here.
+
+#### 1. Runtime/preflight code mostly already goes through the contract
+
+`testing/install-tests/src/preflight.rs` already consumes
+`LoadedVariantContract`, so once the canonical resolver exists its main path
+dependencies should improve automatically.
+
+#### 2. A few helpers still bypass the contract or hardcode current layout
+
+`testing/install-tests/src/distro/mod.rs` still reparses:
+
+- `distro-variants/<distro>/scenarios.toml`
+
+directly for install experience.
+
+This should be deleted in favor of the already loaded contract.
+
+Also, the variant-specific distro files still hardcode compile-time overlay
+paths:
+
+- `testing/install-tests/src/distro/acorn.rs`
+- `testing/install-tests/src/distro/iuppiter.rs`
+
+via `include_str!(...)` pointing at:
+
+- `profile/live-overlay/...`
+
+Those are isolated and should be migrated late, after the resolver and general
+consumer migration are already stable.
+
+### D. `xtask` is a separate migration slice because it does not yet depend on `distro-contract`
+
+`xtask/src/tasks/kernels/common.rs` currently open-codes:
+
+- `root.join("distro-variants").join(distro_id).join("kconfig")`
+
+But `xtask/Cargo.toml` does not currently depend on `distro-contract`.
+
+That means `xtask` should not be the first consumer migrated.
+
+The lowest-risk order is:
+
+1. stabilize canonical path resolution in `distro-contract`
+2. migrate `distro-builder` and `testing/install-tests`
+3. then add the small `xtask` dependency/configuration change needed to consume
+   the same resolver
+
+### E. The highest-risk constraint is the build-host path declaration lock
+
+The current source has a hard lock on old build-host paths:
+
+- `distro-contract/src/build_host_legacy.rs`
+
+with constants:
+
+- `REQUIRED_VARIANT_KCONFIG = "kconfig"`
+- `REQUIRED_VARIANT_RECIPE_DECL = "recipes/kernel.rhai"`
+
+And `distro-contract/src/variant.rs` validates against those exact root-level
+locations today.
+
+This means:
+
+- moving build-host support files early would create avoidable validator/runtime
+  churn
+- the migration must loosen or dual-home this validation before any actual file
+  move for build-host assets
+
+## Best Migration Path
+
+The safest migration order is:
+
+1. move path ownership into one resolver first
+2. migrate all active consumers to that resolver
+3. only then move files on disk
+4. remove compatibility last
+
+This is the opposite of a naive "move folders, then fix breakage" approach.
+
+That naive approach would create simultaneous fallout in:
+
+- `distro-contract`
+- `distro-builder`
+- `testing/install-tests`
+- `xtask`
+- variant shell hooks
+- compile-time `include_str!` tests
+
+The resolver-first path keeps the problem bounded.
+
+## Recommended PR Stack
+
+This is the recommended implementation order based on the source audit.
+
+### PR 1. Introduce Canonical Variant Path Resolution In `distro-contract`
+
+Goal:
+
+- create a single resolver API for:
+  - owner manifest paths
+  - build-host support files
+  - ring0 hook paths
+  - optional ring2 overlay roots
+
+Recommended shape:
+
+- add a public path struct such as:
+  - `VariantOwnerPaths`
+- attach it to:
+  - `LoadedVariantContract`
+- include layout mode information such as:
+  - `FlatRoot`
+  - `OwnerDirectories`
+
+Required behavior:
+
+- accept either old flat layout or new owner-directory layout
+- reject duplicate old+new ownership for the same file
+
+Do not move any files in this PR.
+
+Why first:
+
+- this is the smallest change that removes the biggest architectural risk
+
+### PR 2. Migrate `distro-builder` To Resolver-Owned Paths With No File Moves
+
+Goal:
+
+- eliminate open-coded variant layout assumptions from the active builder path
+
+Required work:
+
+- change distro discovery in `src/bin/workflows/parse.rs`
+- change release hook lookup in `src/bin/workflows/release_hook.rs`
+- change build-host support-file resolution in `src/pipeline/kernel.rs`
+- remove any remaining diagnostics that hardcode old flat owner file locations
+
+Recommended cleanup:
+
+- stop storing root-level hook filenames on `BuildProduct`
+- prefer either:
+  - a logical hook kind
+  - or a canonical resolver-owned relative hook path
+
+Do not move files in this PR either.
+
+Why second:
+
+- once builder consumers use the resolver, actual file movement becomes a data
+  migration instead of a code + data migration
+
+### PR 3. Migrate `testing/install-tests` Off Raw Flat Paths
+
+Goal:
+
+- remove direct flat-layout parsing from the test harness
+
+Required work:
+
+- delete direct `scenarios.toml` reparsing in `src/distro/mod.rs`
+- load install experience through `distro-contract`
+- let preflight/runtime continue consuming `LoadedVariantContract`
+
+Do not touch `include_str!` overlay instrumentation yet.
+
+Why separate:
+
+- this PR is low-risk, easy to test, and keeps the late compile-time overlay
+  paths isolated
+
+### PR 4. Add `distro-contract` Dependency To `xtask` And Migrate Kernel Path Resolution
+
+Goal:
+
+- remove open-coded variant `kconfig` path assembly from `xtask`
+
+Required work:
+
+- add `distro-contract` as a direct dependency in `xtask/Cargo.toml`
+- replace `distro-variants/<distro>/kconfig` path joining in
+  `xtask/src/tasks/kernels/common.rs`
+- consume the same canonical resolver as the rest of the repo
+
+Why here:
+
+- `xtask` is not on the critical path for loader correctness
+- migrating it after the resolver API stabilizes avoids churn
+
+### PR 5. Move Owner Manifest Files Into Owner Directories
+
+Goal:
+
+- relocate:
+  - `identity.toml`
+  - `build-host.toml`
+  - `ring3-sources.toml`
+  - `ring2-products.toml`
+  - `ring1-transforms.toml`
+  - `ring0-release.toml`
+  - `scenarios.toml`
+
+for all active variants.
+
+Required work:
+
+- move files on disk
+- update fixture/test scaffolds that write flat manifest files
+- keep compatibility window active
+
+Why now:
+
+- by this point all major consumers should already be layout-agnostic
+
+### PR 6. Move Build-Host Support Assets And Update Declared Paths
+
+Goal:
+
+- relocate:
+  - `kconfig`
+  - `recipes/kernel.rhai`
+  - `build-capability.sh`
+
+under `build-host/`
+
+Required work:
+
+- update build-host declarations as needed
+- update `distro-contract/src/build_host_legacy.rs`
+- update validator/runtime expectations
+- update temp/test fixtures that still write the old root-level files
+
+Why after manifest moves:
+
+- this is the highest-risk path slice because validators, runtime checks, and
+  kernel tooling all touch it
+
+### PR 7. Move Ring 0 Hooks And Shared Release Helpers
+
+Goal:
+
+- relocate per-variant hooks into `ring0/hooks/`
+- relocate shared helpers into `_shared/ring0/hooks/`
+
+Required work:
+
+- move variant files:
+  - `build-release.sh`
+  - `boot-release.sh`
+  - `live-tools-release.sh`
+- move shared files:
+  - `_shared/build-release.sh`
+  - `_shared/release-artifacts.sh`
+- update shell-script relative repo-root calculations because the scripts will
+  now live deeper in the tree
+
+Why after PR 2:
+
+- builder-side hook lookup will already be resolver-owned
+- only the shell entrypoints and file locations change here
+
+### PR 8. Move Ring 2 Overlay Assets
+
+Goal:
+
+- relocate variant-local overlay material from `profile/live-overlay` into
+  `ring2/overlays/live`
+
+Required work:
+
+- move `acorn` and `iuppiter` overlay directories
+- update ring2 manifest values
+- update compile-time `include_str!` paths in:
+  - `testing/install-tests/src/distro/acorn.rs`
+  - `testing/install-tests/src/distro/iuppiter.rs`
+- update any user-facing diagnostics that still mention `profile/live-overlay`
+
+Why late:
+
+- this is not loader-critical
+- it has compile-time path fallout
+- it is isolated to two variants
+
+### PR 9. Remove Compatibility And Enforce Owner-Directory Layout Only
+
+Goal:
+
+- delete flat-layout fallback behavior
+
+Required work:
+
+- remove dual-path loader support
+- fail on root-level owner files
+- delete stale tests/docs/examples that still teach flat layout
+
+Why last:
+
+- compatibility exists only to reduce migration blast radius
+- it should be removed as soon as all variants and consumers are converted
+
+## Concrete Phase-to-PR Mapping
+
+The existing six migration phases should map to the implementation stack like
+this:
+
+- Phase 1:
+  - PR 1
+- Phase 2:
+  - PR 5
+- Phase 3:
+  - PR 6
+- Phase 4:
+  - PR 7
+- Phase 5:
+  - PR 8
+- Phase 6:
+  - PR 9
+
+Cross-cutting consumer migration that should happen before any real file move:
+
+- PR 2
+- PR 3
+- PR 4
+
+Those three PRs are the main result of the source investigation.
+They are the difference between a low-risk layout migration and a repo-wide
+break/fix scramble.
+
 ## Compatibility Window
 
 This track should use a short dual-path compatibility window.

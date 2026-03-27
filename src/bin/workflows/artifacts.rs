@@ -7,10 +7,10 @@ use distro_builder::recipe::rootfs_source::preseed_rootfs_source_dvd;
 use distro_builder::{build_erofs_default, build_overlayfs_default};
 use distro_builder::{
     load_base_rootfs_product_spec, load_installed_boot_product_spec, load_live_boot_product_spec,
-    load_live_tools_product_spec, materialize_live_boot_source_rootfs, prepare_base_rootfs_product,
-    prepare_installed_boot_product, prepare_live_boot_product, prepare_live_tools_product,
-    resolve_release_product_rootfs_image_for_distro, BaseProductLayout, DerivedProductLayout,
-    OverlayLayout, ParentRootfsInput,
+    load_live_tools_product_spec, materialize_live_boot_source_rootfs, plan_product_realization,
+    prepare_base_rootfs_product, prepare_installed_boot_product, prepare_live_boot_product,
+    prepare_live_tools_product, BaseProductLayout, DerivedProductLayout, OverlayLayout,
+    ParentRootfsInput, ProductRealizationStep,
 };
 use distro_contract::{
     load_variant_contract_bundle_for_distro_from, ConformanceContract, LoadedVariantContract,
@@ -169,7 +169,25 @@ pub(crate) fn prepare_product_cmd(product: &str, distro_id: &str, output_dir: &P
                 product.canonical, distro_id
             )
         })?;
-    let prepared = prepare_product_inputs(&bundle, product, distro_id, output_dir)?;
+    let realization_plan = plan_product_realization(
+        &bundle.repo_root,
+        distro_id,
+        &bundle.contract,
+        product.canonical,
+    )
+    .with_context(|| {
+        format!(
+            "planning canonical product realization for '{}' on '{}'",
+            product.canonical, distro_id
+        )
+    })?;
+    let planned_step = realization_plan.requested_step().with_context(|| {
+        format!(
+            "looking up requested realization step for canonical product '{}' on '{}'",
+            product.canonical, distro_id
+        )
+    })?;
+    let prepared = prepare_product_inputs(&bundle, product, distro_id, output_dir, planned_step)?;
     let output_names = canonical_prepared_output_names(&bundle.contract, product)
         .with_context(|| format!("resolving canonical Ring 1 outputs for '{}'", distro_id))?;
     let source_path_file =
@@ -190,7 +208,17 @@ fn prepare_product_inputs(
     product: crate::BuildProduct,
     distro_id: &str,
     output_dir: &Path,
+    planned_step: &ProductRealizationStep,
 ) -> Result<PreparedProductInputs> {
+    if planned_step.product != product.canonical {
+        bail!(
+            "planner mismatch while preparing canonical product '{}' on '{}': requested step resolved '{}' instead\nRemediation: regenerate the planner-backed realization chain before calling the preparer",
+            product.canonical,
+            distro_id,
+            planned_step.product
+        );
+    }
+
     match product.canonical {
         crate::PRODUCT_BASE_ROOTFS => {
             let output_root =
@@ -216,7 +244,7 @@ fn prepare_product_inputs(
         crate::PRODUCT_LIVE_BOOT => {
             let layout = canonical_derived_product_layout(&bundle.contract, product)?;
             let resolved_parent_rootfs_image =
-                resolve_parent_rootfs_image(&bundle.repo_root, distro_id, &layout)?;
+                planned_parent_rootfs_image(planned_step, product, distro_id, &layout)?;
             let spec = load_live_boot_product_spec(
                 &bundle.repo_root,
                 &bundle.variant_dir,
@@ -237,7 +265,7 @@ fn prepare_product_inputs(
         crate::PRODUCT_LIVE_TOOLS => {
             let layout = canonical_derived_product_layout(&bundle.contract, product)?;
             let resolved_parent_rootfs_image =
-                resolve_parent_rootfs_image(&bundle.repo_root, distro_id, &layout)?;
+                planned_parent_rootfs_image(planned_step, product, distro_id, &layout)?;
             let spec = load_live_tools_product_spec(
                 &bundle.repo_root,
                 &bundle.variant_dir,
@@ -258,7 +286,7 @@ fn prepare_product_inputs(
         crate::PRODUCT_INSTALLED_BOOT => {
             let layout = canonical_derived_product_layout(&bundle.contract, product)?;
             let resolved_parent_rootfs_image =
-                resolve_parent_rootfs_image(&bundle.repo_root, distro_id, &layout)?;
+                planned_parent_rootfs_image(planned_step, product, distro_id, &layout)?;
             let spec = load_installed_boot_product_spec(
                 &bundle.repo_root,
                 &bundle.variant_dir,
@@ -279,6 +307,27 @@ fn prepare_product_inputs(
         }
         _ => unreachable!("validated in parse_product"),
     }
+}
+
+fn planned_parent_rootfs_image(
+    planned_step: &ProductRealizationStep,
+    product: crate::BuildProduct,
+    distro_id: &str,
+    layout: &DerivedProductLayout,
+) -> Result<PathBuf> {
+    planned_step
+        .resolved_parent_rootfs_image
+        .clone()
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "planner did not resolve parent release '{}' for canonical product '{}' on '{}'\nRemediation: use the planner-backed `distro-builder product prepare {} {} <output_dir>` entrypoint after parent release realization succeeds",
+                layout.parent_rootfs.producer_label,
+                product.canonical,
+                distro_id,
+                product.canonical,
+                distro_id
+            )
+        })
 }
 
 pub(crate) fn preseed_rootfs_source_cmd(distro_id: &str, refresh: bool) -> Result<()> {
@@ -366,24 +415,4 @@ fn canonical_live_boot_product_spec(
         distro_id,
         layout,
     )
-}
-
-fn resolve_parent_rootfs_image(
-    repo_root: &Path,
-    distro_id: &str,
-    layout: &DerivedProductLayout,
-) -> Result<PathBuf> {
-    resolve_release_product_rootfs_image_for_distro(
-        repo_root,
-        distro_id,
-        &layout.parent_rootfs.release_dir_name,
-        &layout.parent_rootfs.producer_label,
-        &layout.parent_rootfs.rootfs_filename,
-    )
-    .with_context(|| {
-        format!(
-            "resolving canonical parent release rootfs '{}' for '{}'",
-            layout.parent_rootfs.producer_label, distro_id
-        )
-    })
 }

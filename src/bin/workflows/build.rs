@@ -17,9 +17,14 @@ pub(crate) fn ensure_release_prerequisites(
 ) -> Result<()> {
     let bundle = load_variant_contract_bundle_for_distro_from(repo_root, distro_id)
         .with_context(|| format!("loading variant contract for '{}'", distro_id))?;
-    let missing_prerequisites =
-        missing_release_prerequisite_products(repo_root, distro_id, product, &bundle.contract)?;
-    for prerequisite in missing_prerequisites {
+    let prerequisite_plan = distro_builder::plan_release_prerequisite_realization(
+        repo_root,
+        distro_id,
+        &bundle.contract,
+        product.canonical,
+    )?;
+    for prerequisite in prerequisite_plan.missing_products() {
+        let prerequisite = crate::workflows::parse_product(Some(prerequisite))?;
         println!(
             "[release:iso:{}:{distro_id}] materializing missing parent release '{}'...",
             product.canonical, prerequisite.canonical
@@ -28,42 +33,6 @@ pub(crate) fn ensure_release_prerequisites(
     }
 
     Ok(())
-}
-
-fn missing_release_prerequisite_products(
-    repo_root: &Path,
-    distro_id: &str,
-    product: BuildProduct,
-    contract: &distro_contract::ConformanceContract,
-) -> Result<Vec<BuildProduct>> {
-    let rootfs_filename = crate::workflows::canonical_rootfs_erofs_filename(contract)?;
-    let prerequisite_products =
-        distro_builder::plan_release_prerequisite_products(contract, product.canonical)?;
-    let mut missing = Vec::new();
-    for canonical in prerequisite_products {
-        let prerequisite = crate::workflows::parse_product(Some(&canonical))?;
-        if !release_product_rootfs_exists(repo_root, distro_id, prerequisite, &rootfs_filename)? {
-            missing.push(prerequisite);
-        }
-    }
-    Ok(missing)
-}
-
-fn release_product_rootfs_exists(
-    repo_root: &Path,
-    distro_id: &str,
-    product: BuildProduct,
-    rootfs_filename: &str,
-) -> Result<bool> {
-    let product_root = crate::artifact_paths::release_product_dir_for(
-        repo_root,
-        distro_id,
-        product.release_dir_name,
-    );
-    let Some(run_id) = crate::run_history::latest_successful_run_id(&product_root)? else {
-        return Ok(false);
-    };
-    Ok(product_root.join(run_id).join(rootfs_filename).is_file())
 }
 
 pub(crate) fn enforce_legacy_binding_policy_guard() -> Result<()> {
@@ -303,10 +272,6 @@ pub(crate) fn now_utc_compact() -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use distro_contract::load_variant_contract_for_distro_from;
-    use serde_json::json;
-    use std::fs;
-    use std::path::PathBuf;
 
     #[test]
     fn product_iso_filename_is_product_native() {
@@ -345,91 +310,6 @@ mod tests {
             "run dir '{}' must live under release root '{}'",
             layout.output_dir.display(),
             layout.root_dir.display()
-        );
-    }
-
-    fn workspace_contract(distro_id: &str) -> distro_contract::ConformanceContract {
-        let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("..")
-            .canonicalize()
-            .expect("canonicalize workspace root");
-        load_variant_contract_for_distro_from(&repo_root, distro_id)
-            .unwrap_or_else(|err| panic!("failed to load {} contract: {}", distro_id, err))
-    }
-
-    fn write_successful_release_rootfs(
-        repo_root: &Path,
-        distro_id: &str,
-        product: BuildProduct,
-        rootfs_filename: &str,
-    ) {
-        let run_dir = crate::artifact_paths::release_product_dir_for(
-            repo_root,
-            distro_id,
-            product.release_dir_name,
-        )
-        .join("run-1");
-        fs::create_dir_all(&run_dir).expect("create run dir");
-        fs::write(
-            crate::run_history::manifest_path(&run_dir),
-            serde_json::to_vec_pretty(&json!({
-                "run_id": "run-1",
-                "status": "success",
-                "created_at_utc": "20260313T120000Z",
-                "finished_at_utc": "20260313T120001Z",
-            }))
-            .expect("serialize manifest"),
-        )
-        .expect("write run manifest");
-        fs::write(run_dir.join(rootfs_filename), b"rootfs").expect("write rootfs");
-    }
-
-    #[test]
-    fn missing_release_prerequisites_follow_product_chain_order() {
-        let repo_root = tempfile::tempdir().expect("repo tempdir");
-        let contract = workspace_contract("levitate");
-        let product = crate::workflows::parse_product(Some(crate::PRODUCT_LIVE_TOOLS))
-            .expect("parse live-tools");
-        let missing =
-            missing_release_prerequisite_products(repo_root.path(), "levitate", product, &contract)
-                .expect("resolve missing prerequisites");
-        assert_eq!(
-            missing
-                .into_iter()
-                .map(|product| product.canonical.to_string())
-                .collect::<Vec<_>>(),
-            vec![
-                crate::PRODUCT_BASE_ROOTFS.to_string(),
-                crate::PRODUCT_LIVE_BOOT.to_string(),
-            ]
-        );
-    }
-
-    #[test]
-    fn missing_release_prerequisites_skip_existing_parent_rootfs() {
-        let repo_root = tempfile::tempdir().expect("repo tempdir");
-        let contract = workspace_contract("levitate");
-        let rootfs_filename = crate::workflows::canonical_rootfs_erofs_filename(&contract)
-            .expect("resolve rootfs filename");
-        write_successful_release_rootfs(
-            repo_root.path(),
-            "levitate",
-            crate::workflows::parse_product(Some(crate::PRODUCT_BASE_ROOTFS))
-                .expect("parse base-rootfs"),
-            &rootfs_filename,
-        );
-
-        let product = crate::workflows::parse_product(Some(crate::PRODUCT_LIVE_TOOLS))
-            .expect("parse live-tools");
-        let missing =
-            missing_release_prerequisite_products(repo_root.path(), "levitate", product, &contract)
-                .expect("resolve missing prerequisites");
-        assert_eq!(
-            missing
-                .into_iter()
-                .map(|product| product.canonical.to_string())
-                .collect::<Vec<_>>(),
-            vec![crate::PRODUCT_LIVE_BOOT.to_string()]
         );
     }
 }

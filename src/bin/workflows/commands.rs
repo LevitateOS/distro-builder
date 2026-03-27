@@ -36,8 +36,8 @@ pub(crate) fn run_release_build_command(args: &[String]) -> Result<()> {
 
     let (distro_id, product) =
         crate::workflows::parse_release_build_command(build_args, &repo_root)?;
-    crate::workflows::preflight_iso_build(&repo_root, &distro_id, product)?;
     crate::workflows::enforce_legacy_binding_policy_guard()?;
+    crate::workflows::ensure_release_prerequisites(&repo_root, &distro_id, product)?;
     crate::workflows::build_one(&distro_id, product)
 }
 

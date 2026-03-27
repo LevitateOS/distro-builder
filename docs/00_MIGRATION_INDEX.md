@@ -20,11 +20,16 @@ This directory tracks the current high-level distro-builder migration work as nu
    Status: in_progress
    Scope: replace the remaining mixed stage-era manifest ownership with ring-native ownership across `identity`, `build_host`, `ring3_sources`, `ring2_products`, `ring1_transforms`, `ring0_release`, and `scenarios`, then delete the old stage-era manifest families entirely.
 
+5. [05_MIGRATION_RING_EXECUTION_MODEL.md](05_MIGRATION_RING_EXECUTION_MODEL.md)
+   Status: ready
+   Scope: make ring/process orchestration real after ownership migration by requiring outer-target selection, inward dependency resolution, and inner-to-outer materialization without manual stage choreography.
+
 ## Recommended Order
 
 1. Keep the current A/B runtime/update model and improve its contract/install/test ownership as part of the product-model transition.
 2. Start the filesystem-first migration from `distro-contract`, then move builder/test routing after product ownership is real.
 3. After Track 03 semantics are in place, start Track 04 to redistribute mixed manifest ownership into the ring model before attempting final naming purges.
+4. After Track 04 ownership is real, complete Track 05 so the planner and default operator flow are ring-native in execution as well as naming/ownership.
 
 ## Why This Split Exists
 
@@ -32,3 +37,4 @@ This directory tracks the current high-level distro-builder migration work as nu
 - The `bootc` track was evaluated and cancelled in favor of keeping the current A/B model.
 - The filesystem-first/product-model migration is now the primary architecture track and should start at contract ownership instead of surface-level CLI renames.
 - The ring-model track exists because Track 03 revealed the remaining problem is mixed ownership, not just leftover stage vocabulary.
+- The ring-execution track exists because ownership migration alone does not guarantee that the real build path stops behaving like a stage-driven system.

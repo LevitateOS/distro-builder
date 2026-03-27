@@ -11,7 +11,7 @@ pub(crate) use artifacts::{
     materialize_rootfs_source_cmd, prepare_product_cmd, preseed_rootfs_source_cmd,
 };
 pub(crate) use build::{
-    build_all, build_one, enforce_legacy_binding_policy_guard, preflight_iso_build,
+    build_all, build_one, enforce_legacy_binding_policy_guard, ensure_release_prerequisites,
 };
 pub(crate) use commands::{
     dispatch_non_release_command, is_release_build_invocation, run_release_build_command,

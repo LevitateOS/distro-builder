@@ -161,6 +161,13 @@ pub(crate) fn prepare_product_cmd(product: &str, distro_id: &str, output_dir: &P
     let cwd = std::env::current_dir().context("resolving current directory")?;
     let bundle = load_variant_contract_bundle_for_distro_from(&cwd, distro_id)
         .with_context(|| format!("loading canonical variant contract for '{}'", distro_id))?;
+    crate::workflows::ensure_release_prerequisites(&bundle.repo_root, distro_id, product)
+        .with_context(|| {
+            format!(
+                "realizing parent release prerequisites for product '{}' on '{}'",
+                product.canonical, distro_id
+            )
+        })?;
     let prepared = prepare_product_inputs(&bundle, product, distro_id, output_dir)?;
     let output_names = canonical_prepared_output_names(&bundle.contract, product)
         .with_context(|| format!("resolving canonical Ring 1 outputs for '{}'", distro_id))?;

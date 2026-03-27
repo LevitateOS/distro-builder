@@ -331,9 +331,9 @@ mod tests {
         fs::write(path, content).expect("write file");
     }
 
-    fn write_minimal_flat_variant_scaffold(variant_dir: &Path) {
+    fn write_minimal_variant_scaffold(variant_dir: &Path) {
         write_file(
-            &variant_dir.join("identity.toml"),
+            &variant_dir.join("identity/identity.toml"),
             r#"schema_version = 6
 
 [identity]
@@ -345,7 +345,7 @@ default_hostname = "levitate"
 "#,
         );
         write_file(
-            &variant_dir.join("build-host.toml"),
+            &variant_dir.join("build-host/build-host.toml"),
             r#"schema_version = 6
 
 [build_host]
@@ -367,7 +367,7 @@ pass_marker = "BUILD CAPABILITY PASSED"
 "#,
         );
         write_file(
-            &variant_dir.join("ring2-products.toml"),
+            &variant_dir.join("ring2/products.toml"),
             r#"schema_version = 6
 
 [ring2_products.rootfs_base]
@@ -400,7 +400,7 @@ description = "Kernel image and modules staging product"
 "#,
         );
         write_file(
-            &variant_dir.join("ring1-transforms.toml"),
+            &variant_dir.join("ring1/transforms.toml"),
             r#"schema_version = 6
 
 [ring1_transforms.rootfs]
@@ -417,7 +417,7 @@ output_names = ["live.efi", "emergency.efi", "debug.efi"]
 "#,
         );
         write_file(
-            &variant_dir.join("ring0-release.toml"),
+            &variant_dir.join("ring0/release.toml"),
             r#"schema_version = 6
 
 [ring0_release.iso]
@@ -425,7 +425,7 @@ output_name = "levitate.iso"
 "#,
         );
         write_file(
-            &variant_dir.join("scenarios.toml"),
+            &variant_dir.join("scenarios/scenarios.toml"),
             r#"schema_version = 6
 
 [scenarios.live_environment]
@@ -507,9 +507,9 @@ required_services = ["sshd"]
     fn ring3_rootfs_source_policy_loads_from_canonical_owner() {
         let repo_root = temp_repo_root("ring3-canonical");
         let variant_dir = repo_root.join("distro-variants/levitate");
-        write_minimal_flat_variant_scaffold(&variant_dir);
+        write_minimal_variant_scaffold(&variant_dir);
         write_file(
-            &variant_dir.join("ring3-sources.toml"),
+            &variant_dir.join("ring3/sources.toml"),
             r#"schema_version = 6
 
 [ring3_sources.rootfs_source]
@@ -682,7 +682,7 @@ required_services = ["sshd"]
     fn ring3_rootfs_source_policy_requires_canonical_owner() {
         let repo_root = temp_repo_root("ring3-missing");
         let variant_dir = repo_root.join("distro-variants/levitate");
-        write_minimal_flat_variant_scaffold(&variant_dir);
+        write_minimal_variant_scaffold(&variant_dir);
         let err = load_rootfs_source_policy(&repo_root, &variant_dir)
             .expect_err("missing ring3 rootfs source should fail");
         assert!(

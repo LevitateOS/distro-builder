@@ -196,8 +196,7 @@ pub(crate) fn discover_distro_ids(repo_root: &Path) -> Result<Vec<String>> {
             continue;
         }
 
-        let has_identity_manifest = path.join("identity.toml").is_file()
-            || path.join("identity").join("identity.toml").is_file();
+        let has_identity_manifest = path.join("identity").join("identity.toml").is_file();
         if !has_identity_manifest {
             continue;
         }
@@ -213,7 +212,7 @@ pub(crate) fn discover_distro_ids(repo_root: &Path) -> Result<Vec<String>> {
 
     if distro_ids.is_empty() {
         bail!(
-            "no distro variants discovered under '{}'; expected directories with identity.toml or identity/identity.toml",
+            "no distro variants discovered under '{}'; expected directories with identity/identity.toml",
             variants_dir.display()
         );
     }

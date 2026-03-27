@@ -673,7 +673,7 @@ mod tests {
 
     fn write_live_tools_ring_scaffold(variant_dir: &Path) {
         write_file(
-            &variant_dir.join("identity.toml"),
+            &variant_dir.join("identity/identity.toml"),
             r#"schema_version = 6
 
 [identity]
@@ -685,7 +685,7 @@ default_hostname = "levitate"
 "#,
         );
         write_file(
-            &variant_dir.join("scenarios.toml"),
+            &variant_dir.join("scenarios/scenarios.toml"),
             r#"schema_version = 6
 
 [scenarios.live_environment]
@@ -696,7 +696,7 @@ install_experience = "ux"
 "#,
         );
         write_file(
-            &variant_dir.join("ring2-products.toml"),
+            &variant_dir.join("ring2/products.toml"),
             r#"schema_version = 6
 
 [ring2_products.rootfs_base]
@@ -764,7 +764,7 @@ description = "Kernel image and modules staging product"
 "#,
         );
         write_file(
-            &variant_dir.join("ring3-sources.toml"),
+            &variant_dir.join("ring3/sources.toml"),
             r#"schema_version = 6
 
 [ring3_sources.rootfs_source]
@@ -869,7 +869,7 @@ preseed_recipe_script = "distro-builder/recipes/fedora-preseed-iso.rhai"
         write_live_tools_ring_scaffold(&variant_dir);
         let contract = workspace_contract("levitate");
         write_file(
-            &variant_dir.join("scenarios.toml"),
+            &variant_dir.join("scenarios/scenarios.toml"),
             r#"schema_version = 6
 
 [scenarios.live_environment]

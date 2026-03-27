@@ -109,24 +109,23 @@ Date: 2026-03-27
 - canonical `build-host` support and `ring0/hooks` paths are already migrated
 - OpenRC live overlay seeds already live under `ring2/overlays/live/`
 
-### What still remains
+### What just landed
 
 1. Compatibility loader removal
-   - `distro-contract/src/variant.rs` still accepts:
+   - `distro-contract/src/variant.rs` now rejects:
      - flat-root manifests
      - legacy owner-dir ring filenames such as `ring3-sources.toml`
+     - flat-root build-host support files and flat `ring0` hook layouts
 2. Legacy key removal
-   - `distro-contract/src/variant.rs` still accepts `profile_overlay` as a
-     compatibility alias for `seed_overlay`
+   - `distro-contract/src/variant.rs` no longer accepts `profile_overlay`
 3. Fixture/doc cleanup
-   - some tests and migration docs still intentionally exercise or describe the
-     older compatibility layouts
+   - `distro-builder` fixtures now generate canonical owner-directory layouts by default
 
 ### Recommended next slices
 
-1. Update remaining fixtures/docs so canonical owner-layout examples dominate.
-2. Remove flat-root and legacy owner-filename loading from the resolver.
-3. Remove the `profile_overlay` compatibility alias after the resolver cleanup lands.
+1. Remove transition-only path-layout metadata from `distro-contract` once downstream callers no longer need it.
+2. Keep docs/examples canonical so new fixtures do not reintroduce flat-root layouts.
+3. Continue into Track 03/05 stage-residue cleanup now that layout compatibility is closed.
 
 ## Canonical Target Tree
 

@@ -24,7 +24,7 @@ use crate::pipeline::plan::ensure_non_legacy_rootfs_source;
 use crate::pipeline::plan::{
     apply_producer_plan, build_baseline_producers, ProducerPlan, RootfsProducer,
 };
-use crate::pipeline::scripts::install_stage_test_scripts;
+use crate::pipeline::scripts::install_scenario_test_scripts;
 use crate::pipeline::source::{
     cleanup_legacy_provider_dir, materialize_source_rootfs, RootfsSourcePolicy,
 };
@@ -292,9 +292,9 @@ pub fn prepare_live_boot_product(
             spec.distro_id
         )
     })?;
-    install_stage_test_scripts(&spec.repo_root, &rootfs_source_dir).with_context(|| {
+    install_scenario_test_scripts(&spec.repo_root, &rootfs_source_dir).with_context(|| {
         format!(
-            "installing stage test scripts into live boot rootfs for '{}'",
+            "installing scenario test scripts into live boot rootfs for '{}'",
             spec.distro_id
         )
     })?;
@@ -449,9 +449,9 @@ pub fn prepare_live_tools_product(
         )
     })?;
 
-    install_stage_test_scripts(&spec.repo_root, &rootfs_source_dir).with_context(|| {
+    install_scenario_test_scripts(&spec.repo_root, &rootfs_source_dir).with_context(|| {
         format!(
-            "installing stage test scripts into live tools rootfs for '{}'",
+            "installing scenario test scripts into live tools rootfs for '{}'",
             spec.distro_id
         )
     })?;

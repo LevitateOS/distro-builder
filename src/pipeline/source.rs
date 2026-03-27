@@ -1,4 +1,6 @@
 use anyhow::{bail, Context, Result};
+#[cfg(test)]
+use distro_contract::resolve_variant_owner_paths;
 use distro_contract::{ConformanceContract, RootfsSourceContract, RootfsSourceKind};
 use std::collections::BTreeMap;
 use std::fs;
@@ -54,7 +56,14 @@ pub(crate) fn load_rootfs_source_policy(
     repo_root: &Path,
     variant_dir: &Path,
 ) -> Result<Option<RootfsSourcePolicy>> {
-    let ring3_config_path = variant_dir.join("ring3-sources.toml");
+    let ring3_config_path = resolve_variant_owner_paths(variant_dir)
+        .with_context(|| {
+            format!(
+                "resolving canonical Ring 3 owner path for '{}'",
+                variant_dir.display()
+            )
+        })?
+        .ring3_sources_manifest;
     if !ring3_config_path.is_file() {
         bail!(
             "missing canonical Ring 3 source owner for '{}': expected '{}'",
@@ -322,6 +331,109 @@ mod tests {
         fs::write(path, content).expect("write file");
     }
 
+    fn write_minimal_flat_variant_scaffold(variant_dir: &Path) {
+        write_file(
+            &variant_dir.join("identity.toml"),
+            r#"schema_version = 6
+
+[identity]
+os_name = "LevitateOS"
+os_id = "levitateos"
+iso_label = "LEVITATE"
+os_version = "0.1.0"
+default_hostname = "levitate"
+"#,
+        );
+        write_file(
+            &variant_dir.join("build-host.toml"),
+            r#"schema_version = 6
+
+[build_host]
+required_build_tools = ["recipe"]
+kernel_kconfig_path = "kconfig"
+recipe_kernel_script = "distro-builder/recipes/linux.rhai"
+recipe_kernel_invocation = "recipe install"
+kernel_release_path = "boot/vmlinuz-linux"
+kernel_image_path = "boot/vmlinuz-linux"
+kernel_modules_path = "usr/lib/modules/<kernel.release>"
+kernel_version = "6.12.0"
+kernel_sha256 = "abc123"
+kernel_localversion = "-levitate"
+module_install_path = "/usr/lib/modules"
+
+[build_host.evidence]
+script_path = "build-capability.sh"
+pass_marker = "BUILD CAPABILITY PASSED"
+"#,
+        );
+        write_file(
+            &variant_dir.join("ring2-products.toml"),
+            r#"schema_version = 6
+
+[ring2_products.rootfs_base]
+logical_name = "product.rootfs.base"
+description = "Canonical base root filesystem tree"
+
+[ring2_products.live_overlay]
+logical_name = "product.payload.live_overlay"
+description = "Read-only live overlay payload tree"
+overlay_kind = "systemd"
+
+[ring2_products.boot_live]
+logical_name = "product.payload.boot.live"
+description = "Live boot payload inputs"
+extends = "product.rootfs.base"
+
+[ring2_products.live_tools]
+logical_name = "product.payload.live_tools"
+description = "Live tools payload tree"
+extends = "product.payload.boot.live"
+
+[ring2_products.boot_installed]
+logical_name = "product.payload.boot.installed"
+description = "Installed-system boot payload inputs"
+extends = "product.rootfs.base"
+
+[ring2_products.kernel_staging]
+logical_name = "product.kernel.staging"
+description = "Kernel image and modules staging product"
+"#,
+        );
+        write_file(
+            &variant_dir.join("ring1-transforms.toml"),
+            r#"schema_version = 6
+
+[ring1_transforms.rootfs]
+output_name = "filesystem.erofs"
+
+[ring1_transforms.overlay]
+output_name = "overlayfs.erofs"
+
+[ring1_transforms.initramfs_live]
+output_name = "initramfs-live.img"
+
+[ring1_transforms.live_uki]
+output_names = ["live.efi", "emergency.efi", "debug.efi"]
+"#,
+        );
+        write_file(
+            &variant_dir.join("ring0-release.toml"),
+            r#"schema_version = 6
+
+[ring0_release.iso]
+output_name = "levitate.iso"
+"#,
+        );
+        write_file(
+            &variant_dir.join("scenarios.toml"),
+            r#"schema_version = 6
+
+[scenarios.live_environment]
+required_services = ["sshd"]
+"#,
+        );
+    }
+
     #[test]
     fn rootfs_source_policy_accepts_custom_recipe_for_any_distro() {
         let source = RootfsSourceToml {
@@ -395,6 +507,7 @@ mod tests {
     fn ring3_rootfs_source_policy_loads_from_canonical_owner() {
         let repo_root = temp_repo_root("ring3-canonical");
         let variant_dir = repo_root.join("distro-variants/levitate");
+        write_minimal_flat_variant_scaffold(&variant_dir);
         write_file(
             &variant_dir.join("ring3-sources.toml"),
             r#"schema_version = 6
@@ -417,14 +530,151 @@ preseed_recipe_script = "distro-builder/recipes/fedora-preseed-iso.rhai"
     }
 
     #[test]
+    fn ring3_rootfs_source_policy_loads_from_owner_directory_layout() {
+        let repo_root = temp_repo_root("ring3-owner-dir");
+        let variant_dir = repo_root.join("distro-variants/levitate");
+        write_file(
+            &variant_dir.join("identity/identity.toml"),
+            r#"schema_version = 6
+
+[identity]
+os_name = "LevitateOS"
+os_id = "levitateos"
+iso_label = "LEVITATE"
+os_version = "0.1.0"
+default_hostname = "levitate"
+"#,
+        );
+        write_file(
+            &variant_dir.join("build-host/build-host.toml"),
+            r#"schema_version = 6
+
+[build_host]
+required_build_tools = ["recipe"]
+kernel_kconfig_path = "kconfig"
+recipe_kernel_script = "distro-builder/recipes/linux.rhai"
+recipe_kernel_invocation = "recipe install"
+kernel_release_path = "boot/vmlinuz-linux"
+kernel_image_path = "boot/vmlinuz-linux"
+kernel_modules_path = "usr/lib/modules/<kernel.release>"
+kernel_version = "6.12.0"
+kernel_sha256 = "abc123"
+kernel_localversion = "-levitate"
+module_install_path = "/usr/lib/modules"
+
+[build_host.evidence]
+script_path = "build-capability.sh"
+pass_marker = "BUILD CAPABILITY PASSED"
+"#,
+        );
+        write_file(
+            &variant_dir.join("ring3/ring3-sources.toml"),
+            r#"schema_version = 6
+
+[ring3_sources.rootfs_source]
+kind = "recipe_rpm_dvd"
+recipe_script = "distro-builder/recipes/fedora-dvd-source-rootfs.rhai"
+preseed_recipe_script = "distro-builder/recipes/fedora-preseed-iso.rhai"
+"#,
+        );
+        write_file(
+            &variant_dir.join("ring2/ring2-products.toml"),
+            r#"schema_version = 6
+
+[ring2_products.rootfs_base]
+logical_name = "product.rootfs.base"
+description = "Canonical base root filesystem tree"
+
+[ring2_products.live_overlay]
+logical_name = "product.payload.live_overlay"
+description = "Read-only live overlay payload tree"
+overlay_kind = "systemd"
+
+[ring2_products.boot_live]
+logical_name = "product.payload.boot.live"
+description = "Live boot payload inputs"
+extends = "product.rootfs.base"
+
+[ring2_products.live_tools]
+logical_name = "product.payload.live_tools"
+description = "Live tools payload tree"
+extends = "product.payload.boot.live"
+
+[ring2_products.boot_installed]
+logical_name = "product.payload.boot.installed"
+description = "Installed-system boot payload inputs"
+extends = "product.rootfs.base"
+
+[ring2_products.kernel_staging]
+logical_name = "product.kernel.staging"
+description = "Kernel image and modules staging product"
+"#,
+        );
+        write_file(
+            &variant_dir.join("ring1/ring1-transforms.toml"),
+            r#"schema_version = 6
+
+[ring1_transforms.rootfs]
+output_name = "filesystem.erofs"
+
+[ring1_transforms.overlay]
+output_name = "overlayfs.erofs"
+
+[ring1_transforms.initramfs_live]
+output_name = "initramfs-live.img"
+
+[ring1_transforms.live_uki]
+output_names = ["live.efi", "emergency.efi", "debug.efi"]
+"#,
+        );
+        write_file(
+            &variant_dir.join("ring0/ring0-release.toml"),
+            r#"schema_version = 6
+
+[ring0_release.iso]
+output_name = "levitate.iso"
+"#,
+        );
+        write_file(
+            &variant_dir.join("scenarios/scenarios.toml"),
+            r#"schema_version = 6
+
+[scenarios.live_environment]
+required_services = ["sshd"]
+"#,
+        );
+        write_file(&variant_dir.join("kconfig"), "CONFIG_TEST=y\n");
+        write_file(&variant_dir.join("recipes/kernel.rhai"), "// recipe decl\n");
+        write_file(
+            &variant_dir.join("build-capability.sh"),
+            "#!/bin/sh\necho BUILD CAPABILITY PASSED\n",
+        );
+        write_file(&variant_dir.join("build-release.sh"), "#!/bin/sh\nexit 0\n");
+        write_file(&variant_dir.join("boot-release.sh"), "#!/bin/sh\nexit 0\n");
+        write_file(
+            &variant_dir.join("live-tools-release.sh"),
+            "#!/bin/sh\nexit 0\n",
+        );
+
+        let loaded = load_rootfs_source_policy(&repo_root, &variant_dir)
+            .expect("load ring3 rootfs source policy from owner-directory layout");
+        assert!(matches!(
+            loaded,
+            Some(RootfsSourcePolicy::RecipeRpmDvd { .. })
+        ));
+
+        fs::remove_dir_all(repo_root).expect("cleanup temp root");
+    }
+
+    #[test]
     fn ring3_rootfs_source_policy_requires_canonical_owner() {
         let repo_root = temp_repo_root("ring3-missing");
         let variant_dir = repo_root.join("distro-variants/levitate");
+        write_minimal_flat_variant_scaffold(&variant_dir);
         let err = load_rootfs_source_policy(&repo_root, &variant_dir)
             .expect_err("missing ring3 rootfs source should fail");
         assert!(
-            err.to_string()
-                .contains("missing canonical Ring 3 source owner"),
+            format!("{err:#}").contains("ring3-sources.toml"),
             "unexpected error: {err:#}"
         );
 

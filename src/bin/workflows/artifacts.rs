@@ -60,7 +60,7 @@ fn canonical_derived_product_layout(
         .as_deref()
         .ok_or_else(|| {
             anyhow::anyhow!(
-                "missing canonical Ring 2 composition edge for '{}': product '{}' must declare `extends` in ring2-products.toml",
+                "missing canonical Ring 2 composition edge for '{}': product '{}' must declare `extends` in ring2/products.toml",
                 product.canonical,
                 runtime_product.logical_name
             )
@@ -89,7 +89,7 @@ fn runtime_product_decl<'a>(
         crate::PRODUCT_LIVE_TOOLS => Ok(&contract.products.live_tools),
         crate::PRODUCT_INSTALLED_BOOT => contract.products.boot_installed.as_ref().ok_or_else(|| {
             anyhow::anyhow!(
-                "missing canonical Ring 2 product declaration for '{}': ring2-products.toml must define `boot_installed`",
+                "missing canonical Ring 2 product declaration for '{}': ring2/products.toml must define `boot_installed`",
                 product.canonical
             )
         }),

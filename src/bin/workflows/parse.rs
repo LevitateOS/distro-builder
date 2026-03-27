@@ -355,7 +355,7 @@ pass_marker = "BUILD_CAPABILITY_PASS"
 "#,
         );
         write_file(
-            &variant_dir.join("ring3/ring3-sources.toml"),
+            &variant_dir.join("ring3/sources.toml"),
             r#"schema_version = 6
 
 [ring3_sources.rootfs_source]
@@ -364,7 +364,7 @@ recipe_script = "distro-builder/recipes/fedora-dvd-source-rootfs.rhai"
 "#,
         );
         write_file(
-            &variant_dir.join("ring2/ring2-products.toml"),
+            &variant_dir.join("ring2/products.toml"),
             r#"schema_version = 6
 
 [ring2_products.rootfs_base]
@@ -397,7 +397,7 @@ description = "Kernel image and modules staging product"
 "#,
         );
         write_file(
-            &variant_dir.join("ring1/ring1-transforms.toml"),
+            &variant_dir.join("ring1/transforms.toml"),
             r#"schema_version = 6
 
 [ring1_transforms.rootfs]
@@ -414,7 +414,7 @@ output_names = ["live.efi", "emergency.efi", "debug.efi"]
 "#,
         );
         write_file(
-            &variant_dir.join("ring0/ring0-release.toml"),
+            &variant_dir.join("ring0/release.toml"),
             r#"schema_version = 6
 
 [ring0_release.iso]

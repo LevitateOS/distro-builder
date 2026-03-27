@@ -447,7 +447,7 @@ required_services = ["sshd"]
         };
         let policy = parse_rootfs_source_policy(
             Path::new("."),
-            &PathBuf::from("distro-variants/acorn/ring3-sources.toml"),
+            &PathBuf::from("distro-variants/acorn/ring3/sources.toml"),
             Some(source),
         )
         .expect("parsing custom rootfs_source policy must succeed");
@@ -470,7 +470,7 @@ required_services = ["sshd"]
         };
         let policy = parse_rootfs_source_policy(
             Path::new("."),
-            &PathBuf::from("distro-variants/levitate/ring3-sources.toml"),
+            &PathBuf::from("distro-variants/levitate/ring3/sources.toml"),
             Some(source),
         )
         .expect("parsing recipe_rpm_dvd must succeed");
@@ -491,7 +491,7 @@ required_services = ["sshd"]
         };
         let err = parse_rootfs_source_policy(
             Path::new("."),
-            &PathBuf::from("distro-variants/levitate/ring3-sources.toml"),
+            &PathBuf::from("distro-variants/levitate/ring3/sources.toml"),
             Some(source),
         )
         .expect_err("legacy recipe_rocky kind must fail");
@@ -568,7 +568,7 @@ pass_marker = "BUILD CAPABILITY PASSED"
 "#,
         );
         write_file(
-            &variant_dir.join("ring3/ring3-sources.toml"),
+            &variant_dir.join("ring3/sources.toml"),
             r#"schema_version = 6
 
 [ring3_sources.rootfs_source]
@@ -578,7 +578,7 @@ preseed_recipe_script = "distro-builder/recipes/fedora-preseed-iso.rhai"
 "#,
         );
         write_file(
-            &variant_dir.join("ring2/ring2-products.toml"),
+            &variant_dir.join("ring2/products.toml"),
             r#"schema_version = 6
 
 [ring2_products.rootfs_base]
@@ -611,7 +611,7 @@ description = "Kernel image and modules staging product"
 "#,
         );
         write_file(
-            &variant_dir.join("ring1/ring1-transforms.toml"),
+            &variant_dir.join("ring1/transforms.toml"),
             r#"schema_version = 6
 
 [ring1_transforms.rootfs]
@@ -628,7 +628,7 @@ output_names = ["live.efi", "emergency.efi", "debug.efi"]
 "#,
         );
         write_file(
-            &variant_dir.join("ring0/ring0-release.toml"),
+            &variant_dir.join("ring0/release.toml"),
             r#"schema_version = 6
 
 [ring0_release.iso]
@@ -686,7 +686,7 @@ required_services = ["sshd"]
         let err = load_rootfs_source_policy(&repo_root, &variant_dir)
             .expect_err("missing ring3 rootfs source should fail");
         assert!(
-            format!("{err:#}").contains("ring3-sources.toml"),
+            format!("{err:#}").contains("sources.toml"),
             "unexpected error: {err:#}"
         );
 

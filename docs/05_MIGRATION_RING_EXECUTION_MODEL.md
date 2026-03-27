@@ -228,8 +228,6 @@ planner itself.
 1. Stage-attributed reporting still dominates validation surfaces
    - `distro-contract/src/error.rs`, `validate.rs`, and `runtime.rs` still use
      `StageId`
-   - `distro-builder/src/bin/artifact_paths.rs` still exports compatibility
-     stage-path helpers
 2. Scenario/test consumption remains intentionally build-free
    - this is correct by policy, but it means the canonical product/release
      entrypoints now need to be taught more clearly as the artifact-producing
@@ -285,9 +283,7 @@ without breaking the canonical scenario/release entrypoints.
   - many canonical validation surfaces still report under `Stage00` / `Stage01`
 - `distro-contract/src/runtime.rs`
   - canonical runtime validation exists, but the compatibility entrypoint
-    `validate_live_boot_runtime_with_stage_dir` remains
-- `distro-builder/src/bin/artifact_paths.rs`
-  - `stage_output_dir_for` is still present as a compatibility path helper
+    still exposes stage-attributed checkpoint IDs in violation reports
 
 This residue is acceptable in the short term if it remains explicitly
 validation-only and does not control build orchestration.
@@ -542,7 +538,6 @@ Recommended file ownership:
 - `distro-contract/src/error.rs`
 - `distro-contract/src/validate.rs`
 - `distro-contract/src/runtime.rs`
-- `distro-builder/src/bin/artifact_paths.rs`
 
 Recommended approach:
 

@@ -70,7 +70,6 @@ Date: 2026-03-27
 
 1. Track 03/05 stage-residue reduction
    - `distro-contract` validation/runtime/error surfaces still center `StageId`
-   - `distro-builder/src/bin/artifact_paths.rs` still exposes compatibility stage-path helpers
 
 ### Recommended Next Slices
 

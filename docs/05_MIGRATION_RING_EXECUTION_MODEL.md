@@ -217,27 +217,20 @@ The core Track 05 execution debt has been reduced substantially.
   - derived product preparers still require explicit parent rootfs injection,
     which is now the correct lower-level contract rather than a workflow bug
 
-The remaining Track 05 debt is now mostly UX and compatibility residue, not the
-canonical planner path itself.
+The remaining Track 05 debt is now mostly validation/reporting residue and
+compatibility-window cleanup, not the canonical planner path itself.
 
 ### B1. Audit snapshot: what still remains after the planner landing
 
 The highest-value remaining work for Track 05 is now outside the canonical
 planner itself.
 
-1. Default operator UX still teaches stage-first workflows
-   - `justfile` still exposes `stage`, `stage-ssh`, `test`, `test-up-to`,
-     `build`, and `build-up-to` as prominent compatibility wrappers
-   - `xtask/README.md` still shows `stages boot`, `stages test`, and
-     `stages test-up-to` as usage examples
-   - `testing/install-tests/src/bin/install-tests.rs` still redirects users to
-     `just test` / `just test-up-to`
-2. Stage-attributed reporting still dominates validation surfaces
+1. Stage-attributed reporting still dominates validation surfaces
    - `distro-contract/src/error.rs`, `validate.rs`, and `runtime.rs` still use
      `StageId`
    - `distro-builder/src/bin/artifact_paths.rs` still exports compatibility
      stage-path helpers
-3. Scenario/test consumption remains intentionally build-free
+2. Scenario/test consumption remains intentionally build-free
    - this is correct by policy, but it means the canonical product/release
      entrypoints now need to be taught more clearly as the artifact-producing
      path
@@ -265,21 +258,24 @@ This is correct with respect to the repo policy boundary:
 Track 05 should therefore make release/product build orchestration recursive,
 but it should not add hidden build side effects to scenario runners.
 
-### D. The wrapper/doc layer still teaches stage-shaped workflows
+### D. The wrapper/doc layer is now compatibility-only on the default path
 
 - `justfile`
-  - compatibility aliases remain prominent: `_boot_stage`, `stage`, `stage-ssh`,
-    `test`, `test-up-to`, `test-status`, `test-reset`
-  - `build` still special-cases `03Install`
-  - `build-up-to` still loops `00Build`, `01Boot`, `02LiveTools`, `03Install`
+  - canonical `scenario*` wrappers now take canonical scenario names
+  - legacy `stage`, `test`, and `build*` spellings normalize through explicit
+    compatibility mapping before delegating to canonical scenario/release flows
 - `xtask/README.md`
-  - usage examples still teach `stages boot`, `stages test`, and
-    `stages test-up-to`
+  - usage examples now teach `scenarios boot`, `scenarios test`, and
+    `scenarios test-up-to`
 - `testing/install-tests/src/bin/install-tests.rs`
-  - removal message still tells users to use SSH-based "stage workflows"
+  - removal message now points users at `cargo xtask scenarios ...` and
+    `just scenario-test ...`
+- `testing/install-tests/test-scripts/README.md`
+  - canonical operator examples now use `just scenario ...` / `just scenario-test ...`
 
-This is UX debt, not architecture debt, but it keeps the old process model
-visible in day-to-day usage.
+This slice is no longer an open blocker on the default operator path. The
+remaining work is to reduce compatibility surfaces and validation-stage residue
+without breaking the canonical scenario/release entrypoints.
 
 ### E. Validation/reporting still uses stage attribution as the main vocabulary
 
@@ -329,16 +325,14 @@ The best upgrade path is:
 
 Current progress:
 
-- steps 1 and 2 are landed on the canonical release/product path
-- the remaining priority is step 3 onward
+- steps 1 through 3 are landed on the canonical release/product/operator path
+- the remaining priority is step 4 onward
 
 Recommended next slices:
 
-1. wrapper/doc cleanup in `justfile`, `xtask/README.md`, and
-   `testing/install-tests/src/bin/install-tests.rs`
-2. validation/reporting residue cleanup where stage vocabulary is only
+1. validation/reporting residue cleanup where stage vocabulary is only
    compatibility metadata, not orchestration
-3. proof/hardening after the default operator path no longer teaches stages
+2. proof/hardening after the default operator path no longer teaches stages
 
 Do not start by deleting stage words.
 That produces a cosmetic migration and leaves the operator-facing dependency
@@ -630,6 +624,7 @@ If this work is split into reviewable changes, the best stack is:
    - align canonical installed scripts with canonical scenario evidence names
 5. wrapper/doc cleanup
    - demote stage aliases and update stale docs
+   - landed on the canonical operator/docs path
 
 This order minimizes churn and keeps behavior changes reviewable.
 

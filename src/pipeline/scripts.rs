@@ -16,7 +16,7 @@ pub(crate) fn install_scenario_test_scripts(
     }
 
     let bin_dst = rootfs_source_dir.join("usr/local/bin");
-    let lib_dst = rootfs_source_dir.join("usr/local/lib/stage-tests");
+    let lib_dst = rootfs_source_dir.join("usr/local/lib/scenario-tests");
     fs::create_dir_all(&bin_dst)
         .with_context(|| format!("creating scenario scripts bin dir '{}'", bin_dst.display()))?;
     fs::create_dir_all(&lib_dst)
@@ -118,7 +118,7 @@ mod tests {
         assert!(
             rootfs_dir
                 .path()
-                .join("usr/local/lib/stage-tests/common.sh")
+                .join("usr/local/lib/scenario-tests/common.sh")
                 .is_file(),
             "expected shared scenario common library to be installed"
         );

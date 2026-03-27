@@ -61,25 +61,22 @@ Date: 2026-03-27
   - planner-owned release prerequisite closure
   - planner-owned resolved parent rootfs inputs for product preparation
   - canonical scenario script installation
+  - canonical scenario-first operator/docs cleanup on the default path
 - Track 06 layout is materially landed for active variants:
   - active variants visibly follow the sibling owner-directory tree
 
 ### Still open
 
-1. Track 05 wrapper/doc cleanup
-   - `justfile` still presents stage-first compatibility wrappers prominently
-   - `xtask/README.md` still teaches `stages ...`
-   - `testing/install-tests/src/bin/install-tests.rs` still points users at `just test` / `just test-up-to`
-2. Track 06 compatibility-window closure
+1. Track 06 compatibility-window closure
    - `distro-contract/src/variant.rs` still loads flat-root manifests
    - `distro-contract/src/variant.rs` still accepts legacy owner-dir ring filenames
    - `distro-contract/src/variant.rs` still accepts `profile_overlay` as a compatibility key
-3. Track 03/05 stage-residue reduction
+2. Track 03/05 stage-residue reduction
    - `distro-contract` validation/runtime/error surfaces still center `StageId`
    - `distro-builder/src/bin/artifact_paths.rs` still exposes compatibility stage-path helpers
 
 ### Recommended Next Slices
 
-1. Demote or remove stage-first wrapper/doc surfaces from default operator UX.
-2. Close the variant-layout compatibility window in `distro-contract` once fixtures/tests/docs are updated.
-3. Reduce validation/reporting stage residue after the default UX no longer teaches stage-first operation.
+1. Close the variant-layout compatibility window in `distro-contract` once fixtures/tests/docs are updated.
+2. Reduce validation/reporting stage residue after the default UX no longer teaches stage-first operation.
+3. Harden compatibility aliases further only after the canonical path stays stable.

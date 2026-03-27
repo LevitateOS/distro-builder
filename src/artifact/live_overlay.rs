@@ -29,7 +29,7 @@ pub struct LiveOverlayConfig<'a> {
     /// Which inittab variant to generate.
     pub inittab: InittabVariant,
     /// Optional path to a variant-local live overlay seed directory to copy first.
-    pub profile_overlay: Option<&'a Path>,
+    pub seed_overlay: Option<&'a Path>,
     /// Optional override for `/etc/issue`.
     pub issue_message: Option<&'a str>,
 }
@@ -70,13 +70,13 @@ pub fn create_openrc_live_overlay(
     }
 
     // Step 1: Copy variant-local live overlay seed files (test instrumentation, etc.)
-    if let Some(profile) = config.profile_overlay {
-        if profile.exists() {
+    if let Some(seed_overlay) = config.seed_overlay {
+        if seed_overlay.exists() {
             println!("  Copying live overlay seed files...");
-            copy_dir_recursive(profile, &live_overlay).with_context(|| {
+            copy_dir_recursive(seed_overlay, &live_overlay).with_context(|| {
                 format!(
                     "Failed to copy {} -> {}",
-                    profile.display(),
+                    seed_overlay.display(),
                     live_overlay.display()
                 )
             })?;

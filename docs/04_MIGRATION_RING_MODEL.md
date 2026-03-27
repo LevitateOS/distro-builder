@@ -182,11 +182,11 @@ These variant deltas are the remaining currently loaded fields that differ by di
 | `ralph` | `00Build.toml` | no `initramfs_installed_output` / no `installed_uki_outputs` | not present for this variant | none |
 | `acorn` | `00Build.toml` | `artifacts.installed_uki_outputs` | `ring1_transforms` | `ring1-transforms.toml` |
 | `acorn` | `01Boot.toml` | `rootfs_source.defines.*` | `ring3_sources` | `ring3-sources.toml` |
-| `acorn` | `01Boot.toml` | `openrc_inittab`, `profile_overlay` | `ring2_products` | `ring2-products.toml` |
+| `acorn` | `01Boot.toml` | `openrc_inittab`, `seed_overlay` | `ring2_products` | `ring2-products.toml` |
 | `iuppiter` | `00Build.toml` | `artifacts.installed_uki_outputs` | `ring1_transforms` | `ring1-transforms.toml` |
 | `iuppiter` | `00Build.toml` | `artifacts.disk_image_output` | `ring0_release` | `ring0-release.toml` |
 | `iuppiter` | `01Boot.toml` | `rootfs_source.defines.*` | `ring3_sources` | `ring3-sources.toml` |
-| `iuppiter` | `01Boot.toml` | `openrc_inittab`, `profile_overlay` | `ring2_products` | `ring2-products.toml` |
+| `iuppiter` | `01Boot.toml` | `openrc_inittab`, `seed_overlay` | `ring2_products` | `ring2-products.toml` |
 
 Notes:
 - the ring family remains additive during the migration window
@@ -326,7 +326,7 @@ Pre-Phase-5 gate status:
   - [x] `os_name` duplication
   - [x] `issue_message`
   - [x] `openrc_inittab`
-  - [x] `profile_overlay`
+  - [x] `seed_overlay`
 - [x] make `distro-builder` base-product loading succeed without needing `01Boot.toml` for `levitate`
 - [x] add parity tests for the non-`levitate` variants so their new owner files cannot silently drift from the legacy manifests
 - [x] decide whether Phase 5 will start only after repo-wide Ring 2 base parity exists, or whether it will proceed as a second `levitate`-only pilot slice

@@ -18,7 +18,7 @@ pub enum BootOverlayPolicy {
     },
     OpenRc {
         inittab: InittabVariant,
-        profile_overlay: Option<PathBuf>,
+        seed_overlay: Option<PathBuf>,
     },
 }
 
@@ -48,13 +48,13 @@ pub(crate) fn create_live_overlay(
         .with_context(|| format!("creating systemd live overlay for {}", distro_id))?,
         BootOverlayPolicy::OpenRc {
             inittab,
-            profile_overlay,
+            seed_overlay,
         } => create_openrc_live_overlay(
             output_dir,
             &LiveOverlayConfig {
                 os_name,
                 inittab: *inittab,
-                profile_overlay: profile_overlay.as_deref(),
+                seed_overlay: seed_overlay.as_deref(),
                 issue_message: Some(overlay_issue_banner.as_str()),
             },
         )

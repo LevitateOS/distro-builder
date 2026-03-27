@@ -435,13 +435,13 @@ fn overlay_policy_from_contract(
                     "invalid canonical live-overlay config: openrc overlay requires openrc_inittab"
                 ),
             };
-            let profile_overlay = overlay
-                .profile_overlay
+            let seed_overlay = overlay
+                .seed_overlay
                 .as_ref()
                 .map(|path| resolve_repo_path(repo_root, path));
             Ok(BootOverlayPolicy::OpenRc {
                 inittab,
-                profile_overlay,
+                seed_overlay,
             })
         }
     }
@@ -670,7 +670,7 @@ mod tests {
         match loaded.overlay {
             BootOverlayPolicy::OpenRc {
                 inittab,
-                profile_overlay,
+                seed_overlay,
             } => {
                 match (inittab, expected_inittab) {
                     (InittabVariant::DesktopWithSerial, InittabVariant::DesktopWithSerial)
@@ -678,8 +678,8 @@ mod tests {
                     _ => panic!("unexpected inittab variant for {distro_id}"),
                 }
                 assert!(
-                    profile_overlay.is_some(),
-                    "expected profile overlay for {distro_id}"
+                    seed_overlay.is_some(),
+                    "expected seed overlay for {distro_id}"
                 );
             }
             other => panic!("unexpected {distro_id} overlay policy: {other:?}"),
@@ -749,15 +749,10 @@ mod tests {
 
             match (expected_overlay_kind, loaded.overlay) {
                 ("systemd", BootOverlayPolicy::Systemd { .. }) => {}
-                (
-                    "openrc",
-                    BootOverlayPolicy::OpenRc {
-                        profile_overlay, ..
-                    },
-                ) => {
+                ("openrc", BootOverlayPolicy::OpenRc { seed_overlay, .. }) => {
                     assert!(
-                        profile_overlay.is_some(),
-                        "expected profile overlay for {distro_id}"
+                        seed_overlay.is_some(),
+                        "expected seed overlay for {distro_id}"
                     );
                 }
                 (expected, other) => panic!(

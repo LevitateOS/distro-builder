@@ -449,7 +449,7 @@ pub fn test_iso_boot(
                         println!();
                         println!("WARNING: Test instrumentation NOT detected!");
                         println!("         Functional verification SKIPPED.");
-                        println!("         Check that profile/live-overlay is included in ISO.");
+                        println!("         Check that the Ring 2 live overlay payload is included in the ISO.");
                         println!();
                         println!("Boot detected in {:.1}s (no verification)", elapsed);
 
@@ -457,7 +457,7 @@ pub fn test_iso_boot(
                             "Boot detected but test instrumentation missing.\n\
                              Expected: ___SHELL_READY___ marker from /etc/profile.d/{}\n\
                              Got: '{}'\n\n\
-                             This indicates the profile/live-overlay directory was not\n\
+                             This indicates the canonical Ring 2 live overlay payload was not\n\
                              copied to the ISO. Rebuild and try again.",
                             test_script_name,
                             pattern

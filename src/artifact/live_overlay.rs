@@ -28,7 +28,7 @@ pub struct LiveOverlayConfig<'a> {
     pub os_name: &'a str,
     /// Which inittab variant to generate.
     pub inittab: InittabVariant,
-    /// Optional path to profile/live-overlay directory to copy first.
+    /// Optional path to a variant-local live overlay seed directory to copy first.
     pub profile_overlay: Option<&'a Path>,
     /// Optional override for `/etc/issue`.
     pub issue_message: Option<&'a str>,
@@ -69,10 +69,10 @@ pub fn create_openrc_live_overlay(
         fs::remove_dir_all(&live_overlay)?;
     }
 
-    // Step 1: Copy profile/live-overlay (test instrumentation, etc.)
+    // Step 1: Copy variant-local live overlay seed files (test instrumentation, etc.)
     if let Some(profile) = config.profile_overlay {
         if profile.exists() {
-            println!("  Copying profile/live-overlay (test instrumentation)...");
+            println!("  Copying live overlay seed files...");
             copy_dir_recursive(profile, &live_overlay).with_context(|| {
                 format!(
                     "Failed to copy {} -> {}",

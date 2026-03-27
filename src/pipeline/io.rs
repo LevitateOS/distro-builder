@@ -68,7 +68,7 @@ pub(crate) fn rename_live_overlay_dir(
     Ok(target_overlay)
 }
 
-pub(crate) fn resolve_parent_product_rootfs_image_for_distro(
+pub fn resolve_release_product_rootfs_image_for_distro(
     repo_root: &Path,
     distro_id: &str,
     product_dir_name: &str,
@@ -143,7 +143,7 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn resolve_parent_product_rootfs_image_for_distro_uses_repo_layout_not_output_dir_ancestry() {
+    fn resolve_release_product_rootfs_image_for_distro_uses_repo_layout_not_output_dir_ancestry() {
         let repo_root = tempfile::tempdir().expect("repo tempdir");
         let stage_root = repo_root
             .path()
@@ -163,7 +163,7 @@ mod tests {
         let rootfs = stage_root.join("filesystem.erofs");
         fs::write(&rootfs, b"test rootfs").expect("write rootfs file");
 
-        let resolved = resolve_parent_product_rootfs_image_for_distro(
+        let resolved = resolve_release_product_rootfs_image_for_distro(
             repo_root.path(),
             "levitate",
             "base-rootfs",

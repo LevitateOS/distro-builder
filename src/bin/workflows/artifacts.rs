@@ -9,7 +9,8 @@ use distro_builder::{
     load_base_rootfs_product_spec, load_installed_boot_product_spec, load_live_boot_product_spec,
     load_live_tools_product_spec, materialize_live_boot_source_rootfs, prepare_base_rootfs_product,
     prepare_installed_boot_product, prepare_live_boot_product, prepare_live_tools_product,
-    BaseProductLayout, DerivedProductLayout, OverlayLayout, ParentRootfsInput,
+    resolve_release_product_rootfs_image_for_distro, BaseProductLayout, DerivedProductLayout,
+    OverlayLayout, ParentRootfsInput,
 };
 use distro_contract::{
     load_variant_contract_bundle_for_distro_from, ConformanceContract, LoadedVariantContract,
@@ -214,6 +215,8 @@ fn prepare_product_inputs(
         }
         crate::PRODUCT_LIVE_BOOT => {
             let layout = canonical_derived_product_layout(&bundle.contract, product)?;
+            let resolved_parent_rootfs_image =
+                resolve_parent_rootfs_image(&bundle.repo_root, distro_id, &layout)?;
             let spec = load_live_boot_product_spec(
                 &bundle.repo_root,
                 &bundle.variant_dir,
@@ -221,6 +224,7 @@ fn prepare_product_inputs(
                 distro_id,
                 layout,
             )
+            .map(|spec| spec.with_resolved_parent_rootfs_image(resolved_parent_rootfs_image))
             .with_context(|| format!("loading {} config for '{}'", product.canonical, distro_id))?;
             let prepared = prepare_live_boot_product(&spec, output_dir).with_context(|| {
                 format!("preparing {} inputs for '{}'", product.canonical, distro_id)
@@ -232,6 +236,8 @@ fn prepare_product_inputs(
         }
         crate::PRODUCT_LIVE_TOOLS => {
             let layout = canonical_derived_product_layout(&bundle.contract, product)?;
+            let resolved_parent_rootfs_image =
+                resolve_parent_rootfs_image(&bundle.repo_root, distro_id, &layout)?;
             let spec = load_live_tools_product_spec(
                 &bundle.repo_root,
                 &bundle.variant_dir,
@@ -239,6 +245,7 @@ fn prepare_product_inputs(
                 distro_id,
                 layout,
             )
+            .map(|spec| spec.with_resolved_parent_rootfs_image(resolved_parent_rootfs_image))
             .with_context(|| format!("loading {} config for '{}'", product.canonical, distro_id))?;
             let prepared = prepare_live_tools_product(&spec, output_dir).with_context(|| {
                 format!("preparing {} inputs for '{}'", product.canonical, distro_id)
@@ -250,6 +257,8 @@ fn prepare_product_inputs(
         }
         crate::PRODUCT_INSTALLED_BOOT => {
             let layout = canonical_derived_product_layout(&bundle.contract, product)?;
+            let resolved_parent_rootfs_image =
+                resolve_parent_rootfs_image(&bundle.repo_root, distro_id, &layout)?;
             let spec = load_installed_boot_product_spec(
                 &bundle.repo_root,
                 &bundle.variant_dir,
@@ -257,6 +266,7 @@ fn prepare_product_inputs(
                 distro_id,
                 layout,
             )
+            .map(|spec| spec.with_resolved_parent_rootfs_image(resolved_parent_rootfs_image))
             .with_context(|| format!("loading {} config for '{}'", product.canonical, distro_id))?;
             let prepared =
                 prepare_installed_boot_product(&spec, output_dir).with_context(|| {
@@ -356,4 +366,24 @@ fn canonical_live_boot_product_spec(
         distro_id,
         layout,
     )
+}
+
+fn resolve_parent_rootfs_image(
+    repo_root: &Path,
+    distro_id: &str,
+    layout: &DerivedProductLayout,
+) -> Result<PathBuf> {
+    resolve_release_product_rootfs_image_for_distro(
+        repo_root,
+        distro_id,
+        &layout.parent_rootfs.release_dir_name,
+        &layout.parent_rootfs.producer_label,
+        &layout.parent_rootfs.rootfs_filename,
+    )
+    .with_context(|| {
+        format!(
+            "resolving canonical parent release rootfs '{}' for '{}'",
+            layout.parent_rootfs.producer_label, distro_id
+        )
+    })
 }

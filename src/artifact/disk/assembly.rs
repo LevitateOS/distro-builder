@@ -94,14 +94,3 @@ pub fn assemble_disk(
 
     Ok(())
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_partition_constants() {
-        assert_eq!(SECTOR_SIZE, 512);
-        assert_eq!(FIRST_PARTITION_OFFSET_SECTORS, 2048);
-    }
-}

@@ -27,9 +27,6 @@ which = "5.0"
 zstd = "0.13"
 time = "0.3"
 
-[dev-dependencies]
-tempfile = "3"
-
 [[bin]]
 name = "distro-builder"
 path = "src/bin/distro-builder.rs"

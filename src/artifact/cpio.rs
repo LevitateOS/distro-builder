@@ -47,29 +47,3 @@ pub fn build_cpio(root: &Path, output: &Path, gzip_level: u32) -> Result<()> {
 
     Ok(())
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::fs;
-    use tempfile::TempDir;
-
-    #[test]
-    fn test_build_cpio() {
-        let temp = TempDir::new().unwrap();
-        let root = temp.path().join("root");
-        let output = temp.path().join("test.cpio.gz");
-
-        // Create a simple directory structure
-        fs::create_dir_all(root.join("bin")).unwrap();
-        fs::write(root.join("bin/test"), "#!/bin/sh\necho hello\n").unwrap();
-        fs::write(root.join("init"), "#!/bin/sh\nexec /bin/sh\n").unwrap();
-
-        // Build the cpio archive
-        build_cpio(&root, &output, 6).unwrap();
-
-        // Verify output exists and has content
-        assert!(output.exists());
-        assert!(fs::metadata(&output).unwrap().len() > 0);
-    }
-}

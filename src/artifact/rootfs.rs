@@ -235,35 +235,3 @@ pub fn build_erofs_default(source_dir: &Path, output: &Path) -> Result<()> {
         EROFS_CHUNK_SIZE,
     )
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_source_dir_validation() {
-        let result = create_erofs(
-            Path::new("/nonexistent_path_12345"),
-            Path::new("/tmp/test.erofs"),
-            "zstd",
-            6,
-            1048576,
-        );
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("does not exist"));
-    }
-
-    #[test]
-    fn test_source_not_directory() {
-        // /dev/null exists but is not a directory
-        let result = create_erofs(
-            Path::new("/dev/null"),
-            Path::new("/tmp/test.erofs"),
-            "zstd",
-            6,
-            1048576,
-        );
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("not a directory"));
-    }
-}

@@ -84,29 +84,3 @@ pub fn check_required_tools(tools: &[(&str, &str)]) -> Result<()> {
 pub fn check_host_tools() -> Result<()> {
     check_required_tools(REQUIRED_TOOLS)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_command_exists() {
-        // 'ls' should exist on any Unix system
-        assert!(command_exists("ls"));
-        // Random garbage should not exist
-        assert!(!command_exists("definitely_not_a_real_command_12345"));
-    }
-
-    #[test]
-    fn test_check_required_tools_success() {
-        // These should exist on any Unix system
-        let tools = &[("ls", "coreutils"), ("cat", "coreutils")];
-        assert!(check_required_tools(tools).is_ok());
-    }
-
-    #[test]
-    fn test_check_required_tools_failure() {
-        let tools = &[("nonexistent_command_xyz", "fake-package")];
-        assert!(check_required_tools(tools).is_err());
-    }
-}

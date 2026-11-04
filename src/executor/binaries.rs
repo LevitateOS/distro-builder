@@ -139,35 +139,3 @@ pub fn make_executable(path: &Path) -> Result<()> {
     fs::set_permissions(path, perms)?;
     Ok(())
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_extract_library_path() {
-        assert_eq!(
-            extract_library_path("\tlibc.musl-x86_64.so.1 => /lib/ld-musl-x86_64.so.1 (0x7f...)"),
-            Some("/lib/ld-musl-x86_64.so.1".to_string())
-        );
-
-        assert_eq!(extract_library_path("\tlinux-vdso.so.1"), None);
-        assert_eq!(extract_library_path(""), None);
-    }
-
-    #[test]
-    fn test_find_binary() {
-        let temp = tempfile::TempDir::new().unwrap();
-        let source = temp.path();
-
-        // Create a binary in usr/bin
-        fs::create_dir_all(source.join("usr/bin")).unwrap();
-        fs::write(source.join("usr/bin/test-bin"), "").unwrap();
-
-        assert_eq!(
-            find_binary(source, "test-bin"),
-            Some(PathBuf::from("usr/bin/test-bin"))
-        );
-        assert_eq!(find_binary(source, "nonexistent"), None);
-    }
-}

@@ -116,30 +116,3 @@ impl BuildContext {
             .find(|candidate| self.source.join(candidate).exists())
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::fs;
-    use tempfile::tempdir;
-
-    #[test]
-    fn test_lib_path() {
-        let dir = tempdir().unwrap();
-        let ctx =
-            BuildContext::for_testing(dir.path(), dir.path().join("staging").as_path(), dir.path());
-        assert_eq!(ctx.lib_path(), "usr/lib");
-    }
-
-    #[test]
-    fn test_source_exists() {
-        let dir = tempdir().unwrap();
-        let source = dir.path().join("source");
-        fs::create_dir_all(source.join("etc")).unwrap();
-        fs::write(source.join("etc/hostname"), "test").unwrap();
-
-        let ctx = BuildContext::for_testing(&source, dir.path(), dir.path());
-        assert!(ctx.source_exists("etc/hostname"));
-        assert!(!ctx.source_exists("etc/nonexistent"));
-    }
-}

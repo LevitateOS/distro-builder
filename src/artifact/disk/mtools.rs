@@ -68,11 +68,3 @@ pub fn mtools_write_file(image: &Path, dest: &str, content: &str) -> Result<()> 
     let _ = fs::remove_file(&temp);
     result
 }
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn test_mtools_functions_exist() {
-        assert!(true);
-    }
-}

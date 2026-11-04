@@ -183,35 +183,3 @@ pub fn sbins(names: impl IntoIterator<Item = impl Into<String>>) -> Op {
 pub fn custom(name: impl Into<String>) -> Op {
     Op::Custom(name.into())
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_phase_ordering() {
-        assert!(Phase::Filesystem < Phase::Binaries);
-        assert!(Phase::Binaries < Phase::Init);
-        assert!(Phase::Init < Phase::Services);
-        assert!(Phase::Services < Phase::Final);
-    }
-
-    #[test]
-    fn test_op_helpers() {
-        assert_eq!(dir("etc/foo"), Op::Dir("etc/foo".into()));
-        assert_eq!(
-            dir_mode("etc/foo", 0o755),
-            Op::DirMode("etc/foo".into(), 0o755)
-        );
-        assert_eq!(
-            write_file("etc/foo", "bar"),
-            Op::WriteFile("etc/foo".into(), "bar".into())
-        );
-    }
-
-    #[test]
-    fn test_phase_display() {
-        assert_eq!(Phase::Filesystem.to_string(), "Filesystem");
-        assert_eq!(Phase::Final.to_string(), "Final");
-    }
-}

@@ -96,11 +96,3 @@ pub fn create_root_partition(
 
     Ok(())
 }
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn test_partition_functions_exist() {
-        assert!(true);
-    }
-}

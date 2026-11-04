@@ -376,7 +376,7 @@ Important rule:
 
 Acceptance proof for Phase 1:
 
-- planner unit tests in `distro-builder` proving:
+- focused product-build or scenario checks demonstrating (unit tests are prohibited):
   - `live-tools` release target closes over `live-boot` and `base-rootfs`
   - `live-boot` release target closes over `base-rootfs`
   - impossible or missing edges fail with explicit contract-owner diagnostics

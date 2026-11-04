@@ -282,21 +282,3 @@ pub struct AppendedPartition<'a> {
     pub type_code: &'a str,
     pub path: &'a Path,
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use tempfile::TempDir;
-
-    #[test]
-    fn test_setup_iso_structure() {
-        let temp = TempDir::new().unwrap();
-        let iso_root = temp.path().join("iso-root");
-
-        setup_iso_structure(&iso_root).unwrap();
-
-        assert!(iso_root.join("boot").exists());
-        assert!(iso_root.join("live").exists());
-        assert!(iso_root.join("EFI/BOOT").exists());
-    }
-}

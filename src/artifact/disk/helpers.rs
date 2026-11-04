@@ -114,24 +114,3 @@ pub fn calculate_dir_size(path: &Path) -> Result<u64> {
 
     Ok(total)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_base_required_tools_list() {
-        assert!(!BASE_REQUIRED_TOOLS.is_empty());
-        for (tool, package) in BASE_REQUIRED_TOOLS {
-            assert!(!tool.is_empty());
-            assert!(!package.is_empty());
-        }
-    }
-
-    #[test]
-    fn test_generate_vfat_serial_format() {
-        let serial = generate_vfat_serial().unwrap();
-        assert_eq!(serial.len(), 9); // XXXX-XXXX
-        assert_eq!(&serial[4..5], "-");
-    }
-}

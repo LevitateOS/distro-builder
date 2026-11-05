@@ -40,15 +40,17 @@ fn is_built(ctx) {
 }
 
 fn build(ctx) {
+    let work = ctx.runtime.paths.build;
+    let jobs = ctx.runtime.options.jobs.to_string();
     if !is_file(join_path(ctx.source, "Cargo.toml")) {
         _verify(ctx, ctx.supplied_program);
         return ctx;
     }
     exec_checked("cargo", ["build", "--release", "--locked", "--offline", "--bin", "recfstab",
         "--manifest-path", join_path(ctx.source, "Cargo.toml"),
-        "--target-dir", join_path(RUNTIME.paths.build, "target")], #{
+        "--target-dir", join_path(work, "target")], #{
         cwd: ctx.source,
-        env: #{CARGO_HOME: join_path(RUNTIME.paths.build, "cargo"), CARGO_BUILD_JOBS: RUNTIME.options.jobs.to_string(),
+        env: #{CARGO_HOME: join_path(work, "cargo"), CARGO_BUILD_JOBS: jobs,
             RUSTFLAGS: "-C link-arg=-Wl,--threads=1", LD_LIBRARY_PATH: "/usr/lib"},
     });
     ctx
@@ -77,8 +79,9 @@ fn remove(ctx) {
 }
 
 fn cleanup(ctx, reason) {
+    let work = ctx.runtime.paths.build;
     if reason == "manual" {
-        for directory in [join_path(RUNTIME.paths.build, "target"), join_path(RUNTIME.paths.build, "cargo")] {
+        for directory in [join_path(work, "target"), join_path(work, "cargo")] {
             if is_dir(directory) { rm(directory); }
         }
         if is_file(ctx.program) { rm(ctx.program); }

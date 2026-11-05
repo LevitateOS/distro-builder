@@ -27,8 +27,8 @@ pub fn run_manifest_path(run_dir: &Path) -> PathBuf {
     run_dir.join(RUN_MANIFEST_FILENAME)
 }
 
-pub fn load_runs_metadata(stage_root_dir: &Path) -> Result<Vec<RunMetadata>> {
-    load_run_metadata(stage_root_dir)
+pub fn load_runs_metadata(release_root_dir: &Path) -> Result<Vec<RunMetadata>> {
+    load_run_metadata(release_root_dir)
 }
 
 pub fn load_run_metadata(run_root_dir: &Path) -> Result<Vec<RunMetadata>> {

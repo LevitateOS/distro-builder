@@ -95,7 +95,7 @@ pub fn run_build_evidence_script(
     repo_root: &Path,
     variant_paths: &VariantOwnerPaths,
     kernel_output_dir: &Path,
-    stage_output_dir: &Path,
+    release_output_dir: &Path,
     spec: &EvidenceSpec,
 ) -> Result<()> {
     let script = variant_paths.build_host_declared_path(&spec.script_path);
@@ -105,7 +105,7 @@ pub fn run_build_evidence_script(
 
     let kernel_release_path = kernel_output_dir.join(&spec.kernel_release_path);
     let kernel_image_path = kernel_output_dir.join(&spec.kernel_image_path);
-    let iso_path = stage_output_dir.join(&spec.iso_filename);
+    let iso_path = release_output_dir.join(&spec.iso_filename);
 
     let output = Command::new("sh")
         .arg(&script)

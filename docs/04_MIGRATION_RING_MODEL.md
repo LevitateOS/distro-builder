@@ -1,5 +1,7 @@
 # 04 Ring-Model Ownership Migration
 
+Historical migration record. Current commands and ownership are documented in the workspace `architecture.md`; numbered stage adapters and ordered scenario gates have been removed.
+
 Status: in_progress
 
 ## Purpose

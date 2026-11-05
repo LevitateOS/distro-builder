@@ -80,10 +80,10 @@ fn canonical_derived_product_layout(
     })
 }
 
-fn runtime_product_decl<'a>(
-    contract: &'a ConformanceContract,
+fn runtime_product_decl(
+    contract: &ConformanceContract,
     product: crate::BuildProduct,
-) -> Result<&'a ProductDecl> {
+) -> Result<&ProductDecl> {
     match product.canonical {
         crate::PRODUCT_LIVE_BOOT => Ok(&contract.products.boot_live),
         crate::PRODUCT_LIVE_TOOLS => Ok(&contract.products.live_tools),

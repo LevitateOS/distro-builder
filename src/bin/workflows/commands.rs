@@ -89,20 +89,20 @@ pub(crate) fn dispatch_non_release_command(args: &[String]) -> Result<()> {
         {
             crate::workflows::build_overlayfs_erofs(Path::new(source_dir), Path::new(output))
         }
-        [artifact, preseed_stage01, distro]
-            if artifact == "artifact" && preseed_stage01 == "preseed-rootfs-source" =>
+        [artifact, preseed_source, distro]
+            if artifact == "artifact" && preseed_source == "preseed-rootfs-source" =>
         {
             crate::workflows::preseed_rootfs_source_cmd(distro, false)
         }
-        [artifact, preseed_stage01, distro, refresh]
+        [artifact, preseed_source, distro, refresh]
             if artifact == "artifact"
-                && preseed_stage01 == "preseed-rootfs-source"
+                && preseed_source == "preseed-rootfs-source"
                 && refresh == "--refresh" =>
         {
             crate::workflows::preseed_rootfs_source_cmd(distro, true)
         }
-        [artifact, materialize_stage01, distro]
-            if artifact == "artifact" && materialize_stage01 == "materialize-rootfs-source" =>
+        [artifact, materialize_source, distro]
+            if artifact == "artifact" && materialize_source == "materialize-rootfs-source" =>
         {
             crate::workflows::materialize_rootfs_source_cmd(distro)
         }

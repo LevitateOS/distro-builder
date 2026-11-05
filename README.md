@@ -54,21 +54,11 @@ impl Installable for MyComponent {
 }
 ```
 
-## Status
+## Build model
 
-This crate is currently a **structural skeleton**. The abstractions are defined but artifact builders contain placeholder implementations. Full extraction from leviso requires testing with both LevitateOS and AcornOS builds.
+Canonical builds load ring-owned manifests from `distro-variants/<distro>/`: sources (Ring 3), filesystem products (Ring 2), artifact transforms (Ring 1), and releases (Ring 0). Build-host and scenario declarations are separate owners.
 
-### Implemented
-- `Installable` trait and `Phase` enum
-- Generic `Op` variants (directory, file, symlink, user/group, binary)
-- `DistroConfig` and `BuildContext` traits
-- FHS filesystem utilities (with tests)
-- Host tool preflight validation
-
-### Placeholder (future work)
-- EROFS builder (interface only)
-- Initramfs builder (interface only)
-- ISO builder (interface only)
+Build explicitly with `just release-build live-tools levitate`. Run an independent scenario with `just scenario-test live-tools levitate`; scenario commands consume existing artifacts. The workspace `architecture.md` describes product outputs, scenarios, and validation.
 
 ## Related Crates
 
@@ -81,7 +71,7 @@ This crate is currently a **structural skeleton**. The abstractions are defined 
 - [docs/00_MIGRATION_INDEX.md](docs/00_MIGRATION_INDEX.md) - migration index for numbered distro-builder migration tracks
 - [docs/01_MIGRATION_FEDORA_SWAP.md](docs/01_MIGRATION_FEDORA_SWAP.md) - active Fedora Server DVD swap plan for the LevitateOS Stage 01 source path
 - [docs/02_MIGRATION_BOOTC.md](docs/02_MIGRATION_BOOTC.md) - cancelled track; the repo is keeping the current A/B model instead of migrating to `bootc`
-- [docs/03_MIGRATION_STAGELESS.md](docs/03_MIGRATION_STAGELESS.md) - active migration plan for replacing stage-numbered composition with product-oriented ownership
+- [docs/03_MIGRATION_STAGELESS.md](docs/03_MIGRATION_STAGELESS.md) - historical plan for the completed transition to product-oriented ownership
 
 ## License
 

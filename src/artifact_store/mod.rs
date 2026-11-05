@@ -553,7 +553,7 @@ impl ArtifactStore {
         }
 
         // Stable order.
-        out.sort_by(|a, b| b.stored_at_unix.cmp(&a.stored_at_unix));
+        out.sort_by_key(|entry| std::cmp::Reverse(entry.stored_at_unix));
         Ok(out)
     }
 

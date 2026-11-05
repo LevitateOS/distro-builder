@@ -1,5 +1,7 @@
 # 03 Filesystem-First Migration
 
+Historical migration record. Current commands and ownership are documented in the workspace `architecture.md`; numbered stage adapters and ordered scenario gates have been removed.
+
 Status: ready
 
 ## Purpose
@@ -815,7 +817,7 @@ Design:
     - `distro-variants`
   - Ring B: full tracked repo cleanup
     - root docs
-    - `checkpoints.md`
+    - `architecture.md`
     - `.teams/`
     - helper scripts and repo notes
   - completion for Phase 9 requires Ring A to be zero first, then Ring B to be zero
@@ -891,7 +893,7 @@ Recommended batch order:
 6. `testing/install-tests/test-scripts/stage-*.sh`
    - rename scripts and their callers
 7. top-level/docs/history sweep
-   - `checkpoints.md`
+   - `architecture.md`
    - `.teams/`
    - root docs and migration docs
 
@@ -994,7 +996,7 @@ Recommended batch order:
 - [ ] Remove `stage` from docs and migration filenames.
   - owner paths:
     - `distro-builder/docs/03_MIGRATION_STAGELESS.md`
-    - `checkpoints.md`
+    - `architecture.md`
     - team/docs notes under `.teams/` that still carry active references
   - required model:
     - rename the Track 03 document itself to a neutral title such as filesystem-first or product-model migration

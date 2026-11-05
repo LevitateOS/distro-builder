@@ -87,8 +87,8 @@ pub fn generate_vfat_serial() -> Result<String> {
     }
     Ok(format!(
         "{}-{}",
-        &hex[0..4].to_uppercase(),
-        &hex[4..8].to_uppercase()
+        hex[0..4].to_uppercase(),
+        hex[4..8].to_uppercase()
     ))
 }
 

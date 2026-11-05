@@ -4,11 +4,6 @@ use std::path::Path;
 use anyhow::{anyhow, Context, Result};
 use serde::Serialize;
 
-#[allow(dead_code)]
-pub fn write_stage_run_metadata<T: Serialize>(path: &Path, metadata: &T) -> Result<()> {
-    write_run_metadata(path, metadata)
-}
-
 pub fn write_run_metadata<T: Serialize>(path: &Path, metadata: &T) -> Result<()> {
     write_json_atomic(path, metadata)
         .with_context(|| format!("writing run metadata '{}'", path.display()))

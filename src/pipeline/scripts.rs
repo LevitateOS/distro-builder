@@ -3,10 +3,8 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
-pub(crate) fn install_scenario_test_scripts(
-    repo_root: &Path,
-    rootfs_source_dir: &Path,
-) -> Result<()> {
+/// Install the canonical runtime scenario scripts and their shared libraries.
+pub fn install_scenario_test_scripts(repo_root: &Path, rootfs_source_dir: &Path) -> Result<()> {
     let scripts_src = repo_root.join("testing/install-tests/test-scripts");
     if !scripts_src.is_dir() {
         bail!(
@@ -59,20 +57,25 @@ pub(crate) fn install_scenario_test_scripts(
             common_src.display()
         );
     }
-    let common_dst = lib_dst.join("common.sh");
-    fs::copy(&common_src, &common_dst).with_context(|| {
-        format!(
-            "copying scenario test common library '{}' to '{}'",
-            common_src.display(),
-            common_dst.display()
-        )
-    })?;
-    let mut perms = fs::metadata(&common_dst)
-        .with_context(|| format!("reading metadata '{}'", common_dst.display()))?
-        .permissions();
-    perms.set_mode(0o644);
-    fs::set_permissions(&common_dst, perms)
-        .with_context(|| format!("setting permissions '{}'", common_dst.display()))?;
+    for entry in fs::read_dir(scripts_src.join("lib")).context("reading scenario test libraries")? {
+        let entry = entry.context("reading scenario test library entry")?;
+        let source = entry.path();
+        if !source.is_file() {
+            continue;
+        }
+        let destination = lib_dst.join(entry.file_name());
+        fs::copy(&source, &destination).with_context(|| {
+            format!(
+                "copying scenario test library '{}' to '{}'",
+                source.display(),
+                destination.display()
+            )
+        })?;
+        let mut permissions = fs::metadata(&destination)?.permissions();
+        permissions.set_mode(0o644);
+        fs::set_permissions(&destination, permissions)
+            .with_context(|| format!("setting permissions '{}'", destination.display()))?;
+    }
 
     Ok(())
 }

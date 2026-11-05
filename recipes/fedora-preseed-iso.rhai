@@ -12,7 +12,7 @@
 //
 // Optional env:
 // - ROOTFS_SOURCE_FORCE_REFRESH=1 (generic rootfs source refresh request)
-// - FEDORA_FORCE_REFRESH=1 (remove existing ISO and download again)
+// - FEDORA_FORCE_REFRESH=1 (legacy alias; acquire a verified replacement)
 
 import "sources/fedora.rhai" as source;
 let assets = source::facts();
@@ -42,21 +42,6 @@ fn _ensure_parent_dir(path) {
     if parent != "" {
         mkdir(parent);
     }
-}
-
-fn _normalize_torrent_output(path, iso_name) {
-    let resolved = path;
-    if is_dir(path) {
-        let expected = join_path(path, iso_name);
-        if !is_file(expected) {
-            throw "torrent produced directory without expected ISO '" + iso_name + "': " + path;
-        }
-        resolved = expected;
-    }
-    if basename(resolved) != iso_name {
-        throw "torrent produced unexpected filename: " + basename(resolved) + " (expected " + iso_name + ")";
-    }
-    resolved
 }
 
 fn _expected_checksum_line(ctx) {
@@ -92,21 +77,12 @@ fn acquire(ctx) {
     _ensure_parent_dir(ctx.iso_path);
     mkdir(ctx.trust_dir);
 
-    if _refresh_requested() && is_file(ctx.iso_path) {
-        log("Rootfs source refresh requested: removing existing Fedora ISO before trusted acquisition");
-        rm(ctx.iso_path);
-    }
-
     _verify_published_checksum(ctx);
 
-    if !is_file(ctx.iso_path) {
+    if _refresh_requested() || !is_file(ctx.iso_path) {
         let target_dir = dirname(ctx.iso_path);
         log("Downloading " + ctx.iso_name + " via torrent...");
-        let fetched = torrent(ctx.torrent_url, target_dir);
-        let resolved = _normalize_torrent_output(fetched, ctx.iso_name);
-        if resolved != ctx.iso_path {
-            mv(resolved, ctx.iso_path);
-        }
+        torrent(ctx.torrent_url, target_dir, ctx.iso_name, ctx.sha256);
     } else {
         log("Fedora ISO already present at preseed path; re-validating checksum.");
     }
@@ -132,15 +108,5 @@ fn is_installed(ctx) {
 
 fn install(ctx) {
     ctx.outputs = #{iso: ctx.iso_path};
-    ctx
-}
-
-fn cleanup(ctx, reason) {
-    if reason == "auto.acquire.failure" {
-        // Ensure retries do not reuse partially downloaded content.
-        if is_file(ctx.iso_path) {
-            rm(ctx.iso_path);
-        }
-    }
     ctx
 }

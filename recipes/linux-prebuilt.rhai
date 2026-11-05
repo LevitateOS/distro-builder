@@ -16,6 +16,8 @@
 // Optional env:
 // - KERNEL_FORCE_REBUILD=1 forces re-download/reinstall
 
+import "kernel/metadata.rhai" as kernel;
+
 let build_deps = [];
 
 let ctx = #{
@@ -38,54 +40,11 @@ ctx.force_rebuild = if is_def_var("KERNEL_FORCE_REBUILD") {
     trim(env("KERNEL_FORCE_REBUILD")) == "1"
 };
 
-fn _kernel_artifact_root_or_throw(kernel_artifact_root) {
-    if kernel_artifact_root == "" {
-        throw "KERNEL_ARTIFACT_ROOT is required";
-    }
-    if basename(kernel_artifact_root) == "" || kernel_artifact_root == "." ||
-       kernel_artifact_root.contains("*") || kernel_artifact_root.contains("?") ||
-       kernel_artifact_root.contains("[") || kernel_artifact_root.contains("]") {
-        throw "unsafe kernel artifact root: '" + kernel_artifact_root + "'";
-    }
-    for component in kernel_artifact_root.split("/") {
-        if component == ".." {
-            throw "unsafe kernel artifact root: '" + kernel_artifact_root + "'";
-        }
-    }
-    kernel_artifact_root
-}
-
-fn _normalize_kernel_target(target) {
-    let normalized = target.to_lower();
-    if normalized == "levitate" || normalized == "leviso" {
-        return "levitate";
-    }
-    if normalized == "acorn" || normalized == "acornos" {
-        return "acorn";
-    }
-    ""
-}
-
-fn _kernel_target_or_throw(build_dir, kconfig_path) {
-    let build_target = _normalize_kernel_target(basename(dirname(build_dir)));
-    if build_target != "" {
-        return build_target;
-    }
-
-    if kconfig_path != "" {
-        let kconfig_target = _normalize_kernel_target(basename(dirname(kconfig_path)));
-        if kconfig_target != "" {
-            return kconfig_target;
-        }
-    }
-
-    throw "Cannot determine prebuilt kernel target from build dir '" + build_dir + "'";
-}
-
 fn _prebuilt_spec_or_throw(build_dir, kconfig_path) {
-    let target = _kernel_target_or_throw(build_dir, kconfig_path);
+    let target = kernel::target(build_dir, kconfig_path);
 
-    // Keep this table explicit so no caller has to discover URLs/hashes manually.
+    // Pinned release facts are independent of the source recipe's current version.
+    // Keep this table explicit so callers do not discover URLs/hashes manually.
     if target == "levitate" {
         return #{
             distro_id: "levitate",
@@ -176,7 +135,7 @@ fn is_acquired(ctx) {
         throw "forced prebuilt refresh requested";
     }
 
-    let kernel_root = _kernel_artifact_root_or_throw(KERNEL_ARTIFACT_ROOT);
+    let kernel_root = kernel::artifact_root(KERNEL_ARTIFACT_ROOT);
     let rel = _validate_payload_or_throw(
         kernel_root,
         spec.expected_release,
@@ -194,7 +153,7 @@ fn is_acquired(ctx) {
 fn acquire(ctx) {
     ctx = _apply_prebuilt_spec(ctx, BUILD_DIR, ctx.kconfig_path);
     let spec = _prebuilt_spec_or_throw(BUILD_DIR, ctx.kconfig_path);
-    let kernel_root = _kernel_artifact_root_or_throw(KERNEL_ARTIFACT_ROOT);
+    let kernel_root = kernel::artifact_root(KERNEL_ARTIFACT_ROOT);
     let asset_url = _resolve_asset_url(spec);
 
     mkdir(BUILD_DIR);
@@ -247,7 +206,7 @@ fn is_built(ctx) {
     if ctx.force_rebuild {
         throw "forced prebuilt refresh requested";
     }
-    let kernel_root = _kernel_artifact_root_or_throw(KERNEL_ARTIFACT_ROOT);
+    let kernel_root = kernel::artifact_root(KERNEL_ARTIFACT_ROOT);
     let rel = _validate_payload_or_throw(
         kernel_root,
         spec.expected_release,
@@ -265,7 +224,7 @@ fn build(ctx) {
     // Prebuilt recipe has no compile step; treat build as validated no-op.
     ctx = _apply_prebuilt_spec(ctx, BUILD_DIR, ctx.kconfig_path);
     let spec = _prebuilt_spec_or_throw(BUILD_DIR, ctx.kconfig_path);
-    let kernel_root = _kernel_artifact_root_or_throw(KERNEL_ARTIFACT_ROOT);
+    let kernel_root = kernel::artifact_root(KERNEL_ARTIFACT_ROOT);
     let rel = _validate_payload_or_throw(
         kernel_root,
         spec.expected_release,
@@ -285,7 +244,7 @@ fn is_installed(ctx) {
     if ctx.force_rebuild {
         throw "forced prebuilt refresh requested";
     }
-    let kernel_root = _kernel_artifact_root_or_throw(KERNEL_ARTIFACT_ROOT);
+    let kernel_root = kernel::artifact_root(KERNEL_ARTIFACT_ROOT);
     let rel = _validate_payload_or_throw(
         kernel_root,
         spec.expected_release,
@@ -303,7 +262,7 @@ fn install(ctx) {
     // Prebuilt recipe already installs in acquire; install is a validated no-op.
     ctx = _apply_prebuilt_spec(ctx, BUILD_DIR, ctx.kconfig_path);
     let spec = _prebuilt_spec_or_throw(BUILD_DIR, ctx.kconfig_path);
-    let kernel_root = _kernel_artifact_root_or_throw(KERNEL_ARTIFACT_ROOT);
+    let kernel_root = kernel::artifact_root(KERNEL_ARTIFACT_ROOT);
     let rel = _validate_payload_or_throw(
         kernel_root,
         spec.expected_release,
@@ -329,7 +288,7 @@ fn cleanup(ctx, reason) {
 }
 
 fn remove(ctx) {
-    let kernel_root = _kernel_artifact_root_or_throw(KERNEL_ARTIFACT_ROOT);
+    let kernel_root = kernel::artifact_root(KERNEL_ARTIFACT_ROOT);
     for name in ["kernel-build", "kernel-build.tmp", "staging", "staging.tmp"] {
         let path = join_path(kernel_root, name);
         if exists(path) {

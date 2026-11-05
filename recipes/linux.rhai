@@ -1,13 +1,27 @@
-//! extends: linux-base.rhai
-//
-// Linux kernel - single SSOT recipe for all distros
-//
-// This recipe intentionally contains the *shared* logic so all distros stay in parity.
-// Kernel source facts are resolved inside the recipe from the canonical target
-// mapping in linux-base.rhai. Orchestrators provide only:
-// - KERNEL_KCONFIG_PATH: variant-owned kconfig path
-// - KERNEL_ARTIFACT_ROOT: canonical kernel artifact root directory
-// - KERNEL_FORCE_REBUILD: explicit rebuild policy
+// Linux kernel source lifecycle for all supported targets.
+// Recipe-owned metadata and common checks live in kernel/metadata.rhai.
+// Orchestrators supply artifact/configuration paths and force policy.
+
+import "kernel/metadata.rhai" as kernel;
+
+let build_deps = ["linux-deps"];
+
+let ctx = #{
+    build_dir: "",
+    description: "Linux kernel",
+    kernel_version: "?",
+    name: "linux",
+    kernel_localversion: "",
+    module_install_path: "/usr/lib/modules",
+    source_dir_name: "",
+    source_path: "",
+    tarball_filename: "",
+    tarball_url: "",
+};
+
+ctx.source_path = "";
+ctx.build_dir = "";
+ctx.kconfig_path = if is_def_var("KERNEL_KCONFIG_PATH") { KERNEL_KCONFIG_PATH } else { "" };
 
 // Recompute invocation policy on load even if the legacy executor saved ctx.
 ctx.force_rebuild = if is_def_var("KERNEL_FORCE_REBUILD") {
@@ -21,29 +35,6 @@ ctx.force_rebuild = if is_def_var("KERNEL_FORCE_REBUILD") {
 // Do NOT weaken lifecycle checks or correctness validation (kernel.release, artifacts-out enforcement, modules layout).
 // Do NOT add `|| true` or otherwise ignore failures; fix the real issue.
 // Keep changes minimal and local.
-
-/// Resolve canonical kernel artifact root.
-///
-/// Required define:
-/// - KERNEL_ARTIFACT_ROOT
-///
-/// This recipe no longer supports `<distro>/output` symlink indirection.
-fn _kernel_artifact_root_or_throw(kernel_artifact_root) {
-    if kernel_artifact_root == "" {
-        throw "KERNEL_ARTIFACT_ROOT is required";
-    }
-    if basename(kernel_artifact_root) == "" || kernel_artifact_root == "." ||
-       kernel_artifact_root.contains("*") || kernel_artifact_root.contains("?") ||
-       kernel_artifact_root.contains("[") || kernel_artifact_root.contains("]") {
-        throw "unsafe kernel artifact root: '" + kernel_artifact_root + "'";
-    }
-    for component in kernel_artifact_root.split("/") {
-        if component == ".." {
-            throw "unsafe kernel artifact root: '" + kernel_artifact_root + "'";
-        }
-    }
-    kernel_artifact_root
-}
 
 /// Environment prefix for kernel make invocations.
 ///
@@ -188,30 +179,55 @@ fn _cleanup_modules(staging, version, module_install_path) {
     }
 }
 
-/// Read kernel.release from a completed build dir.
-fn _kernel_release_or_throw(build_dir, expected_version, expected_localversion) {
-    let rel_file = join_path(build_dir, "include/config/kernel.release");
-    if !is_file(rel_file) {
-        throw "Missing kernel.release at " + rel_file;
-    }
-    let rel = trim(read_file(rel_file));
+// === ACQUIRE ===
 
-    if expected_version != "" && !rel.starts_with(expected_version) {
-        throw "Wrong kernel version: kernel.release '" + rel + "' does not start with '" + expected_version + "'";
+fn is_acquired(ctx) {
+    ctx = kernel::apply_source_spec(ctx, BUILD_DIR, ctx.kconfig_path);
+    let tarball_source = join_path(BUILD_DIR, ctx.source_dir_name);
+    if is_file(join_path(tarball_source, "Makefile")) {
+        ctx.source_path = tarball_source;
+        return ctx;
     }
-    if !rel.ends_with(expected_localversion) {
-        throw "Wrong kernel localversion: kernel.release '" + rel + "' does not end with '" + expected_localversion + "'";
-    }
-
-    rel
+    throw "linux source not acquired";
 }
 
-// === OVERRIDES (explicit kernel root + usrmerge-aware install detection) ===
+fn acquire(ctx) {
+    ctx = kernel::apply_source_spec(ctx, BUILD_DIR, ctx.kconfig_path);
+    mkdir(BUILD_DIR);
+    let spec = kernel::source_spec(BUILD_DIR, ctx.kconfig_path);
+
+    let tarball_path = join_path(BUILD_DIR, ctx.tarball_filename);
+    let tarball_source = join_path(BUILD_DIR, ctx.source_dir_name);
+
+    if !is_file(join_path(tarball_source, "Makefile")) {
+        if !is_file(tarball_path) {
+            log("Downloading kernel " + ctx.kernel_version + " from cdn.kernel.org...");
+            shell("curl -fSL -o " + tarball_path + " " + ctx.tarball_url);
+        }
+
+        log("Verifying SHA256...");
+        verify_sha256(tarball_path, spec.sha256);
+
+        log("Extracting kernel source...");
+        shell("tar xf " + tarball_path + " -C " + BUILD_DIR);
+    }
+
+    if is_file(join_path(tarball_source, "Makefile")) {
+        ctx.source_path = tarball_source;
+        log("Kernel source ready at " + tarball_source);
+        return ctx;
+    }
+
+    throw "Failed to acquire linux source from cdn.kernel.org";
+}
+
+
+// === BUILD / INSTALL ===
 
 fn is_built(ctx) {
-    ctx = _apply_kernel_spec(ctx, BUILD_DIR, KERNEL_KCONFIG_PATH);
-    let spec = _kernel_spec_or_throw(BUILD_DIR, KERNEL_KCONFIG_PATH);
-    let kernel_root = _kernel_artifact_root_or_throw(KERNEL_ARTIFACT_ROOT);
+    ctx = kernel::apply_source_spec(ctx, BUILD_DIR, ctx.kconfig_path);
+    let spec = kernel::source_spec(BUILD_DIR, ctx.kconfig_path);
+    let kernel_root = kernel::artifact_root(KERNEL_ARTIFACT_ROOT);
     let build_dir = join_path(kernel_root, "kernel-build");
     let bzimage = join_path(build_dir, "arch/x86/boot/bzImage");
 
@@ -223,21 +239,21 @@ fn is_built(ctx) {
         throw "kernel not built";
     }
 
-    let rel = _kernel_release_or_throw(build_dir, spec.version, spec.localversion);
+    let rel = kernel::release(build_dir, spec.version, spec.localversion);
     ctx.kernel_version = rel;
     ctx.build_dir = build_dir;
     ctx
 }
 
 fn build(ctx) {
-    ctx = _apply_kernel_spec(ctx, BUILD_DIR, KERNEL_KCONFIG_PATH);
-    let spec = _kernel_spec_or_throw(BUILD_DIR, KERNEL_KCONFIG_PATH);
-    let kconfig = if KERNEL_KCONFIG_PATH == "" {
+    ctx = kernel::apply_source_spec(ctx, BUILD_DIR, ctx.kconfig_path);
+    let spec = kernel::source_spec(BUILD_DIR, ctx.kconfig_path);
+    let kconfig = if ctx.kconfig_path == "" {
         throw "KERNEL_KCONFIG_PATH is required";
     } else {
-        KERNEL_KCONFIG_PATH
+        ctx.kconfig_path
     };
-    let kernel_root = _kernel_artifact_root_or_throw(KERNEL_ARTIFACT_ROOT);
+    let kernel_root = kernel::artifact_root(KERNEL_ARTIFACT_ROOT);
     let build_dir = join_path(kernel_root, "kernel-build");
     let build_dir_tmp = join_path(kernel_root, "kernel-build.tmp");
 
@@ -275,13 +291,13 @@ fn build(ctx) {
 }
 
 fn is_installed(ctx) {
-    ctx = _apply_kernel_spec(ctx, BUILD_DIR, KERNEL_KCONFIG_PATH);
-    let spec = _kernel_spec_or_throw(BUILD_DIR, KERNEL_KCONFIG_PATH);
-    let kernel_root = _kernel_artifact_root_or_throw(KERNEL_ARTIFACT_ROOT);
+    ctx = kernel::apply_source_spec(ctx, BUILD_DIR, ctx.kconfig_path);
+    let spec = kernel::source_spec(BUILD_DIR, ctx.kconfig_path);
+    let kernel_root = kernel::artifact_root(KERNEL_ARTIFACT_ROOT);
     let staging = join_path(kernel_root, "staging");
     let vmlinuz = join_path(staging, "boot/vmlinuz");
     let build_dir = join_path(kernel_root, "kernel-build");
-    let rel = _kernel_release_or_throw(build_dir, spec.version, spec.localversion);
+    let rel = kernel::release(build_dir, spec.version, spec.localversion);
 
     if ctx.force_rebuild {
         throw "force rebuild requested";
@@ -300,13 +316,15 @@ fn is_installed(ctx) {
         throw "modules not installed";
     }
 
+    ctx.kernel_version = rel;
+    ctx.build_dir = build_dir;
     ctx
 }
 
 fn install(ctx) {
-    ctx = _apply_kernel_spec(ctx, BUILD_DIR, KERNEL_KCONFIG_PATH);
-    let spec = _kernel_spec_or_throw(BUILD_DIR, KERNEL_KCONFIG_PATH);
-    let kernel_root = _kernel_artifact_root_or_throw(KERNEL_ARTIFACT_ROOT);
+    ctx = kernel::apply_source_spec(ctx, BUILD_DIR, ctx.kconfig_path);
+    let spec = kernel::source_spec(BUILD_DIR, ctx.kconfig_path);
+    let kernel_root = kernel::artifact_root(KERNEL_ARTIFACT_ROOT);
     let staging = join_path(kernel_root, "staging");
     let staging_tmp = join_path(kernel_root, "staging.tmp");
     let build_dir = ctx.build_dir;
@@ -361,8 +379,78 @@ fn install(ctx) {
     ctx
 }
 
+// === CLEANUP ===
+
+fn _kernel_cleanup_path(build_dir, name) {
+    if name == "" || basename(name) != name || name == "." || name == ".." {
+        throw "unsafe kernel cleanup filename: '" + name + "'";
+    }
+    let path = join_path(build_dir, name);
+    // rm accepts glob patterns; cleanup owns exact paths only.
+    if path.contains("*") || path.contains("?") || path.contains("[") || path.contains("]") {
+        throw "unsafe kernel cleanup path: '" + path + "'";
+    }
+    path
+}
+
+fn cleanup(ctx, reason) {
+    if reason != "manual" && reason != "auto.acquire.success" && reason != "auto.acquire.failure" {
+        return ctx;
+    }
+    // Manual cleanup can run before any acquire/build hook initializes ctx.
+    if ctx.source_dir_name == "" || ctx.tarball_filename == "" {
+        ctx = kernel::apply_source_spec(ctx, BUILD_DIR, "");
+    }
+    if !ctx.source_dir_name.starts_with("linux-") ||
+       ctx.tarball_filename != ctx.source_dir_name + ".tar.xz" {
+        throw "unsafe kernel cleanup: source and archive names do not identify a kernel source";
+    }
+    let downloaded = _kernel_cleanup_path(BUILD_DIR, ctx.source_dir_name);
+    let tarball = _kernel_cleanup_path(BUILD_DIR, ctx.tarball_filename);
+
+    // IMPORTANT:
+    // - After acquire succeeds, the extracted source is still needed for build/install.
+    // - After build succeeds, the extracted source is still needed for install (modules_install).
+    // So automatic cleanup must be reason-aware.
+
+    // Manual cleanup: full hygiene.
+    if reason == "manual" {
+        if is_dir(downloaded) {
+            log("Removing downloaded kernel source...");
+            rm(downloaded);
+        }
+        if is_file(tarball) {
+            rm(tarball);
+        }
+        return ctx;
+    }
+
+    // Acquire succeeded: the tarball is no longer needed after extraction, but the source tree is.
+    if reason == "auto.acquire.success" {
+        if is_file(tarball) {
+            rm(tarball);
+        }
+        return ctx;
+    }
+
+    // Acquire failed: remove any partial tarball/source so a retry starts clean.
+    if reason == "auto.acquire.failure" {
+        if is_dir(downloaded) {
+            rm(downloaded);
+        }
+        if is_file(tarball) {
+            rm(tarball);
+        }
+        return ctx;
+    }
+
+    // Build/install success or failure: keep sources by default (use manual cleanup if desired).
+    ctx
+}
+
+
 fn remove(ctx) {
-    let kernel_root = _kernel_artifact_root_or_throw(KERNEL_ARTIFACT_ROOT);
+    let kernel_root = kernel::artifact_root(KERNEL_ARTIFACT_ROOT);
     for name in ["kernel-build", "kernel-build.tmp", "staging", "staging.tmp"] {
         let path = join_path(kernel_root, name);
         if exists(path) {

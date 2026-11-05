@@ -11,6 +11,7 @@
 //
 // Orchestrators may also provide:
 // - KERNEL_KCONFIG_PATH (used only to resolve the canonical distro target)
+// - KERNEL_FORCE_REBUILD=1 (takes precedence over the legacy environment variable)
 //
 // Optional env:
 // - KERNEL_FORCE_REBUILD=1 forces re-download/reinstall
@@ -27,6 +28,14 @@ let ctx = #{
     source_path: "",
     tarball_filename: "",
     tarball_url: "",
+};
+
+// Invocation options are refreshed on load, independently of persisted state.
+ctx.kconfig_path = if is_def_var("KERNEL_KCONFIG_PATH") { KERNEL_KCONFIG_PATH } else { "" };
+ctx.force_rebuild = if is_def_var("KERNEL_FORCE_REBUILD") {
+    trim(KERNEL_FORCE_REBUILD) == "1"
+} else {
+    trim(env("KERNEL_FORCE_REBUILD")) == "1"
 };
 
 fn _kernel_artifact_root_or_throw(kernel_artifact_root) {
@@ -126,10 +135,6 @@ fn _apply_prebuilt_spec(ctx, build_dir, kconfig_path) {
     ctx
 }
 
-fn _kernel_force_rebuild_requested() {
-    trim(shell_output("printf '%s' \"${KERNEL_FORCE_REBUILD:-0}\"")) == "1"
-}
-
 fn _validate_payload_or_throw(kernel_root, expected_release, expected_version, expected_localversion, module_install_path) {
     let rel_file = join_path(kernel_root, "kernel-build/include/config/kernel.release");
     if !is_file(rel_file) {
@@ -165,9 +170,9 @@ fn _validate_payload_or_throw(kernel_root, expected_release, expected_version, e
 }
 
 fn is_acquired(ctx) {
-    ctx = _apply_prebuilt_spec(ctx, BUILD_DIR, KERNEL_KCONFIG_PATH);
-    let spec = _prebuilt_spec_or_throw(BUILD_DIR, KERNEL_KCONFIG_PATH);
-    if _kernel_force_rebuild_requested() {
+    ctx = _apply_prebuilt_spec(ctx, BUILD_DIR, ctx.kconfig_path);
+    let spec = _prebuilt_spec_or_throw(BUILD_DIR, ctx.kconfig_path);
+    if ctx.force_rebuild {
         throw "forced prebuilt refresh requested";
     }
 
@@ -187,8 +192,8 @@ fn is_acquired(ctx) {
 }
 
 fn acquire(ctx) {
-    ctx = _apply_prebuilt_spec(ctx, BUILD_DIR, KERNEL_KCONFIG_PATH);
-    let spec = _prebuilt_spec_or_throw(BUILD_DIR, KERNEL_KCONFIG_PATH);
+    ctx = _apply_prebuilt_spec(ctx, BUILD_DIR, ctx.kconfig_path);
+    let spec = _prebuilt_spec_or_throw(BUILD_DIR, ctx.kconfig_path);
     let kernel_root = _kernel_artifact_root_or_throw(KERNEL_ARTIFACT_ROOT);
     let asset_url = _resolve_asset_url(spec);
 
@@ -237,9 +242,9 @@ fn acquire(ctx) {
 }
 
 fn is_built(ctx) {
-    ctx = _apply_prebuilt_spec(ctx, BUILD_DIR, KERNEL_KCONFIG_PATH);
-    let spec = _prebuilt_spec_or_throw(BUILD_DIR, KERNEL_KCONFIG_PATH);
-    if _kernel_force_rebuild_requested() {
+    ctx = _apply_prebuilt_spec(ctx, BUILD_DIR, ctx.kconfig_path);
+    let spec = _prebuilt_spec_or_throw(BUILD_DIR, ctx.kconfig_path);
+    if ctx.force_rebuild {
         throw "forced prebuilt refresh requested";
     }
     let kernel_root = _kernel_artifact_root_or_throw(KERNEL_ARTIFACT_ROOT);
@@ -258,8 +263,8 @@ fn is_built(ctx) {
 
 fn build(ctx) {
     // Prebuilt recipe has no compile step; treat build as validated no-op.
-    ctx = _apply_prebuilt_spec(ctx, BUILD_DIR, KERNEL_KCONFIG_PATH);
-    let spec = _prebuilt_spec_or_throw(BUILD_DIR, KERNEL_KCONFIG_PATH);
+    ctx = _apply_prebuilt_spec(ctx, BUILD_DIR, ctx.kconfig_path);
+    let spec = _prebuilt_spec_or_throw(BUILD_DIR, ctx.kconfig_path);
     let kernel_root = _kernel_artifact_root_or_throw(KERNEL_ARTIFACT_ROOT);
     let rel = _validate_payload_or_throw(
         kernel_root,
@@ -275,9 +280,9 @@ fn build(ctx) {
 }
 
 fn is_installed(ctx) {
-    ctx = _apply_prebuilt_spec(ctx, BUILD_DIR, KERNEL_KCONFIG_PATH);
-    let spec = _prebuilt_spec_or_throw(BUILD_DIR, KERNEL_KCONFIG_PATH);
-    if _kernel_force_rebuild_requested() {
+    ctx = _apply_prebuilt_spec(ctx, BUILD_DIR, ctx.kconfig_path);
+    let spec = _prebuilt_spec_or_throw(BUILD_DIR, ctx.kconfig_path);
+    if ctx.force_rebuild {
         throw "forced prebuilt refresh requested";
     }
     let kernel_root = _kernel_artifact_root_or_throw(KERNEL_ARTIFACT_ROOT);
@@ -296,8 +301,8 @@ fn is_installed(ctx) {
 
 fn install(ctx) {
     // Prebuilt recipe already installs in acquire; install is a validated no-op.
-    ctx = _apply_prebuilt_spec(ctx, BUILD_DIR, KERNEL_KCONFIG_PATH);
-    let spec = _prebuilt_spec_or_throw(BUILD_DIR, KERNEL_KCONFIG_PATH);
+    ctx = _apply_prebuilt_spec(ctx, BUILD_DIR, ctx.kconfig_path);
+    let spec = _prebuilt_spec_or_throw(BUILD_DIR, ctx.kconfig_path);
     let kernel_root = _kernel_artifact_root_or_throw(KERNEL_ARTIFACT_ROOT);
     let rel = _validate_payload_or_throw(
         kernel_root,

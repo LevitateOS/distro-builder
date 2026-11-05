@@ -9,6 +9,13 @@
 // - KERNEL_ARTIFACT_ROOT: canonical kernel artifact root directory
 // - KERNEL_FORCE_REBUILD: explicit rebuild policy
 
+// Recompute invocation policy on load even if the legacy executor saved ctx.
+ctx.force_rebuild = if is_def_var("KERNEL_FORCE_REBUILD") {
+    trim(KERNEL_FORCE_REBUILD) == "1"
+} else {
+    trim(env("KERNEL_FORCE_REBUILD")) == "1"
+};
+
 // AUTOFIX_PROMPT: This recipe is the SSOT for all kernel builds. Keep distros in parity.
 // Only edit files under `distro-builder/recipes/` to fix the failure.
 // Do NOT weaken lifecycle checks or correctness validation (kernel.release, artifacts-out enforcement, modules layout).
@@ -199,10 +206,6 @@ fn _kernel_release_or_throw(build_dir, expected_version, expected_localversion) 
     rel
 }
 
-fn _kernel_force_rebuild_requested() {
-    trim(shell_output("printf '%s' \"${KERNEL_FORCE_REBUILD:-0}\"")) == "1"
-}
-
 // === OVERRIDES (explicit kernel root + usrmerge-aware install detection) ===
 
 fn is_built(ctx) {
@@ -212,7 +215,7 @@ fn is_built(ctx) {
     let build_dir = join_path(kernel_root, "kernel-build");
     let bzimage = join_path(build_dir, "arch/x86/boot/bzImage");
 
-    if _kernel_force_rebuild_requested() {
+    if ctx.force_rebuild {
         throw "force rebuild requested";
     }
 
@@ -280,7 +283,7 @@ fn is_installed(ctx) {
     let build_dir = join_path(kernel_root, "kernel-build");
     let rel = _kernel_release_or_throw(build_dir, spec.version, spec.localversion);
 
-    if _kernel_force_rebuild_requested() {
+    if ctx.force_rebuild {
         throw "force rebuild requested";
     }
 

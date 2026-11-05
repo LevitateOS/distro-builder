@@ -99,8 +99,3 @@ fn is_installed(ctx) {
 fn install(ctx) {
     ctx
 }
-
-fn cleanup(ctx, reason) {
-    // Download owns partial files; cached assets survive failed refreshes.
-    ctx
-}

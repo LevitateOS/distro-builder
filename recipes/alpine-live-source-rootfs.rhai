@@ -15,55 +15,28 @@ fn _downloads_dir(build_dir) {
     join_path(parent, "downloads")
 }
 
+import "sources/alpine.rhai" as source;
+let assets = source::facts();
+
 let ctx = #{
-    alpine_version: "3.23.2",
+    alpine_version: assets.iso_version,
     apk_static_path: "",
-    apk_tools_preseed_path: join_path(_downloads_dir(BUILD_DIR), "apk-tools-static-3.0.5-r0.apk"),
-    apk_tools_sha256: "6e832468b4efebd6ab7245e4989ca38b6e4589a9772d52a03b58c690a7aeacbe",
-    apk_tools_version: "3.0.5-r0",
+    apk_tools_preseed_path: join_path(_downloads_dir(BUILD_DIR), assets.apk_tools_name),
+    apk_tools_sha256: assets.apk_tools_sha256,
+    apk_tools_version: assets.apk_tools_version,
     description: "Alpine live rootfs source producer",
     iso_path: "",
-    iso_preseed_path: join_path(_downloads_dir(BUILD_DIR), "alpine-extended-3.23.2-x86_64.iso"),
-    iso_sha256: "8d50854936dba58e7616ac3bfa07ad67dac0347305fec1cba6d288cf5df1577d",
+    iso_preseed_path: join_path(_downloads_dir(BUILD_DIR), assets.iso_name),
+    iso_sha256: assets.iso_sha256,
+    iso_name: assets.iso_name,
+    apk_tools_name: assets.apk_tools_name,
     name: "alpine-live-source-rootfs",
     profile: "acorn",
-    release_branch: "v3.23",
+    release_branch: assets.release_branch,
     rootfs_path: "",
     rootfs_recipe_version: "alpine-live-source-v5",
     trust_dir: _downloads_dir(BUILD_DIR),
 };
-
-fn _iso_name(ctx) {
-    "alpine-extended-" + ctx.alpine_version + "-x86_64.iso"
-}
-
-fn _apk_tools_name(ctx) {
-    "apk-tools-static-" + ctx.apk_tools_version + ".apk"
-}
-
-fn _verify_marker_path(trust_dir) {
-    join_path(trust_dir, ".alpine-source-preseed.marker")
-}
-
-fn _fingerprint(path) {
-    trim(shell_output("stat -c '%s' '" + path + "'"))
-}
-
-fn _verify_marker_content(iso_path, iso_sha256, apk_tools_path, apk_tools_sha256) {
-    "iso_sha256=" + iso_sha256 + "\n" +
-    "iso_fingerprint=" + _fingerprint(iso_path) + "\n" +
-    "apk_tools_sha256=" + apk_tools_sha256 + "\n" +
-    "apk_tools_fingerprint=" + _fingerprint(apk_tools_path) + "\n"
-}
-
-fn _marker_is_valid(trust_dir, iso_path, iso_sha256, apk_tools_path, apk_tools_sha256) {
-    let marker = _verify_marker_path(trust_dir);
-    if !is_file(marker) {
-        return false;
-    }
-    let expected = _verify_marker_content(iso_path, iso_sha256, apk_tools_path, apk_tools_sha256);
-    read_file_or_empty(marker) == expected
-}
 
 fn _ensure_parent_dir(path) {
     let parent = dirname(path);
@@ -104,7 +77,7 @@ fn _require_trusted_preseed_assets(ctx, remediation) {
     }
     verify_sha256(ctx.iso_preseed_path, ctx.iso_sha256);
     verify_sha256(ctx.apk_tools_preseed_path, ctx.apk_tools_sha256);
-    if !_marker_is_valid(
+    if !source::marker_is_valid(
         ctx.trust_dir,
         ctx.iso_preseed_path,
         ctx.iso_sha256,
@@ -245,12 +218,12 @@ fn _ensure_openrc_live_source_completeness(rootfs) {
 
 fn is_acquired(ctx) {
     let remediation = "Run 'cargo run -p distro-builder --bin distro-builder -- artifact preseed-rootfs-source " + ctx.profile + " --refresh'";
-    let iso_path = join_path(BUILD_DIR, _iso_name(ctx));
+    let iso_path = join_path(BUILD_DIR, ctx.iso_name);
     _require_trusted_preseed_assets(ctx, remediation);
     _require_preseeded_asset(iso_path, ctx.iso_preseed_path, "Alpine ISO", remediation);
     verify_sha256(iso_path, ctx.iso_sha256);
     let apk_tools_dir = join_path(BUILD_DIR, "apk-tools");
-    let apk_tools_pkg = join_path(apk_tools_dir, _apk_tools_name(ctx));
+    let apk_tools_pkg = join_path(apk_tools_dir, ctx.apk_tools_name);
     _require_preseeded_asset(
         apk_tools_pkg,
         ctx.apk_tools_preseed_path,
@@ -272,13 +245,13 @@ fn is_acquired(ctx) {
 fn acquire(ctx) {
     let remediation = "Run 'cargo run -p distro-builder --bin distro-builder -- artifact preseed-rootfs-source " + ctx.profile + " --refresh'";
     mkdir(BUILD_DIR);
-    let iso_dest = join_path(BUILD_DIR, _iso_name(ctx));
+    let iso_dest = join_path(BUILD_DIR, ctx.iso_name);
     _require_trusted_preseed_assets(ctx, remediation);
     _require_preseeded_asset(iso_dest, ctx.iso_preseed_path, "Alpine ISO", remediation);
     verify_sha256(iso_dest, ctx.iso_sha256);
 
     let apk_tools_dir = join_path(BUILD_DIR, "apk-tools");
-    let apk_tools_pkg = join_path(apk_tools_dir, _apk_tools_name(ctx));
+    let apk_tools_pkg = join_path(apk_tools_dir, ctx.apk_tools_name);
     let apk_static = _resolve_apk_static(apk_tools_dir);
     mkdir(apk_tools_dir);
 

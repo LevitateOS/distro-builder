@@ -5,77 +5,30 @@
 //     alpine-extended-<version>-x86_64.iso
 //     apk-tools-static-<version>.apk
 //
-// Current canonical assets:
-// - release branch: v3.23
-// - alpine-extended-3.23.2-x86_64.iso
-// - ISO SHA256: 8d50854936dba58e7616ac3bfa07ad67dac0347305fec1cba6d288cf5df1577d
-// - apk-tools-static-3.0.5-r0.apk
-// - apk-tools SHA256: 6e832468b4efebd6ab7245e4989ca38b6e4589a9772d52a03b58c690a7aeacbe
+// Pinned versions, filenames, URLs, hashes, and marker format: sources/alpine.rhai.
 //
 // Optional env:
 // - ALPINE_FORCE_REFRESH=1 (remove existing assets and download again)
 
+import "sources/alpine.rhai" as source;
+let assets = source::facts();
+
 let ctx = #{
-    apk_tools_path: join_path(BUILD_DIR, "apk-tools-static-3.0.5-r0.apk"),
-    apk_tools_sha256: "6e832468b4efebd6ab7245e4989ca38b6e4589a9772d52a03b58c690a7aeacbe",
-    apk_tools_version: "3.0.5-r0",
+    apk_tools_path: join_path(BUILD_DIR, assets.apk_tools_name),
+    apk_tools_sha256: assets.apk_tools_sha256,
+    apk_tools_version: assets.apk_tools_version,
     description: "Canonical Alpine rootfs source preseed",
-    iso_path: join_path(BUILD_DIR, "alpine-extended-3.23.2-x86_64.iso"),
-    iso_sha256: "8d50854936dba58e7616ac3bfa07ad67dac0347305fec1cba6d288cf5df1577d",
-    iso_version: "3.23.2",
+    iso_path: join_path(BUILD_DIR, assets.iso_name),
+    iso_sha256: assets.iso_sha256,
+    iso_version: assets.iso_version,
+    iso_name: assets.iso_name,
+    apk_tools_name: assets.apk_tools_name,
+    iso_url: assets.iso_url,
+    apk_tools_url: assets.apk_tools_url,
     name: "alpine-preseed-source-assets",
-    release_branch: "v3.23",
+    release_branch: assets.release_branch,
     trust_dir: BUILD_DIR,
 };
-
-fn _iso_name(ctx) {
-    "alpine-extended-" + ctx.iso_version + "-x86_64.iso"
-}
-
-fn _iso_url(ctx) {
-    "https://dl-cdn.alpinelinux.org/alpine/" +
-    ctx.release_branch +
-    "/releases/x86_64/" +
-    _iso_name(ctx)
-}
-
-fn _apk_tools_name(ctx) {
-    "apk-tools-static-" + ctx.apk_tools_version + ".apk"
-}
-
-fn _apk_tools_url(ctx) {
-    "https://dl-cdn.alpinelinux.org/alpine/" +
-    ctx.release_branch +
-    "/main/x86_64/" +
-    _apk_tools_name(ctx)
-}
-
-fn _verify_marker_path(trust_dir) {
-    join_path(trust_dir, ".alpine-source-preseed.marker")
-}
-
-fn _fingerprint(path) {
-    trim(shell_output("stat -c '%s' '" + path + "'"))
-}
-
-fn _verify_marker_content(ctx) {
-    "iso_sha256=" + ctx.iso_sha256 + "\n" +
-    "iso_fingerprint=" + _fingerprint(ctx.iso_path) + "\n" +
-    "apk_tools_sha256=" + ctx.apk_tools_sha256 + "\n" +
-    "apk_tools_fingerprint=" + _fingerprint(ctx.apk_tools_path) + "\n"
-}
-
-fn _marker_is_valid(ctx) {
-    let marker = _verify_marker_path(ctx.trust_dir);
-    if !is_file(marker) {
-        return false;
-    }
-    read_file_or_empty(marker) == _verify_marker_content(ctx)
-}
-
-fn _write_verify_marker(ctx) {
-    write_file(_verify_marker_path(ctx.trust_dir), _verify_marker_content(ctx));
-}
 
 fn _refresh_requested() {
     trim(env("ALPINE_FORCE_REFRESH")) == "1"
@@ -89,7 +42,7 @@ fn _ensure_parent_dir(path) {
 }
 
 fn _remove_marker(ctx) {
-    let marker = _verify_marker_path(ctx.trust_dir);
+    let marker = source::marker_path(ctx.trust_dir);
     if is_file(marker) {
         rm(marker);
     }
@@ -107,7 +60,7 @@ fn is_acquired(ctx) {
     }
     verify_sha256(ctx.iso_path, ctx.iso_sha256);
     verify_sha256(ctx.apk_tools_path, ctx.apk_tools_sha256);
-    if !_marker_is_valid(ctx) {
+    if !source::marker_is_valid(ctx.trust_dir, ctx.iso_path, ctx.iso_sha256, ctx.apk_tools_path, ctx.apk_tools_sha256) {
         throw "Alpine rootfs source trust marker missing/stale under " + ctx.trust_dir;
     }
     ctx
@@ -127,9 +80,9 @@ fn acquire(ctx) {
 
     if !is_file(ctx.iso_path) {
         log("Downloading " + basename(ctx.iso_path) + "...");
-        let downloaded = download(_iso_url(ctx), ctx.iso_path);
+        let downloaded = download(ctx.iso_url, ctx.iso_path);
         if downloaded == "" {
-            throw "failed to download Alpine ISO from " + _iso_url(ctx);
+            throw "failed to download Alpine ISO from " + ctx.iso_url;
         }
     } else {
         log("Alpine ISO already present at preseed path; re-validating checksum.");
@@ -138,16 +91,16 @@ fn acquire(ctx) {
 
     if !is_file(ctx.apk_tools_path) {
         log("Downloading " + basename(ctx.apk_tools_path) + "...");
-        let downloaded = download(_apk_tools_url(ctx), ctx.apk_tools_path);
+        let downloaded = download(ctx.apk_tools_url, ctx.apk_tools_path);
         if downloaded == "" {
-            throw "failed to download apk-tools-static from " + _apk_tools_url(ctx);
+            throw "failed to download apk-tools-static from " + ctx.apk_tools_url;
         }
     } else {
         log("apk-tools package already present at preseed path; re-validating checksum.");
     }
     verify_sha256(ctx.apk_tools_path, ctx.apk_tools_sha256);
 
-    _write_verify_marker(ctx);
+    source::write_marker(ctx.trust_dir, ctx.iso_path, ctx.iso_sha256, ctx.apk_tools_path, ctx.apk_tools_sha256);
     ctx
 }
 

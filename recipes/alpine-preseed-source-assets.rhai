@@ -8,7 +8,7 @@
 // Pinned versions, filenames, URLs, hashes, and marker format: sources/alpine.rhai.
 //
 // Optional env:
-// - ALPINE_FORCE_REFRESH=1 (remove existing assets and download again)
+// - ALPINE_FORCE_REFRESH=1 (download verified replacements for existing assets)
 
 import "sources/alpine.rhai" as source;
 let assets = source::facts();
@@ -41,13 +41,6 @@ fn _ensure_parent_dir(path) {
     }
 }
 
-fn _remove_marker(ctx) {
-    let marker = source::marker_path(ctx.trust_dir);
-    if is_file(marker) {
-        rm(marker);
-    }
-}
-
 fn is_acquired(ctx) {
     if _refresh_requested() {
         throw "forced refresh";
@@ -71,34 +64,20 @@ fn acquire(ctx) {
     _ensure_parent_dir(ctx.iso_path);
     _ensure_parent_dir(ctx.apk_tools_path);
 
-    if _refresh_requested() {
-        log("ALPINE_FORCE_REFRESH=1: removing existing Alpine rootfs source preseed assets");
-        if is_file(ctx.iso_path) { rm(ctx.iso_path); }
-        if is_file(ctx.apk_tools_path) { rm(ctx.apk_tools_path); }
-        _remove_marker(ctx);
-    }
-
-    if !is_file(ctx.iso_path) {
+    let refresh = _refresh_requested();
+    if refresh || !is_file(ctx.iso_path) {
         log("Downloading " + basename(ctx.iso_path) + "...");
-        let downloaded = download(ctx.iso_url, ctx.iso_path);
-        if downloaded == "" {
-            throw "failed to download Alpine ISO from " + ctx.iso_url;
-        }
+        download(ctx.iso_url, ctx.iso_path, ctx.iso_sha256);
     } else {
-        log("Alpine ISO already present at preseed path; re-validating checksum.");
+        verify_sha256(ctx.iso_path, ctx.iso_sha256);
     }
-    verify_sha256(ctx.iso_path, ctx.iso_sha256);
 
-    if !is_file(ctx.apk_tools_path) {
+    if refresh || !is_file(ctx.apk_tools_path) {
         log("Downloading " + basename(ctx.apk_tools_path) + "...");
-        let downloaded = download(ctx.apk_tools_url, ctx.apk_tools_path);
-        if downloaded == "" {
-            throw "failed to download apk-tools-static from " + ctx.apk_tools_url;
-        }
+        download(ctx.apk_tools_url, ctx.apk_tools_path, ctx.apk_tools_sha256);
     } else {
-        log("apk-tools package already present at preseed path; re-validating checksum.");
+        verify_sha256(ctx.apk_tools_path, ctx.apk_tools_sha256);
     }
-    verify_sha256(ctx.apk_tools_path, ctx.apk_tools_sha256);
 
     source::write_marker(ctx.trust_dir, ctx.iso_path, ctx.iso_sha256, ctx.apk_tools_path, ctx.apk_tools_sha256);
     ctx
@@ -122,14 +101,6 @@ fn install(ctx) {
 }
 
 fn cleanup(ctx, reason) {
-    if reason == "auto.acquire.failure" {
-        // Ensure retries do not reuse partial files.
-        if is_file(ctx.iso_path) {
-            rm(ctx.iso_path);
-        }
-        if is_file(ctx.apk_tools_path) {
-            rm(ctx.apk_tools_path);
-        }
-    }
+    // Download owns partial files; cached assets survive failed refreshes.
     ctx
 }

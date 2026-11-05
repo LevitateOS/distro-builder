@@ -3,14 +3,15 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use super::{
-    find_recipe, recipe_work_dir, run_recipe_phase_json_with_defines,
-    run_recipe_phase_json_with_defines_and_env,
+    find_recipe, recipe_work_dir, run_recipe_phase_json_with_defines_and_env,
+    run_recipe_phase_json_with_inputs,
 };
 
 #[derive(Debug, Clone)]
 pub struct RootfsSourceRecipeSpec {
     pub recipe_script: PathBuf,
     pub defines: BTreeMap<String, String>,
+    pub inputs: BTreeMap<String, PathBuf>,
 }
 
 fn resolve_recipe_path(repo_root: &Path, recipe_script: &Path) -> PathBuf {
@@ -47,12 +48,18 @@ pub fn materialize_rootfs_from_recipe(
         defines.push((key.as_str(), value.as_str()));
     }
 
-    let ctx = run_recipe_phase_json_with_defines(
+    let inputs: Vec<(&str, &Path)> = spec
+        .inputs
+        .iter()
+        .map(|(name, path)| (name.as_str(), path.as_path()))
+        .collect();
+    let ctx = run_recipe_phase_json_with_inputs(
         &recipe_bin.path,
         "install",
         &recipe_path,
         build_dir,
         &defines,
+        &inputs,
         Some(recipes_path),
     )
     .with_context(|| {

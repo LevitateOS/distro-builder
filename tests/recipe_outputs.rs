@@ -57,6 +57,7 @@ fn install(ctx) {{
         &RootfsSourceRecipeSpec {
             recipe_script: recipe,
             defines: BTreeMap::new(),
+            inputs: BTreeMap::new(),
         },
     );
     assert_eq!(

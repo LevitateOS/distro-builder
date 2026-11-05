@@ -1,88 +1,69 @@
-// Generic rootfs source producer for custom distro payloads.
-//
-// Produces:
-// - BUILD_DIR/rootfs (copied from CUSTOM_ROOTFS_DIR)
-//
-// Required defines:
-// - CUSTOM_ROOTFS_DIR (absolute or repo-relative path, resolved by caller)
-
+// Produce a rootfs from one explicit immutable source tree:
+//   --input rootfs=PATH
+// The coordinator publishes ctx.outputs.rootfs after successful installation.
+const RECIPE_API = 2;
 let ctx = #{
-    outputs: #{},
     name: "custom-source-rootfs",
     description: "Custom rootfs source producer",
-    source_rootfs: CUSTOM_ROOTFS_DIR,
-    rootfs_path: "",
+    source_rootfs: join_path(RUNTIME.paths.inputs, "rootfs"),
+    rootfs_path: join_path(RUNTIME.paths.output, "rootfs"),
 };
 
 fn _validate_source(path) {
-    if !is_dir(path) {
-        throw "custom rootfs source directory missing: " + path;
-    }
+    if !is_dir(path) { throw "custom rootfs input directory missing: " + path; }
     if !is_dir(join_path(path, "usr")) {
-        throw "custom rootfs source must contain 'usr/' (missing under " + path + ")";
+        throw "custom rootfs input must contain usr/: " + path;
     }
 }
 
 fn is_acquired(ctx) {
+    if !is_dir(ctx.source_rootfs) { return needs_work(ctx, "rootfs input is missing"); }
     _validate_source(ctx.source_rootfs);
-    ctx.rootfs_path = join_path(BUILD_DIR, "rootfs");
-    ctx
+    ready(ctx)
 }
 
-fn acquire(ctx) {
-    mkdir(BUILD_DIR);
-    _validate_source(ctx.source_rootfs);
-    ctx.rootfs_path = join_path(BUILD_DIR, "rootfs");
-    ctx
-}
+fn acquire(ctx) { _validate_source(ctx.source_rootfs); ctx }
 
 fn is_built(ctx) {
-    let rootfs = join_path(BUILD_DIR, "rootfs");
-    if !is_dir(join_path(rootfs, "usr")) {
-        throw "rootfs not built";
+    if !is_dir(join_path(ctx.rootfs_path, "usr")) {
+        return needs_work(ctx, "rootfs has not been copied");
     }
-    ctx.rootfs_path = rootfs;
-    ctx
+    ready(ctx)
 }
 
 fn build(ctx) {
-    let rootfs = join_path(BUILD_DIR, "rootfs");
     _validate_source(ctx.source_rootfs);
-
-    shell("rm -rf " + rootfs);
-    shell("mkdir -p " + rootfs);
-    copy_tree_contents(ctx.source_rootfs, rootfs);
-
-    if !is_dir(join_path(rootfs, "usr")) {
-        throw "custom rootfs copy incomplete: missing " + join_path(rootfs, "usr");
-    }
-
-    ctx.rootfs_path = rootfs;
+    if is_dir(ctx.rootfs_path) { rm(ctx.rootfs_path); }
+    mkdir(ctx.rootfs_path);
+    copy_tree_contents(ctx.source_rootfs, ctx.rootfs_path);
+    _validate_source(ctx.rootfs_path);
     ctx
 }
 
 fn is_installed(ctx) {
-    let rootfs = join_path(BUILD_DIR, "rootfs");
-    if !is_dir(join_path(rootfs, "usr")) {
-        throw "rootfs not installed";
+    if !is_dir(join_path(ctx.rootfs_path, "usr")) {
+        return needs_work(ctx, "rootfs output is missing");
     }
-    ctx.rootfs_path = rootfs;
-    ctx.outputs = #{rootfs: ctx.rootfs_path};
-    ctx
+    ctx.outputs.rootfs = ctx.rootfs_path;
+    ready(ctx)
 }
 
 fn install(ctx) {
-    ctx.rootfs_path = join_path(BUILD_DIR, "rootfs");
-    ctx.outputs = #{rootfs: ctx.rootfs_path};
+    _validate_source(ctx.rootfs_path);
+    ctx.outputs.rootfs = ctx.rootfs_path;
+    ctx
+}
+
+fn remove(ctx) {
+    if is_dir(ctx.rootfs_path) { rm(ctx.rootfs_path); }
+    ctx.outputs = #{};
     ctx
 }
 
 fn cleanup(ctx, reason) {
-    if reason == "manual" {
-        let rootfs = join_path(BUILD_DIR, "rootfs");
-        if is_dir(rootfs) {
-            rm(rootfs);
-        }
+    if reason == "manual" || reason == "auto.build.failure" {
+        if is_dir(ctx.rootfs_path) { rm(ctx.rootfs_path); }
+        ctx.outputs = #{};
     }
     ctx
 }

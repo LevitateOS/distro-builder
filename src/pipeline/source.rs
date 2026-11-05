@@ -18,6 +18,7 @@ pub(crate) struct RootfsSourcePolicy {
     pub preseed_recipe_script: Option<PathBuf>,
     pub preseed_outputs: BTreeMap<String, RecipeOutputKind>,
     pub defines: BTreeMap<String, String>,
+    pub inputs: BTreeMap<String, PathBuf>,
 }
 
 pub(crate) fn rootfs_source_policy_from_contract(
@@ -43,6 +44,11 @@ fn rootfs_source_policy_from_source_contract(
             .map(|script| resolve_repo_path(repo_root, script.trim())),
         preseed_outputs: source.preseed_outputs.clone(),
         defines: source.defines.clone(),
+        inputs: source
+            .inputs
+            .iter()
+            .map(|(name, path)| (name.clone(), resolve_repo_path(repo_root, path)))
+            .collect(),
     })
 }
 
@@ -69,6 +75,7 @@ pub(crate) fn materialize_source_rootfs(
         &RootfsSourceRecipeSpec {
             recipe_script: source.recipe_script.clone(),
             defines: source.defines.clone(),
+            inputs: source.inputs.clone(),
         },
     )
     .with_context(|| format!("materializing rootfs source recipe output for '{distro_id}'"))?;

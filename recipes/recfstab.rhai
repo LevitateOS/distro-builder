@@ -9,7 +9,7 @@ let ctx = #{
     version: "0.1.5",
     source: "/inputs/source",
     supplied_program: "/inputs/program",
-    built_program: join_path(BUILD_DIR, "target/release/recfstab"),
+    built_program: join_path(RUNTIME.paths.build, "target/release/recfstab"),
     program: join_path(RUNTIME.paths.output, "bin/recfstab"),
 };
 
@@ -46,9 +46,9 @@ fn build(ctx) {
     }
     exec_checked("cargo", ["build", "--release", "--locked", "--offline", "--bin", "recfstab",
         "--manifest-path", join_path(ctx.source, "Cargo.toml"),
-        "--target-dir", join_path(BUILD_DIR, "target")], #{
+        "--target-dir", join_path(RUNTIME.paths.build, "target")], #{
         cwd: ctx.source,
-        env: #{CARGO_HOME: join_path(BUILD_DIR, "cargo"), CARGO_BUILD_JOBS: NPROC.to_string(),
+        env: #{CARGO_HOME: join_path(RUNTIME.paths.build, "cargo"), CARGO_BUILD_JOBS: RUNTIME.options.jobs.to_string(),
             RUSTFLAGS: "-C link-arg=-Wl,--threads=1", LD_LIBRARY_PATH: "/usr/lib"},
     });
     ctx
@@ -78,7 +78,7 @@ fn remove(ctx) {
 
 fn cleanup(ctx, reason) {
     if reason == "manual" {
-        for directory in [join_path(BUILD_DIR, "target"), join_path(BUILD_DIR, "cargo")] {
+        for directory in [join_path(RUNTIME.paths.build, "target"), join_path(RUNTIME.paths.build, "cargo")] {
             if is_dir(directory) { rm(directory); }
         }
         if is_file(ctx.program) { rm(ctx.program); }

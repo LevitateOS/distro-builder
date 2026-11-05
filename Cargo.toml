@@ -26,6 +26,7 @@ walkdir = "2"
 which = "5.0"
 zstd = "0.13"
 time = "0.3"
+tempfile = "3"
 
 [[bin]]
 name = "distro-builder"

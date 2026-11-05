@@ -21,6 +21,7 @@ import "kernel/metadata.rhai" as kernel;
 let build_deps = [];
 
 let ctx = #{
+    outputs: #{},
     build_dir: "",
     description: "Prebuilt Linux kernel artifacts",
     kernel_localversion: "",
@@ -128,6 +129,14 @@ fn _validate_payload_or_throw(kernel_root, expected_release, expected_version, e
     rel
 }
 
+fn _payload_context(ctx, kernel_root, release, module_install_path) {
+    ctx.kernel_version = release;
+    ctx.build_dir = join_path(kernel_root, "kernel-build");
+    ctx.source_path = "";
+    ctx.outputs = kernel::output_paths(kernel_root, release, module_install_path, "");
+    ctx
+}
+
 fn is_acquired(ctx) {
     ctx = _apply_prebuilt_spec(ctx, BUILD_DIR, ctx.kconfig_path);
     let spec = _prebuilt_spec_or_throw(BUILD_DIR, ctx.kconfig_path);
@@ -144,10 +153,7 @@ fn is_acquired(ctx) {
         spec.module_install_path
     );
 
-    ctx.kernel_version = rel;
-    ctx.build_dir = join_path(kernel_root, "kernel-build");
-    ctx.source_path = "";
-    ctx
+    _payload_context(ctx, kernel_root, rel, spec.module_install_path)
 }
 
 fn acquire(ctx) {
@@ -189,9 +195,7 @@ fn acquire(ctx) {
         spec.module_install_path
     );
 
-    ctx.kernel_version = rel;
-    ctx.build_dir = join_path(kernel_root, "kernel-build");
-    ctx.source_path = "";
+    ctx = _payload_context(ctx, kernel_root, rel, spec.module_install_path);
     ctx.tarball_url = asset_url;
     log("Prebuilt kernel artifact installed at " + kernel_root);
     ctx
@@ -211,10 +215,7 @@ fn is_built(ctx) {
         spec.localversion,
         spec.module_install_path
     );
-    ctx.kernel_version = rel;
-    ctx.build_dir = join_path(kernel_root, "kernel-build");
-    ctx.source_path = "";
-    ctx
+    _payload_context(ctx, kernel_root, rel, spec.module_install_path)
 }
 
 fn build(ctx) {
@@ -229,10 +230,7 @@ fn build(ctx) {
         spec.localversion,
         spec.module_install_path
     );
-    ctx.kernel_version = rel;
-    ctx.build_dir = join_path(kernel_root, "kernel-build");
-    ctx.source_path = "";
-    ctx
+    _payload_context(ctx, kernel_root, rel, spec.module_install_path)
 }
 
 fn is_installed(ctx) {
@@ -249,10 +247,7 @@ fn is_installed(ctx) {
         spec.localversion,
         spec.module_install_path
     );
-    ctx.kernel_version = rel;
-    ctx.build_dir = join_path(kernel_root, "kernel-build");
-    ctx.source_path = "";
-    ctx
+    _payload_context(ctx, kernel_root, rel, spec.module_install_path)
 }
 
 fn install(ctx) {
@@ -267,10 +262,7 @@ fn install(ctx) {
         spec.localversion,
         spec.module_install_path
     );
-    ctx.kernel_version = rel;
-    ctx.build_dir = join_path(kernel_root, "kernel-build");
-    ctx.source_path = "";
-    ctx
+    _payload_context(ctx, kernel_root, rel, spec.module_install_path)
 }
 
 fn cleanup(ctx, reason) {
@@ -297,5 +289,6 @@ fn remove(ctx) {
         }
     }
     ctx.build_dir = "";
+    ctx.outputs = #{};
     ctx
 }

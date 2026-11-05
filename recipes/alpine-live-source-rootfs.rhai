@@ -19,6 +19,7 @@ import "sources/alpine.rhai" as source;
 let assets = source::facts();
 
 let ctx = #{
+    outputs: #{},
     alpine_version: assets.iso_version,
     apk_static_path: "",
     apk_tools_preseed_path: join_path(_downloads_dir(BUILD_DIR), assets.apk_tools_name),
@@ -369,6 +370,7 @@ fn is_installed(ctx) {
         throw "rootfs not installed";
     }
     ctx.rootfs_path = rootfs;
+    ctx.outputs = #{rootfs: ctx.rootfs_path};
     ctx
 }
 
@@ -378,6 +380,7 @@ fn install(ctx) {
         throw "cannot install: rootfs missing or stale at " + rootfs;
     }
     ctx.rootfs_path = rootfs;
+    ctx.outputs = #{rootfs: ctx.rootfs_path};
     ctx
 }
 

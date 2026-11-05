@@ -2,7 +2,7 @@
 
 use super::find_recipe;
 use crate::process::ensure_exists;
-use anyhow::{bail, Result};
+use anyhow::Result;
 use std::path::{Path, PathBuf};
 
 /// Paths produced by the alpine.rhai recipe after execution.
@@ -17,7 +17,7 @@ pub struct AlpinePaths {
 impl AlpinePaths {
     /// Check if all paths exist.
     pub fn exists(&self) -> bool {
-        self.iso.exists() && self.rootfs.exists()
+        self.iso.is_file() && self.rootfs.is_dir()
     }
 }
 
@@ -59,34 +59,8 @@ pub fn alpine(base_dir: &Path) -> Result<AlpinePaths> {
         Some(&recipes_path),
     )?;
 
-    // Extract paths from ctx (recipe sets these)
-    let iso = ctx["iso_path"]
-        .as_str()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| downloads_dir.join("alpine-extended-latest-x86_64.iso"));
-
-    let rootfs = ctx["rootfs_path"]
-        .as_str()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| downloads_dir.join("rootfs"));
-
-    let paths = AlpinePaths { iso, rootfs };
-
-    if !paths.exists() {
-        bail!(
-            "Recipe completed but expected paths are missing:\n\
-             - ISO:    {} ({})\n\
-             - rootfs: {} ({})",
-            paths.iso.display(),
-            if paths.iso.exists() { "OK" } else { "MISSING" },
-            paths.rootfs.display(),
-            if paths.rootfs.exists() {
-                "OK"
-            } else {
-                "MISSING"
-            },
-        );
-    }
-
-    Ok(paths)
+    Ok(AlpinePaths {
+        iso: super::outputs::file(&ctx, "iso")?,
+        rootfs: super::outputs::directory(&ctx, "rootfs")?,
+    })
 }

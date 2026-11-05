@@ -7,6 +7,7 @@ import "kernel/metadata.rhai" as kernel;
 let build_deps = ["linux-deps"];
 
 let ctx = #{
+    outputs: #{},
     build_dir: "",
     description: "Linux kernel",
     kernel_version: "?",
@@ -317,6 +318,9 @@ fn is_installed(ctx) {
 
     ctx.kernel_version = rel;
     ctx.build_dir = build_dir;
+    let source = join_path(BUILD_DIR, ctx.source_dir_name);
+    ctx.source_path = if is_file(join_path(source, "Makefile")) { source } else { "" };
+    ctx.outputs = kernel::output_paths(kernel_root, ctx.kernel_version, spec.module_install_path, ctx.source_path);
     ctx
 }
 
@@ -375,6 +379,7 @@ fn install(ctx) {
     shell("rm -rf '" + staging + "'");
     shell("mv '" + staging_tmp + "' '" + staging + "'");
 
+    ctx.outputs = kernel::output_paths(kernel_root, ctx.kernel_version, spec.module_install_path, ctx.source_path);
     ctx
 }
 
@@ -457,5 +462,6 @@ fn remove(ctx) {
         }
     }
     ctx.build_dir = "";
+    ctx.outputs = #{};
     ctx
 }

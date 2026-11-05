@@ -72,27 +72,8 @@ pub fn preseed_alpine_rootfs_source_assets(
         )
     })?;
 
-    let iso_path = ctx["iso_path"]
-        .as_str()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| build_dir.join("alpine-extended-3.23.2-x86_64.iso"));
-    let apk_tools_path = ctx["apk_tools_path"]
-        .as_str()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| build_dir.join("apk-tools-static-3.0.5-r0.apk"));
-
-    if !iso_path.is_file() {
-        bail!(
-            "Alpine preseed recipe did not produce ISO at '{}'",
-            iso_path.display()
-        );
-    }
-    if !apk_tools_path.is_file() {
-        bail!(
-            "Alpine preseed recipe did not produce apk-tools package at '{}'",
-            apk_tools_path.display()
-        );
-    }
+    let iso_path = super::outputs::file(&ctx, "iso")?;
+    let apk_tools_path = super::outputs::file(&ctx, "apk_tools")?;
 
     Ok(AlpineRootfsSourcePreseedOutput {
         iso_path,

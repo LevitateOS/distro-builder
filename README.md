@@ -80,3 +80,36 @@ Licensed under either of:
 - MIT license ([LICENSE-MIT](LICENSE-MIT) or http://opensource.org/licenses/MIT)
 
 at your option.
+
+## Recipe output contracts
+
+Producer recipes report named path products in `ctx.outputs`. Readiness checks
+must return those names when reusing an existing installation. The Rust adapters
+require explicit absolute paths and validate the selected filesystem types:
+
+| Consumer | Required named outputs |
+| --- | --- |
+| Rootfs source | `rootfs` directory |
+| Fedora ISO preseed | `iso` file |
+| Alpine asset preseed | `iso` and `apk_tools` files |
+| Kernel | `kernel` file and `modules` directory; optional `source` directory |
+| Legacy Alpine facade | `iso` file and `rootfs` directory |
+
+Kernel metadata also requires a nonempty `ctx.kernel_version`; there is no
+`unknown` fallback. `LinuxPaths.source` is optional because installed kernel
+artifacts can be reused without retaining source caches. Legacy flat fields may
+remain in recipe context during migration, but adapters do not fall back to them
+or to guessed filenames/directories.
+
+Each CLI invocation uses a fresh temporary JSON result path. Missing or malformed
+results fail instead of reusing an old `.recipe-output.json`.
+
+These are consumer contracts, not publication authority. The Ginux coordinator
+must export selected domain products and supply published host paths before
+these adapters consume them. That R08 integration and real managed runtime
+verification remain pending; a declared domain path is not publication evidence.
+
+The integration target `recipe_outputs` invokes the real Recipe CLI against a
+self-contained rootfs producer and executes the returned tool. It also checks
+missing/wrong-kind/unproduced outputs with a stale conventional rootfs present.
+Build `recipe` explicitly and configure a real `GINUX_BIN` before running it.

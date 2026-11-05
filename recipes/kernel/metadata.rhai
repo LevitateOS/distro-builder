@@ -96,3 +96,19 @@ fn release(build_dir, expected_version, expected_localversion) {
 
     rel
 }
+
+// Product names are shared by source and prebuilt kernel lifecycles. Rust
+// selects/validates named products; it does not reconstruct package paths.
+fn output_paths(kernel_root, release, module_install_path, source_path) {
+    let modules = if module_install_path == "/usr/lib/modules" {
+        "staging/usr/lib/modules/"
+    } else if module_install_path == "/lib/modules" {
+        "staging/lib/modules/"
+    } else {
+        throw "unsupported module installation path: " + module_install_path;
+    };
+    let outputs = #{kernel: join_path(kernel_root, "staging/boot/vmlinuz"),
+                    modules: join_path(kernel_root, modules + release)};
+    if source_path != "" { outputs.source = source_path; }
+    outputs
+}

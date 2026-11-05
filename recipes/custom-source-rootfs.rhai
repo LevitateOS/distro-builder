@@ -7,6 +7,7 @@
 // - CUSTOM_ROOTFS_DIR (absolute or repo-relative path, resolved by caller)
 
 let ctx = #{
+    outputs: #{},
     name: "custom-source-rootfs",
     description: "Custom rootfs source producer",
     source_rootfs: CUSTOM_ROOTFS_DIR,
@@ -66,11 +67,13 @@ fn is_installed(ctx) {
         throw "rootfs not installed";
     }
     ctx.rootfs_path = rootfs;
+    ctx.outputs = #{rootfs: ctx.rootfs_path};
     ctx
 }
 
 fn install(ctx) {
     ctx.rootfs_path = join_path(BUILD_DIR, "rootfs");
+    ctx.outputs = #{rootfs: ctx.rootfs_path};
     ctx
 }
 

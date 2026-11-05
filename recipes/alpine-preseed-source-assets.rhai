@@ -14,6 +14,7 @@ import "sources/alpine.rhai" as source;
 let assets = source::facts();
 
 let ctx = #{
+    outputs: #{},
     apk_tools_path: join_path(BUILD_DIR, assets.apk_tools_name),
     apk_tools_sha256: assets.apk_tools_sha256,
     apk_tools_version: assets.apk_tools_version,
@@ -56,6 +57,7 @@ fn is_acquired(ctx) {
     if !source::marker_is_valid(ctx.trust_dir, ctx.iso_path, ctx.iso_sha256, ctx.apk_tools_path, ctx.apk_tools_sha256) {
         throw "Alpine rootfs source trust marker missing/stale under " + ctx.trust_dir;
     }
+    ctx.outputs = #{iso: ctx.iso_path, apk_tools: ctx.apk_tools_path};
     ctx
 }
 
@@ -80,6 +82,7 @@ fn acquire(ctx) {
     }
 
     source::write_marker(ctx.trust_dir, ctx.iso_path, ctx.iso_sha256, ctx.apk_tools_path, ctx.apk_tools_sha256);
+    ctx.outputs = #{iso: ctx.iso_path, apk_tools: ctx.apk_tools_path};
     ctx
 }
 
@@ -97,5 +100,6 @@ fn is_installed(ctx) {
 }
 
 fn install(ctx) {
+    ctx.outputs = #{iso: ctx.iso_path, apk_tools: ctx.apk_tools_path};
     ctx
 }

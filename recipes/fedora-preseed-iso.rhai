@@ -18,6 +18,7 @@ import "sources/fedora.rhai" as source;
 let assets = source::facts();
 
 let ctx = #{
+    outputs: #{},
     checksum_url: assets.checksum_url,
     description: "Canonical Fedora Server 43 x86_64 DVD preseed",
     iso_name: assets.iso_name,
@@ -83,6 +84,7 @@ fn is_acquired(ctx) {
     if !source::marker_is_valid(ctx.trust_dir, ctx.iso_path, ctx.sha256) {
         throw "Fedora ISO trust marker missing/stale for '" + ctx.iso_path + "'";
     }
+    ctx.outputs = #{iso: ctx.iso_path};
     ctx
 }
 
@@ -111,6 +113,7 @@ fn acquire(ctx) {
 
     verify_sha256(ctx.iso_path, ctx.sha256);
     source::write_marker(ctx.trust_dir, ctx.iso_path, ctx.sha256);
+    ctx.outputs = #{iso: ctx.iso_path};
     ctx
 }
 
@@ -128,6 +131,7 @@ fn is_installed(ctx) {
 }
 
 fn install(ctx) {
+    ctx.outputs = #{iso: ctx.iso_path};
     ctx
 }
 

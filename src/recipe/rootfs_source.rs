@@ -62,19 +62,12 @@ pub fn materialize_rootfs_from_recipe(
         )
     })?;
 
-    let rootfs = ctx["rootfs_path"]
-        .as_str()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| build_dir.join("rootfs"));
-
-    if !rootfs.is_dir() {
-        bail!(
-            "rootfs source directory missing after recipe run: '{}'",
-            rootfs.display()
-        );
-    }
-
-    Ok(rootfs)
+    super::outputs::directory(&ctx, "rootfs").with_context(|| {
+        format!(
+            "rootfs source recipe '{}' output contract",
+            recipe_path.display()
+        )
+    })
 }
 
 pub fn preseed_rootfs_source_dvd(
@@ -124,21 +117,8 @@ pub fn preseed_rootfs_source_dvd(
         Some(recipes_path),
     )
     .with_context(|| format!("preseeding rootfs source via '{}'", recipe_path.display()))?;
-    let iso_path = ctx["iso_path"].as_str().map(PathBuf::from).ok_or_else(|| {
-        anyhow::anyhow!(
-            "rootfs source preseed recipe '{}' did not expose ctx.iso_path",
-            recipe_path.display()
-        )
-    })?;
-
-    if !iso_path.is_file() {
-        bail!(
-            "rootfs source preseed recipe did not produce ISO at '{}'",
-            iso_path.display()
-        );
-    }
-
-    Ok(iso_path)
+    super::outputs::file(&ctx, "iso")
+        .with_context(|| format!("preseed recipe '{}' output contract", recipe_path.display()))
 }
 
 fn downloads_work_dir(repo_root: &Path, distro_id: &str) -> Result<PathBuf> {

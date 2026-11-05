@@ -8,8 +8,8 @@ use std::path::{Path, PathBuf};
 /// Paths produced by the linux.rhai recipe after execution.
 #[derive(Debug, Clone)]
 pub struct LinuxPaths {
-    /// Path to the kernel source tree.
-    pub source: PathBuf,
+    /// Reported source tree, when retained by the producer.
+    pub source: Option<PathBuf>,
     /// Path to vmlinuz in staging.
     pub vmlinuz: PathBuf,
     /// Kernel version string.
@@ -17,9 +17,9 @@ pub struct LinuxPaths {
 }
 
 impl LinuxPaths {
-    /// Check if kernel is built and installed.
+    /// Whether the returned image remains present; recipe checks determine readiness.
     pub fn is_installed(&self) -> bool {
-        self.vmlinuz.exists()
+        self.vmlinuz.is_file()
     }
 }
 
@@ -89,21 +89,12 @@ pub fn linux(
         Some(&recipes_dir),
     )?;
 
-    // Extract paths from ctx (recipe sets these)
-    let output_dir = crate::artifact_store::central_output_dir_for_distro(base_dir);
-
-    let source = ctx["source_path"]
-        .as_str()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| discover_linux_source_dir(&downloads_dir));
-
-    let version = ctx["kernel_version"]
-        .as_str()
-        .map(|s: &str| s.to_string())
-        .unwrap_or_else(|| "unknown".to_string());
-
-    let vmlinuz = output_dir.join("staging/boot/vmlinuz");
-
+    let vmlinuz = super::outputs::file(&ctx, "kernel")?;
+    // Modules are a required companion product, even though callers currently
+    // consume only the image path from this return type.
+    super::outputs::directory(&ctx, "modules")?;
+    let source = super::outputs::optional_directory(&ctx, "source")?;
+    let version = super::outputs::metadata_string(&ctx, "kernel_version")?.to_owned();
     Ok(LinuxPaths {
         source,
         vmlinuz,
@@ -111,23 +102,7 @@ pub fn linux(
     })
 }
 
-fn discover_linux_source_dir(downloads_dir: &Path) -> PathBuf {
-    if let Ok(entries) = std::fs::read_dir(downloads_dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            let name = entry.file_name();
-            if let Some(name_str) = name.to_str() {
-                if name_str.starts_with("linux-") && path.join("Makefile").exists() {
-                    return path;
-                }
-            }
-        }
-    }
-
-    downloads_dir.join("linux-source")
-}
-
-/// Check if Linux source is available (without running the full recipe).
+/// Legacy UI cache hint; this is not the recipe's acquisition/readiness check.
 pub fn has_linux_source(base_dir: &Path) -> bool {
     // Check downloads for any tarball-extracted source (linux-*)
     let downloads = base_dir.join("downloads");

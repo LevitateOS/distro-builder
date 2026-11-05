@@ -23,6 +23,7 @@ import "sources/fedora.rhai" as source;
 let assets = source::facts();
 
 let ctx = #{
+    outputs: #{},
     checksum_url: assets.checksum_url,
     description: "Fedora Server 43 DVD rootfs source producer",
     iso_contents_path: join_path(BUILD_DIR, "iso-contents"),
@@ -493,6 +494,7 @@ fn install(ctx) {
         throw "cannot install: rootfs missing at " + rootfs;
     }
     ctx.rootfs_path = rootfs;
+    ctx.outputs = #{rootfs: ctx.rootfs_path};
     ctx
 }
 

@@ -13,6 +13,7 @@
 pub mod alpine;
 pub mod alpine_rootfs_source;
 pub mod linux;
+mod outputs;
 pub mod rootfs_source;
 
 use crate::process::ensure_exists;
@@ -314,7 +315,16 @@ pub fn run_recipe_phase_json_with_defines_and_env(
     eprintln!("    Phase: {}", phase);
     eprintln!("    Build dir: {}", build_dir.display());
 
-    let json_path = build_dir.join(".recipe-output.json");
+    std::fs::create_dir_all(build_dir)
+        .with_context(|| format!("creating recipe work directory '{}'", build_dir.display()))?;
+    // A successful subprocess must provide this invocation's result. Never
+    // accept a stale .recipe-output.json from an earlier invocation.
+    let result_file = tempfile::Builder::new()
+        .prefix(".recipe-result.")
+        .suffix(".json")
+        .tempfile_in(build_dir)
+        .context("creating fresh recipe result file")?;
+    let json_path = result_file.path();
 
     let mut cmd = Command::new(recipe_bin);
     cmd.arg(phase)
@@ -367,11 +377,13 @@ pub fn run_recipe_phase_json_with_defines_and_env(
         );
     }
 
-    let json_bytes =
-        std::fs::read(&json_path).with_context(|| "Failed to read recipe JSON output")?;
-    let ctx: serde_json::Value = serde_json::from_slice(&json_bytes)
-        .with_context(|| "Failed to parse recipe JSON output")?;
-
+    let result =
+        std::fs::read(json_path).context("reading this invocation's recipe JSON result")?;
+    let ctx: serde_json::Value = serde_json::from_slice(&result)
+        .context("failed to parse this invocation's recipe JSON result")?;
+    if !ctx.is_object() {
+        bail!("recipe result must be a ctx JSON object");
+    }
     Ok(ctx)
 }
 

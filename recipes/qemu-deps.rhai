@@ -1,3 +1,4 @@
+const RECIPE_API = 2;
 // QEMU + OVMF testing dependencies
 //
 // Provides: qemu-system-x86_64, qemu-img, OVMF firmware
@@ -23,32 +24,35 @@ let ctx = #{
 };
 
 fn is_installed(ctx) {
-    let bin = join_path(TOOLS_PREFIX, "usr/bin");
-    let libexec = join_path(TOOLS_PREFIX, "usr/libexec");
+    let tools = ctx.runtime.paths.tools;
+    let bin = join_path(tools, "usr/bin");
+    let libexec = join_path(tools, "usr/libexec");
     if !is_file(join_path(bin, "qemu-img")) {
         if !is_file(join_path(libexec, "qemu-kvm")) {
-            throw "qemu not installed";
+            return needs_work(ctx, "qemu not installed");
         }
     }
     // Check OVMF
-    let ovmf = join_path(TOOLS_PREFIX, "usr/share/edk2/ovmf/OVMF_CODE.fd");
-    if !is_file(ovmf) { throw "OVMF not installed"; }
-    ctx
+    let ovmf = join_path(tools, "usr/share/edk2/ovmf/OVMF_CODE.fd");
+    if !is_file(ovmf) { return needs_work(ctx, "OVMF not installed"); }
+    ready(ctx)
 }
 
 fn is_acquired(ctx) {
+    let work = ctx.runtime.paths.build;
     for rpm in rpms {
-        if !is_file(join_path(BUILD_DIR, rpm[1])) {
-            throw rpm[1] + " not downloaded";
+        if !is_file(join_path(work, rpm[1])) {
+            return needs_work(ctx, rpm[1] + " not downloaded");
         }
     }
-    ctx
+    ready(ctx)
 }
 
 fn acquire(ctx) {
-    mkdir(BUILD_DIR);
+    let work = ctx.runtime.paths.build;
+    mkdir(work);
     for rpm in rpms {
-        let dest = join_path(BUILD_DIR, rpm[1]);
+        let dest = join_path(work, rpm[1]);
         if !is_file(dest) {
             log("Downloading " + rpm[1] + "...");
             download(rpm[0], dest);
@@ -58,16 +62,18 @@ fn acquire(ctx) {
 }
 
 fn install(ctx) {
-    mkdir(TOOLS_PREFIX);
+    let work = ctx.runtime.paths.build;
+    let tools = ctx.runtime.paths.tools;
+    mkdir(tools);
     for rpm in rpms {
-        let rpm_path = join_path(BUILD_DIR, rpm[1]);
+        let rpm_path = join_path(work, rpm[1]);
         log("Extracting " + rpm[1] + "...");
-        shell_in(TOOLS_PREFIX, "rpm2cpio '" + rpm_path + "' | cpio -idmu --quiet 2>/dev/null");
+        shell_in(tools, "rpm2cpio '" + rpm_path + "' | cpio -idmu --quiet 2>/dev/null");
     }
 
     // Create convenience symlink: qemu-system-x86_64 -> qemu-kvm
-    let bin_dir = join_path(TOOLS_PREFIX, "usr/bin");
-    let libexec = join_path(TOOLS_PREFIX, "usr/libexec");
+    let bin_dir = join_path(tools, "usr/bin");
+    let libexec = join_path(tools, "usr/libexec");
     mkdir(bin_dir);
     if is_file(join_path(libexec, "qemu-kvm")) {
         if !exists(join_path(bin_dir, "qemu-system-x86_64")) {
@@ -76,8 +82,8 @@ fn install(ctx) {
     }
 
     // Symlink iPXE ROMs into QEMU data dir so QEMU can find them
-    let qemu_data = join_path(TOOLS_PREFIX, "usr/share/qemu-kvm");
-    let ipxe_dir = join_path(TOOLS_PREFIX, "usr/share/ipxe/qemu");
+    let qemu_data = join_path(tools, "usr/share/qemu-kvm");
+    let ipxe_dir = join_path(tools, "usr/share/ipxe/qemu");
     if is_dir(ipxe_dir) {
         shell("ln -sf " + ipxe_dir + "/*.rom " + qemu_data + "/");
     }

@@ -1,7 +1,8 @@
+const RECIPE_API = 2;
 // Linux kernel build dependencies
 //
 // Bundled dep recipe: downloads and extracts all RPMs needed to build
-// the Linux kernel into TOOLS_PREFIX.
+// the Linux kernel into RUNTIME.paths.tools.
 
 let ctx = #{
     name: "linux-deps",
@@ -13,47 +14,52 @@ let ctx = #{
 };
 
 fn is_installed(ctx) {
+    let tools = ctx.runtime.paths.tools;
     let bins = ["flex", "bison", "gcc", "make", "bc", "perl", "ld"];
     for bin in bins {
         if shell_status("which " + bin) != 0 {
             // Check all possible RPM install locations (keep expressions simple for Rhai).
             let found = false;
             for p in ["usr/bin", "usr/sbin", "bin", "sbin"] {
-                let dir = join_path(TOOLS_PREFIX, p);
+                let dir = join_path(tools, p);
                 let candidate = join_path(dir, bin);
                 if is_file(candidate) {
                     found = true;
                     break;
                 }
             }
-            if !found { throw bin + " not available"; }
+            if !found { return needs_work(ctx, bin + " not available"); }
         }
     }
-    ctx
+    ready(ctx)
 }
 
 fn is_acquired(ctx) {
-    let rpms = glob_list(join_path(BUILD_DIR, "*.rpm"));
+    let work = ctx.runtime.paths.build;
+    let rpms = glob_list(join_path(work, "*.rpm"));
     if rpms.len() == 0 {
-        throw "no RPMs downloaded";
+        return needs_work(ctx, "no RPMs downloaded");
     }
-    ctx
+    ready(ctx)
 }
 
 fn acquire(ctx) {
-    mkdir(BUILD_DIR);
-    dnf_download(ctx.packages, BUILD_DIR, ["x86_64", "noarch"]);
+    let work = ctx.runtime.paths.build;
+    mkdir(work);
+    dnf_download(ctx.packages, work, ["x86_64", "noarch"]);
     ctx
 }
 
 fn install(ctx) {
-    mkdir(TOOLS_PREFIX);
-    let rpms = glob_list(join_path(BUILD_DIR, "*.rpm"));
+    let work = ctx.runtime.paths.build;
+    let tools = ctx.runtime.paths.tools;
+    mkdir(tools);
+    let rpms = glob_list(join_path(work, "*.rpm"));
     for rpm in rpms {
         // Extract to a temp file first so rpm2cpio failures aren't swallowed by the pipe
         let cpio_file = rpm + ".cpio";
         shell("rpm2cpio '" + rpm + "' > '" + cpio_file + "'");
-        shell_in(TOOLS_PREFIX, "cpio -idmu --quiet < '" + cpio_file + "'");
+        shell_in(tools, "cpio -idmu --quiet < '" + cpio_file + "'");
         shell("rm -f '" + cpio_file + "'");
     }
 
@@ -61,7 +67,7 @@ fn install(ctx) {
     // paths) is used instead. The RPM ld is gold and doesn't know about
     // .tools/usr/lib64, causing -lelf and similar failures.
     for ld_name in ["ld", "ld.bfd", "ld.gold"] {
-        let p = join_path(TOOLS_PREFIX, "usr/bin/" + ld_name);
+        let p = join_path(tools, "usr/bin/" + ld_name);
         if is_file(p) { rm(p); }
     }
 

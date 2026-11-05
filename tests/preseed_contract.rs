@@ -100,6 +100,11 @@ fn explicit_preseed_survives_renamed_recipe_files_and_requires_ginux() {
     assert!(stderr.contains("Running recipe:"), "{stderr}");
     assert!(stderr.contains("renamed-preseed.rhai"), "{stderr}");
     assert!(stderr.contains("GINUX_BIN"), "{stderr}");
+    assert!(fixture
+        .path()
+        .join(".artifacts/work/acorn/downloads")
+        .is_dir());
+    assert!(!fixture.path().join("AcornOS/downloads").exists());
     assert!(
         !stderr.contains("alpine-preseed-source-assets.rhai"),
         "{stderr}"

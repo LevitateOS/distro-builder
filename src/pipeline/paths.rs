@@ -17,3 +17,12 @@ pub(crate) fn normalize_distro_id(distro_id: &str, purpose: &str) -> Result<&'st
         other => bail!("unsupported distro '{}' for {} resolution", other, purpose),
     }
 }
+
+/// Shared acquisition/build work for a distro's recipes, separate from published outputs.
+pub fn recipe_work_dir(repo_root: &Path, distro_id: &str) -> Result<PathBuf> {
+    let normalized = normalize_distro_id(distro_id, "recipe work directory")?;
+    Ok(repo_root
+        .join(".artifacts/work")
+        .join(normalized)
+        .join("downloads"))
+}

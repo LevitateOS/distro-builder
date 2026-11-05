@@ -16,6 +16,8 @@ pub mod linux;
 mod outputs;
 pub mod rootfs_source;
 
+pub use crate::pipeline::paths::recipe_work_dir;
+
 use crate::process::ensure_exists;
 use anyhow::{bail, Context, Result};
 use distro_spec::shared::LEVITATE_CARGO_TOOLS;

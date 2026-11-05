@@ -118,3 +118,18 @@ The `real_cli_success_without_a_fresh_json_result_cannot_reuse_stale_context`
 case uses the actual static `recipe info` command to verify that exit zero
 without a fresh JSON result cannot reuse cached context. That case does not
 evaluate recipe code and can run without Ginux; it does not validate publication.
+
+## Recipe work paths
+
+`recipe::recipe_work_dir(repo_root, distro_id)` selects
+`.artifacts/work/<distro>/downloads` for shared acquisition/build work. Canonical
+kernel checks, xtask source/prebuilt producers, and explicit rootfs preseeding
+use this path owner. Published kernel artifacts stay under
+`.artifacts/kernel/<distro>/current`.
+
+Use `recipe::linux::linux_for_distro(repo_root, distro_id)` for the source kernel
+producer. It reads configuration from the canonical variant contract rather than
+searching the legacy distro crate. The older `linux(base_dir, ...)` entry point
+remains a compatibility wrapper. `has_linux_source` remains a filesystem cache
+hint for compatibility; it does not establish readiness or the validity of an
+installed kernel. Legacy Alpine/package/tool adapters still need path migration.

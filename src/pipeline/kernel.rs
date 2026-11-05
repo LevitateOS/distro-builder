@@ -3,7 +3,7 @@ use distro_contract::VariantOwnerPaths;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::pipeline::paths::normalize_distro_id;
+use crate::recipe::recipe_work_dir;
 
 #[derive(Debug, Clone)]
 pub struct KernelSpec {
@@ -139,11 +139,7 @@ pub fn run_build_evidence_script(
 }
 
 fn work_dir_for_distro(repo_root: &Path, distro_id: &str) -> Result<PathBuf> {
-    let normalized = normalize_distro_id(distro_id, "kernel recipe build directory")?;
-    let build_dir = repo_root
-        .join(".artifacts/work")
-        .join(normalized)
-        .join("downloads");
+    let build_dir = recipe_work_dir(repo_root, distro_id)?;
     std::fs::create_dir_all(&build_dir).with_context(|| {
         format!(
             "creating kernel recipe work directory '{}'",

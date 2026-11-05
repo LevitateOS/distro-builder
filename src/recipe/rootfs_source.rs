@@ -3,9 +3,9 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use super::{
-    find_recipe, run_recipe_phase_json_with_defines, run_recipe_phase_json_with_defines_and_env,
+    find_recipe, recipe_work_dir, run_recipe_phase_json_with_defines,
+    run_recipe_phase_json_with_defines_and_env,
 };
-use crate::pipeline::paths::normalize_distro_id;
 
 #[derive(Debug, Clone)]
 pub struct RootfsSourceRecipeSpec {
@@ -89,7 +89,7 @@ pub fn preseed_rootfs_source(
             recipe_path.display()
         );
     }
-    let build_dir = downloads_work_dir(repo_root, distro_id)?;
+    let build_dir = recipe_work_dir(repo_root, distro_id)?;
     std::fs::create_dir_all(&build_dir).with_context(|| {
         format!(
             "creating rootfs source preseed work directory '{}'",
@@ -144,12 +144,4 @@ pub fn preseed_rootfs_source_dvd(
     )?
     .remove("iso")
     .context("preseed did not report its iso output")
-}
-
-fn downloads_work_dir(repo_root: &Path, distro_id: &str) -> Result<PathBuf> {
-    let normalized = normalize_distro_id(distro_id, "rootfs source preseed")?;
-    Ok(repo_root
-        .join(".artifacts/work")
-        .join(normalized)
-        .join("downloads"))
 }

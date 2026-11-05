@@ -293,9 +293,32 @@ fn install(ctx) {
 
 // === CLEANUP ===
 
+fn _kernel_cleanup_path(build_dir, name) {
+    if name == "" || basename(name) != name || name == "." || name == ".." {
+        throw "unsafe kernel cleanup filename: '" + name + "'";
+    }
+    let path = join_path(build_dir, name);
+    // rm accepts glob patterns; cleanup owns exact paths only.
+    if path.contains("*") || path.contains("?") || path.contains("[") || path.contains("]") {
+        throw "unsafe kernel cleanup path: '" + path + "'";
+    }
+    path
+}
+
 fn cleanup(ctx, reason) {
-    let downloaded = join_path(BUILD_DIR, ctx.source_dir_name);
-    let tarball = join_path(BUILD_DIR, ctx.tarball_filename);
+    if reason != "manual" && reason != "auto.acquire.success" && reason != "auto.acquire.failure" {
+        return ctx;
+    }
+    // Manual cleanup can run before any acquire/build hook initializes ctx.
+    if ctx.source_dir_name == "" || ctx.tarball_filename == "" {
+        ctx = _apply_kernel_spec(ctx, BUILD_DIR, "");
+    }
+    if !ctx.source_dir_name.starts_with("linux-") ||
+       ctx.tarball_filename != ctx.source_dir_name + ".tar.xz" {
+        throw "unsafe kernel cleanup: source and archive names do not identify a kernel source";
+    }
+    let downloaded = _kernel_cleanup_path(BUILD_DIR, ctx.source_dir_name);
+    let tarball = _kernel_cleanup_path(BUILD_DIR, ctx.tarball_filename);
 
     // IMPORTANT:
     // - After acquire succeeds, the extracted source is still needed for build/install.

@@ -33,7 +33,16 @@ fn _kernel_artifact_root_or_throw(kernel_artifact_root) {
     if kernel_artifact_root == "" {
         throw "KERNEL_ARTIFACT_ROOT is required";
     }
-    mkdir(kernel_artifact_root);
+    if basename(kernel_artifact_root) == "" || kernel_artifact_root == "." ||
+       kernel_artifact_root.contains("*") || kernel_artifact_root.contains("?") ||
+       kernel_artifact_root.contains("[") || kernel_artifact_root.contains("]") {
+        throw "unsafe kernel artifact root: '" + kernel_artifact_root + "'";
+    }
+    for component in kernel_artifact_root.split("/") {
+        if component == ".." {
+            throw "unsafe kernel artifact root: '" + kernel_artifact_root + "'";
+        }
+    }
     kernel_artifact_root
 }
 
@@ -316,8 +325,12 @@ fn cleanup(ctx, reason) {
 
 fn remove(ctx) {
     let kernel_root = _kernel_artifact_root_or_throw(KERNEL_ARTIFACT_ROOT);
-    if exists(kernel_root) {
-        rm(kernel_root);
+    for name in ["kernel-build", "kernel-build.tmp", "staging", "staging.tmp"] {
+        let path = join_path(kernel_root, name);
+        if exists(path) {
+            rm(path);
+        }
     }
+    ctx.build_dir = "";
     ctx
 }

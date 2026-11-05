@@ -2,8 +2,7 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use anyhow::{bail, Context, Result};
-use distro_builder::recipe::alpine_rootfs_source::preseed_alpine_rootfs_source_assets;
-use distro_builder::recipe::rootfs_source::preseed_rootfs_source_dvd;
+use distro_builder::recipe::rootfs_source::preseed_rootfs_source;
 use distro_builder::{build_erofs_default, build_overlayfs_default};
 use distro_builder::{
     load_base_rootfs_product_spec, load_installed_boot_product_spec, load_live_boot_product_spec,
@@ -13,8 +12,8 @@ use distro_builder::{
     ParentRootfsInput, ProductRealizationStep,
 };
 use distro_contract::{
-    load_variant_contract_bundle_for_distro_from, ConformanceContract, LoadedVariantContract,
-    ProductDecl,
+    load_variant_contract_bundle_for_distro_from, require_valid_contract, ConformanceContract,
+    LoadedVariantContract, ProductDecl,
 };
 
 use crate::workflows::prepared_products::{
@@ -337,54 +336,22 @@ pub(crate) fn preseed_rootfs_source_cmd(distro_id: &str, refresh: bool) -> Resul
     let live_boot_spec = canonical_live_boot_product_spec(&bundle, distro_id)
         .with_context(|| format!("loading canonical rootfs source policy for '{}'", distro_id))?;
 
-    if let Some(preseed_recipe_script) = live_boot_spec.rpm_dvd_preseed_recipe_script() {
-        let iso_path =
-            preseed_rootfs_source_dvd(&bundle.repo_root, distro_id, preseed_recipe_script, refresh)
-                .with_context(|| format!("preseeding rootfs source for '{}'", distro_id))?;
-        let trust_dir = iso_path
-            .parent()
-            .map(|p| p.to_path_buf())
-            .unwrap_or_else(|| {
-                bundle
-                    .repo_root
-                    .join(".artifacts/work")
-                    .join(distro_id)
-                    .join("downloads")
-            });
-
-        println!("rootfs source preseed ready for {}:", distro_id);
-        println!("  ISO:   {}", iso_path.display());
-        println!("  Trust: {}", trust_dir.display());
-        return Ok(());
-    }
-
-    if live_boot_spec.uses_alpine_live_source_rootfs() {
-        let output = preseed_alpine_rootfs_source_assets(&bundle.repo_root, distro_id, refresh)
-            .with_context(|| format!("preseeding rootfs source for '{}'", distro_id))?;
-        let trust_dir = output
-            .iso_path
-            .parent()
-            .map(|p| p.to_path_buf())
-            .unwrap_or_else(|| {
-                bundle
-                    .repo_root
-                    .join(".artifacts/work")
-                    .join(distro_id)
-                    .join("downloads")
-            });
-
-        println!("rootfs source preseed ready for {}:", distro_id);
-        println!("  ISO:        {}", output.iso_path.display());
-        println!("  apk-tools:  {}", output.apk_tools_path.display());
-        println!("  Trust:      {}", trust_dir.display());
-        return Ok(());
-    }
-
-    bail!(
-        "rootfs source for '{}' does not use a canonical preseedable recipe in '{}'",
+    let (recipe_script, outputs) = live_boot_spec.rootfs_source_preseed().with_context(|| format!(
+        "rootfs source for '{distro_id}' does not declare sources.rootfs_source.preseed_recipe_script in '{}'",
+        bundle.paths.ring3_sources_manifest.display()))?;
+    let paths = preseed_rootfs_source(
+        &bundle.repo_root,
         distro_id,
-        bundle.paths.ring3_sources_manifest.display()
-    );
+        recipe_script,
+        outputs,
+        refresh,
+    )
+    .with_context(|| format!("preseeding rootfs source for '{distro_id}'"))?;
+    println!("rootfs source preseed ready for {distro_id}:");
+    for (name, path) in paths {
+        println!("  {name}: {}", path.display());
+    }
+    Ok(())
 }
 
 pub(crate) fn materialize_rootfs_source_cmd(distro_id: &str) -> Result<()> {
@@ -406,6 +373,8 @@ fn canonical_live_boot_product_spec(
     bundle: &LoadedVariantContract,
     distro_id: &str,
 ) -> Result<distro_builder::LiveBootProductSpec> {
+    require_valid_contract(&bundle.contract)
+        .with_context(|| format!("validating canonical variant contract for '{distro_id}'"))?;
     let product = crate::workflows::parse_product(Some(crate::PRODUCT_LIVE_BOOT))?;
     let layout = canonical_derived_product_layout(&bundle.contract, product)?;
     load_live_boot_product_spec(

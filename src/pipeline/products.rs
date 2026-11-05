@@ -24,7 +24,6 @@ use crate::pipeline::scripts::install_scenario_test_scripts;
 use crate::pipeline::source::{
     cleanup_legacy_provider_dir, materialize_source_rootfs, RootfsSourcePolicy,
 };
-use crate::recipe::alpine_rootfs_source::is_alpine_rootfs_source_recipe;
 
 #[derive(Debug, Clone)]
 pub struct BaseRootfsProduct {
@@ -107,30 +106,30 @@ impl LiveBootProductSpec {
     }
 
     pub fn uses_rpm_dvd_rootfs_source(&self) -> bool {
-        matches!(
-            self.rootfs_source_policy,
-            Some(RootfsSourcePolicy::RecipeRpmDvd { .. })
-        )
+        self.rootfs_source_policy
+            .as_ref()
+            .is_some_and(|source| source.kind == distro_contract::RootfsSourceKind::RecipeRpmDvd)
     }
 
     pub fn rpm_dvd_preseed_recipe_script(&self) -> Option<&Path> {
-        let Some(RootfsSourcePolicy::RecipeRpmDvd {
-            preseed_recipe_script,
-            ..
-        }) = &self.rootfs_source_policy
-        else {
-            return None;
-        };
-        Some(preseed_recipe_script.as_path())
+        self.rootfs_source_policy
+            .as_ref()
+            .filter(|source| source.kind == distro_contract::RootfsSourceKind::RecipeRpmDvd)
+            .and_then(|source| source.preseed_recipe_script.as_deref())
     }
 
-    pub fn uses_alpine_live_source_rootfs(&self) -> bool {
-        let Some(RootfsSourcePolicy::RecipeCustom { recipe_script, .. }) =
-            &self.rootfs_source_policy
-        else {
-            return false;
-        };
-        is_alpine_rootfs_source_recipe(recipe_script)
+    /// Explicit source acquisition declaration, independent of recipe filename.
+    pub fn rootfs_source_preseed(
+        &self,
+    ) -> Option<(
+        &Path,
+        &std::collections::BTreeMap<String, distro_contract::RecipeOutputKind>,
+    )> {
+        let source = self.rootfs_source_policy.as_ref()?;
+        Some((
+            source.preseed_recipe_script.as_deref()?,
+            &source.preseed_outputs,
+        ))
     }
 
     pub fn with_resolved_parent_rootfs_image(mut self, image: PathBuf) -> Self {

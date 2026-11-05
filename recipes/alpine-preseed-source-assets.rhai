@@ -8,7 +8,8 @@
 // Pinned versions, filenames, URLs, hashes, and marker format: sources/alpine.rhai.
 //
 // Optional env:
-// - ALPINE_FORCE_REFRESH=1 (download verified replacements for existing assets)
+// - ROOTFS_SOURCE_FORCE_REFRESH=1 (generic explicit refresh request)
+// - ALPINE_FORCE_REFRESH=1 (legacy alias when the generic option is unset)
 
 import "sources/alpine.rhai" as source;
 let assets = source::facts();
@@ -32,6 +33,8 @@ let ctx = #{
 };
 
 fn _refresh_requested() {
+    let generic = env("ROOTFS_SOURCE_FORCE_REFRESH");
+    if generic != "" { return trim(generic) == "1"; }
     trim(env("ALPINE_FORCE_REFRESH")) == "1"
 }
 

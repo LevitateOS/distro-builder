@@ -70,20 +70,18 @@ pub fn materialize_rootfs_from_recipe(
     })
 }
 
-pub fn preseed_rootfs_source_dvd(
+/// Run an explicitly declared acquisition recipe and validate selected products.
+/// Materialization never calls this implicitly.
+pub fn preseed_rootfs_source(
     repo_root: &Path,
     distro_id: &str,
     recipe_script: &Path,
+    required_outputs: &BTreeMap<String, distro_contract::RecipeOutputKind>,
     refresh: bool,
-) -> Result<PathBuf> {
-    let build_dir = downloads_work_dir(repo_root, distro_id)?;
-    std::fs::create_dir_all(&build_dir).with_context(|| {
-        format!(
-            "creating rootfs source preseed work directory '{}'",
-            build_dir.display()
-        )
-    })?;
-
+) -> Result<BTreeMap<String, PathBuf>> {
+    if required_outputs.is_empty() {
+        bail!("preseed requires explicit named output contracts");
+    }
     let recipe_path = resolve_recipe_path(repo_root, recipe_script);
     if !recipe_path.is_file() {
         bail!(
@@ -91,22 +89,20 @@ pub fn preseed_rootfs_source_dvd(
             recipe_path.display()
         );
     }
-
-    let recipe_bin =
-        find_recipe(repo_root).context("resolving recipe binary for rootfs source preseed")?;
-    let recipes_path = recipe_path.parent().ok_or_else(|| {
-        anyhow::anyhow!(
-            "rootfs source preseed recipe has no parent directory: '{}'",
-            recipe_path.display()
+    let build_dir = downloads_work_dir(repo_root, distro_id)?;
+    std::fs::create_dir_all(&build_dir).with_context(|| {
+        format!(
+            "creating rootfs source preseed work directory '{}'",
+            build_dir.display()
         )
     })?;
-
+    let recipe_bin =
+        find_recipe(repo_root).context("resolving recipe binary for rootfs source preseed")?;
     let envs = if refresh {
         vec![("ROOTFS_SOURCE_FORCE_REFRESH", "1")]
     } else {
         Vec::new()
     };
-
     let ctx = run_recipe_phase_json_with_defines_and_env(
         &recipe_bin.path,
         "install",
@@ -114,11 +110,40 @@ pub fn preseed_rootfs_source_dvd(
         &build_dir,
         &[],
         &envs,
-        Some(recipes_path),
+        recipe_path.parent(),
     )
     .with_context(|| format!("preseeding rootfs source via '{}'", recipe_path.display()))?;
-    super::outputs::file(&ctx, "iso")
+    required_outputs
+        .iter()
+        .map(|(name, kind)| {
+            let path = match kind {
+                distro_contract::RecipeOutputKind::File => super::outputs::file(&ctx, name),
+                distro_contract::RecipeOutputKind::Directory => {
+                    super::outputs::directory(&ctx, name)
+                }
+            }?;
+            Ok((name.clone(), path))
+        })
+        .collect::<Result<_>>()
         .with_context(|| format!("preseed recipe '{}' output contract", recipe_path.display()))
+}
+
+/// Compatibility convenience for callers explicitly requesting the DVD ISO.
+pub fn preseed_rootfs_source_dvd(
+    repo_root: &Path,
+    distro_id: &str,
+    recipe_script: &Path,
+    refresh: bool,
+) -> Result<PathBuf> {
+    preseed_rootfs_source(
+        repo_root,
+        distro_id,
+        recipe_script,
+        &BTreeMap::from([("iso".into(), distro_contract::RecipeOutputKind::File)]),
+        refresh,
+    )?
+    .remove("iso")
+    .context("preseed did not report its iso output")
 }
 
 fn downloads_work_dir(repo_root: &Path, distro_id: &str) -> Result<PathBuf> {

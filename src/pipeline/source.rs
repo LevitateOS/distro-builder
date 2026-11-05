@@ -1,6 +1,8 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 
-use distro_contract::{ConformanceContract, RootfsSourceContract, RootfsSourceKind};
+use distro_contract::{
+    ConformanceContract, RecipeOutputKind, RootfsSourceContract, RootfsSourceKind,
+};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -10,15 +12,12 @@ use crate::pipeline::plan::ensure_non_legacy_rootfs_source;
 use crate::recipe::rootfs_source::{materialize_rootfs_from_recipe, RootfsSourceRecipeSpec};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum RootfsSourcePolicy {
-    RecipeRpmDvd {
-        recipe_script: PathBuf,
-        preseed_recipe_script: PathBuf,
-    },
-    RecipeCustom {
-        recipe_script: PathBuf,
-        defines: BTreeMap<String, String>,
-    },
+pub(crate) struct RootfsSourcePolicy {
+    pub kind: RootfsSourceKind,
+    pub recipe_script: PathBuf,
+    pub preseed_recipe_script: Option<PathBuf>,
+    pub preseed_outputs: BTreeMap<String, RecipeOutputKind>,
+    pub defines: BTreeMap<String, String>,
 }
 
 pub(crate) fn rootfs_source_policy_from_contract(
@@ -35,24 +34,16 @@ fn rootfs_source_policy_from_source_contract(
     repo_root: &Path,
     source: &RootfsSourceContract,
 ) -> Result<RootfsSourcePolicy> {
-    match source.kind {
-        RootfsSourceKind::RecipeRpmDvd => {
-            let recipe_script = resolve_repo_path(repo_root, source.recipe_script.trim());
-            let Some(preseed_recipe_script) = source.preseed_recipe_script.as_deref() else {
-                bail!(
-                    "invalid canonical Ring 3 contract: sources.rootfs_source.preseed_recipe_script is required for kind='recipe_rpm_dvd'"
-                );
-            };
-            Ok(RootfsSourcePolicy::RecipeRpmDvd {
-                recipe_script,
-                preseed_recipe_script: resolve_repo_path(repo_root, preseed_recipe_script.trim()),
-            })
-        }
-        RootfsSourceKind::RecipeCustom => Ok(RootfsSourcePolicy::RecipeCustom {
-            recipe_script: resolve_repo_path(repo_root, source.recipe_script.trim()),
-            defines: source.defines.clone(),
-        }),
-    }
+    Ok(RootfsSourcePolicy {
+        kind: source.kind,
+        recipe_script: resolve_repo_path(repo_root, source.recipe_script.trim()),
+        preseed_recipe_script: source
+            .preseed_recipe_script
+            .as_deref()
+            .map(|script| resolve_repo_path(repo_root, script.trim())),
+        preseed_outputs: source.preseed_outputs.clone(),
+        defines: source.defines.clone(),
+    })
 }
 
 pub(crate) fn materialize_source_rootfs(
@@ -60,67 +51,29 @@ pub(crate) fn materialize_source_rootfs(
     distro_id: &str,
     source_policy: &Option<RootfsSourcePolicy>,
 ) -> Result<PathBuf> {
-    match source_policy {
-        Some(RootfsSourcePolicy::RecipeRpmDvd { recipe_script, .. }) => {
-            let build_dir =
-                rootfs_source_provider_recipe_work_dir(repo_root, distro_id, recipe_script)?;
-            fs::create_dir_all(&build_dir).with_context(|| {
-                format!(
-                    "creating rootfs source recipe provider directory '{}'",
-                    build_dir.display()
-                )
-            })?;
-            let source_rootfs_dir = materialize_rootfs_from_recipe(
-                repo_root,
-                &build_dir,
-                &RootfsSourceRecipeSpec {
-                    recipe_script: recipe_script.clone(),
-                    defines: BTreeMap::new(),
-                },
-            )
-            .with_context(|| {
-                format!(
-                    "materializing rootfs source recipe output for '{}'",
-                    distro_id
-                )
-            })?;
-            ensure_non_legacy_rootfs_source(&source_rootfs_dir)?;
-            Ok(source_rootfs_dir)
-        }
-        Some(RootfsSourcePolicy::RecipeCustom {
-            recipe_script,
-            defines,
-        }) => {
-            let build_dir =
-                rootfs_source_provider_recipe_work_dir(repo_root, distro_id, recipe_script)?;
-            fs::create_dir_all(&build_dir).with_context(|| {
-                format!(
-                    "creating rootfs source recipe provider directory '{}'",
-                    build_dir.display()
-                )
-            })?;
-            let source_rootfs_dir = materialize_rootfs_from_recipe(
-                repo_root,
-                &build_dir,
-                &RootfsSourceRecipeSpec {
-                    recipe_script: recipe_script.clone(),
-                    defines: defines.clone(),
-                },
-            )
-            .with_context(|| {
-                format!(
-                    "materializing rootfs source recipe output for '{}'",
-                    distro_id
-                )
-            })?;
-            ensure_non_legacy_rootfs_source(&source_rootfs_dir)?;
-            Ok(source_rootfs_dir)
-        }
-        None => bail!(
-            "live-boot product preparation requires a copy-based rootfs source, but no canonical rootfs_source policy is configured for '{}'.",
-            distro_id
-        ),
-    }
+    let source = source_policy.as_ref().with_context(|| {
+        format!(
+        "live-boot product preparation requires a canonical rootfs_source policy for '{distro_id}'")
+    })?;
+    let build_dir =
+        rootfs_source_provider_recipe_work_dir(repo_root, distro_id, &source.recipe_script)?;
+    fs::create_dir_all(&build_dir).with_context(|| {
+        format!(
+            "creating rootfs source recipe provider directory '{}'",
+            build_dir.display()
+        )
+    })?;
+    let source_rootfs_dir = materialize_rootfs_from_recipe(
+        repo_root,
+        &build_dir,
+        &RootfsSourceRecipeSpec {
+            recipe_script: source.recipe_script.clone(),
+            defines: source.defines.clone(),
+        },
+    )
+    .with_context(|| format!("materializing rootfs source recipe output for '{distro_id}'"))?;
+    ensure_non_legacy_rootfs_source(&source_rootfs_dir)?;
+    Ok(source_rootfs_dir)
 }
 
 pub(crate) fn cleanup_legacy_provider_dir(output_dir: &Path) -> Result<()> {

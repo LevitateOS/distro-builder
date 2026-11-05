@@ -34,7 +34,7 @@ let ctx = #{
     profile: "acorn",
     release_branch: assets.release_branch,
     rootfs_path: "",
-    rootfs_recipe_version: "alpine-live-source-v5",
+    rootfs_recipe_version: "alpine-live-source-v6",
     trust_dir: _downloads_dir(BUILD_DIR),
 };
 
@@ -92,7 +92,7 @@ fn _require_trusted_preseed_assets(ctx, remediation) {
 fn _profile_packages(profile) {
     let normalized = trim(profile).to_lower();
     if normalized == "acorn" {
-        return "alpine-base busybox openrc openrc-init " +
+        return "alpine-base busybox openrc openrc-init doas " +
                "openssh openssh-server util-linux e2fsprogs dosfstools " +
                "systemd-boot " +
                "iproute2 iputils dhcpcd less grep findutils curl " +
@@ -145,6 +145,13 @@ fn _rootfs_valid(rootfs, expected_version) {
         return false;
     }
     if !is_file(join_path(rootfs, "bin/busybox")) {
+        return false;
+    }
+    if !is_file(join_path(rootfs, "usr/bin/doas")) {
+        return false;
+    }
+    let doas_conf = join_path(rootfs, "etc/doas.conf");
+    if !is_file(doas_conf) || trim(read_file(doas_conf)) != "permit persist :wheel" {
         return false;
     }
     let sh_path = join_path(rootfs, "bin/sh");
@@ -207,6 +214,10 @@ fn _normalize_rootfs_permissions(rootfs, context) {
 }
 
 fn _ensure_openrc_live_source_completeness(rootfs) {
+    // Acorn uses password-authenticated doas for wheel administrators.
+    let doas_conf = join_path(rootfs, "etc/doas.conf");
+    write_file(doas_conf, "permit persist :wheel\n");
+    chmod(doas_conf, 0o600);
     mkdir(join_path(rootfs, "usr/share/empty.sshd"));
     shell("chmod 755 '" + join_path(rootfs, "usr/share/empty.sshd") + "'");
     write_file(join_path(rootfs, "etc/locale.conf"), "LANG=C.UTF-8\n");

@@ -31,7 +31,7 @@ let ctx = #{
     name: "fedora-dvd-source-rootfs",
     preseed_iso_path: join_path(_downloads_dir(BUILD_DIR), assets.iso_name),
     rootfs_path: join_path(BUILD_DIR, "rootfs-minimal"),
-    rootfs_recipe_version: "fedora-dvd-source-v1",
+    rootfs_recipe_version: "fedora-dvd-source-v2",
     sha256: assets.sha256,
     torrent_url: assets.torrent_url,
     trust_dir: _downloads_dir(BUILD_DIR),
@@ -137,6 +137,8 @@ fn is_built(ctx) {
         "usr/lib/systemd/systemd",
         "usr/sbin/sshd",
         "usr/sbin/auditd",
+        "usr/bin/sudo",
+        "etc/sudoers.d/10-wheel",
         "usr/sbin/ip",
         "usr/lib64/libbpf.so.1",
         "usr/lib64/libelf.so.1",
@@ -263,6 +265,7 @@ fn build(ctx) {
         "libsmartcols",
         "libuuid",
         "shadow-utils",
+        "sudo",
         // SSH + service wiring expectations.
         "openssh-server",
         "openssh",
@@ -363,6 +366,12 @@ fn build(ctx) {
     mkdir(join_path(rootfs, "etc/systemd/system/sockets.target.wants"));
     ln_force("/usr/lib/systemd/system/dbus-broker.service", join_path(rootfs, "etc/systemd/system/dbus.service"));
     ln_force("/usr/lib/systemd/system/dbus.socket", join_path(rootfs, "etc/systemd/system/sockets.target.wants/dbus.socket"));
+
+    // Levitate uses password-authenticated sudo for wheel administrators.
+    mkdir(join_path(rootfs, "etc/sudoers.d"));
+    let wheel_sudoers = join_path(rootfs, "etc/sudoers.d/10-wheel");
+    write_file(wheel_sudoers, "%wheel ALL=(ALL:ALL) ALL\n");
+    chmod(wheel_sudoers, 0o440);
 
     // RPM scriptlets are not executed in this producer path. Ensure OpenSSH
     // Privilege-separation account entries must exist so sshd can start in live boot.

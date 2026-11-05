@@ -78,7 +78,7 @@ fn _write_verify_marker(ctx) {
 }
 
 fn _refresh_requested() {
-    trim(shell_output("printf '%s' \"${ALPINE_FORCE_REFRESH:-0}\"")) == "1"
+    trim(env("ALPINE_FORCE_REFRESH")) == "1"
 }
 
 fn _ensure_parent_dir(path) {
@@ -152,21 +152,7 @@ fn acquire(ctx) {
 }
 
 fn is_built(ctx) {
-    if _refresh_requested() {
-        throw "forced refresh";
-    }
-    if !is_file(ctx.iso_path) {
-        throw "Alpine rootfs source ISO missing at " + ctx.iso_path;
-    }
-    if !is_file(ctx.apk_tools_path) {
-        throw "Alpine rootfs source apk-tools package missing at " + ctx.apk_tools_path;
-    }
-    verify_sha256(ctx.iso_path, ctx.iso_sha256);
-    verify_sha256(ctx.apk_tools_path, ctx.apk_tools_sha256);
-    if !_marker_is_valid(ctx) {
-        throw "Alpine rootfs source trust marker missing/stale under " + ctx.trust_dir;
-    }
-    ctx
+    is_acquired(ctx)
 }
 
 fn build(ctx) {
@@ -174,16 +160,8 @@ fn build(ctx) {
 }
 
 fn is_installed(ctx) {
-    if !is_file(ctx.iso_path) {
-        throw "Alpine rootfs source ISO missing at " + ctx.iso_path;
-    }
-    if !is_file(ctx.apk_tools_path) {
-        throw "Alpine rootfs source apk-tools package missing at " + ctx.apk_tools_path;
-    }
-    if !_marker_is_valid(ctx) {
-        throw "Alpine rootfs source trust marker missing/stale under " + ctx.trust_dir;
-    }
-    ctx
+    // Preseeding has one result: all declared assets are verified and reusable.
+    is_acquired(ctx)
 }
 
 fn install(ctx) {

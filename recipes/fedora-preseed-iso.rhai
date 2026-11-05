@@ -55,7 +55,11 @@ fn _write_verify_marker(trust_dir, iso_path, sha256) {
 }
 
 fn _refresh_requested() {
-    trim(shell_output("printf '%s' \"${ROOTFS_SOURCE_FORCE_REFRESH:-${FEDORA_FORCE_REFRESH:-0}}\"")) == "1"
+    let generic = env("ROOTFS_SOURCE_FORCE_REFRESH");
+    if generic != "" {
+        return trim(generic) == "1";
+    }
+    trim(env("FEDORA_FORCE_REFRESH")) == "1"
 }
 
 fn _ensure_parent_dir(path) {
@@ -137,17 +141,7 @@ fn acquire(ctx) {
 }
 
 fn is_built(ctx) {
-    if _refresh_requested() {
-        throw "forced refresh";
-    }
-    if !is_file(ctx.iso_path) {
-        throw "Fedora ISO missing at " + ctx.iso_path;
-    }
-    verify_sha256(ctx.iso_path, ctx.sha256);
-    if !_marker_is_valid(ctx.trust_dir, ctx.iso_path, ctx.sha256) {
-        throw "Fedora ISO trust marker missing/stale for '" + ctx.iso_path + "'";
-    }
-    ctx
+    is_acquired(ctx)
 }
 
 fn build(ctx) {
@@ -155,13 +149,8 @@ fn build(ctx) {
 }
 
 fn is_installed(ctx) {
-    if !is_file(ctx.iso_path) {
-        throw "Fedora ISO missing at " + ctx.iso_path;
-    }
-    if !_marker_is_valid(ctx.trust_dir, ctx.iso_path, ctx.sha256) {
-        throw "Fedora ISO trust marker missing/stale for '" + ctx.iso_path + "'";
-    }
-    ctx
+    // Preseeding has one result: the declared ISO is verified and reusable.
+    is_acquired(ctx)
 }
 
 fn install(ctx) {

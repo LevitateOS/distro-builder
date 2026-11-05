@@ -162,15 +162,12 @@ fn acquire(ctx) {
 
     log("Downloading prebuilt kernel artifact...");
     log("  URL: " + asset_url);
-    shell("curl -fSL -o '" + tarball_path + "' '" + asset_url + "'");
-
-    log("Verifying SHA256...");
-    verify_sha256(tarball_path, spec.asset_sha256);
+    download(asset_url, tarball_path, spec.asset_sha256);
 
     log("Extracting prebuilt kernel artifact...");
-    shell("rm -rf '" + extract_tmp + "'");
+    rm(extract_tmp);
     mkdir(extract_tmp);
-    shell("tar xf '" + tarball_path + "' -C '" + extract_tmp + "'");
+    extract(tarball_path, extract_tmp);
 
     let rel = _validate_payload_or_throw(
         extract_tmp,
@@ -180,8 +177,8 @@ fn acquire(ctx) {
         spec.module_install_path
     );
 
-    shell("rm -rf '" + kernel_root + "'");
-    shell("mv '" + extract_tmp + "' '" + kernel_root + "'");
+    rm(kernel_root);
+    mv(extract_tmp, kernel_root);
 
     // Validate again in canonical destination for explicit diagnostics.
     _validate_payload_or_throw(
@@ -277,6 +274,10 @@ fn install(ctx) {
 }
 
 fn cleanup(ctx, reason) {
+    if reason == "auto.acquire.failure" {
+        let root = kernel::artifact_root(KERNEL_ARTIFACT_ROOT);
+        rm(root + ".prebuilt.tmp");
+    }
     // Remove downloaded prebuilt tarball after successful acquire.
     if reason == "auto.acquire.success" {
         let tarball = join_path(BUILD_DIR, ctx.tarball_filename);

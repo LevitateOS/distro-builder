@@ -202,14 +202,13 @@ fn acquire(ctx) {
     if !is_file(join_path(tarball_source, "Makefile")) {
         if !is_file(tarball_path) {
             log("Downloading kernel " + ctx.kernel_version + " from cdn.kernel.org...");
-            shell("curl -fSL -o " + tarball_path + " " + ctx.tarball_url);
+            download(ctx.tarball_url, tarball_path, spec.sha256);
+        } else {
+            verify_sha256(tarball_path, spec.sha256);
         }
 
-        log("Verifying SHA256...");
-        verify_sha256(tarball_path, spec.sha256);
-
         log("Extracting kernel source...");
-        shell("tar xf " + tarball_path + " -C " + BUILD_DIR);
+        extract(tarball_path, BUILD_DIR);
     }
 
     if is_file(join_path(tarball_source, "Makefile")) {

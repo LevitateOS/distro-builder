@@ -106,3 +106,34 @@ fn managed_rootfs_consumer_rejects_missing_wrong_kind_and_absent_products() {
         }
     }
 }
+
+#[test]
+fn real_cli_success_without_a_fresh_json_result_cannot_reuse_stale_context() {
+    let dir = tempfile::Builder::new()
+        .prefix("recipe result ")
+        .tempdir()
+        .unwrap();
+    let recipe = dir.path().join("metadata.rhai");
+    std::fs::write(&recipe, "let ctx = #{\n    name: \"metadata-only\",\n};\n").unwrap();
+    let work = dir.path().join("work");
+    std::fs::create_dir_all(&work).unwrap();
+    let stale = work.join(".recipe-output.json");
+    let old_result = b"{\"outputs\":{\"rootfs\":\"/old-result\"}}";
+    std::fs::write(&stale, old_result).unwrap();
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+    let binary = distro_builder::recipe::find_recipe(repo).unwrap();
+    // `info` is a real successful CLI operation that produces human metadata,
+    // not a lifecycle JSON result. No recipe code is evaluated by this command.
+    let error = distro_builder::recipe::run_recipe_phase_json_with_defines(
+        &binary.path,
+        "info",
+        &recipe,
+        &work,
+        &[],
+        Some(dir.path()),
+    )
+    .expect_err("a successful process without this invocation's JSON must fail");
+    assert!(format!("{error:#}").contains("parse this invocation's recipe JSON result"));
+    assert_eq!(std::fs::read(stale).unwrap(), old_result);
+    assert_eq!(std::fs::read_dir(work).unwrap().count(), 1);
+}

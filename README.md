@@ -113,3 +113,8 @@ The integration target `recipe_outputs` invokes the real Recipe CLI against a
 self-contained rootfs producer and executes the returned tool. It also checks
 missing/wrong-kind/unproduced outputs with a stale conventional rootfs present.
 Build `recipe` explicitly and configure a real `GINUX_BIN` before running it.
+
+The `real_cli_success_without_a_fresh_json_result_cannot_reuse_stale_context`
+case uses the actual static `recipe info` command to verify that exit zero
+without a fresh JSON result cannot reuse cached context. That case does not
+evaluate recipe code and can run without Ginux; it does not validate publication.

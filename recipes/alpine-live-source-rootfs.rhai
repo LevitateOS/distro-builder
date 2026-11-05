@@ -102,6 +102,8 @@ fn _require_trusted_preseed_assets(ctx, remediation) {
     if !is_file(ctx.apk_tools_preseed_path) {
         throw "Alpine preseed apk-tools package missing at '" + ctx.apk_tools_preseed_path + "'.\n" + remediation;
     }
+    verify_sha256(ctx.iso_preseed_path, ctx.iso_sha256);
+    verify_sha256(ctx.apk_tools_preseed_path, ctx.apk_tools_sha256);
     if !_marker_is_valid(
         ctx.trust_dir,
         ctx.iso_preseed_path,
@@ -244,8 +246,9 @@ fn _ensure_openrc_live_source_completeness(rootfs) {
 fn is_acquired(ctx) {
     let remediation = "Run 'cargo run -p distro-builder --bin distro-builder -- artifact preseed-rootfs-source " + ctx.profile + " --refresh'";
     let iso_path = join_path(BUILD_DIR, _iso_name(ctx));
-    _require_preseeded_asset(iso_path, ctx.iso_preseed_path, "Alpine ISO", remediation);
     _require_trusted_preseed_assets(ctx, remediation);
+    _require_preseeded_asset(iso_path, ctx.iso_preseed_path, "Alpine ISO", remediation);
+    verify_sha256(iso_path, ctx.iso_sha256);
     let apk_tools_dir = join_path(BUILD_DIR, "apk-tools");
     let apk_tools_pkg = join_path(apk_tools_dir, _apk_tools_name(ctx));
     _require_preseeded_asset(
@@ -254,6 +257,7 @@ fn is_acquired(ctx) {
         "apk-tools-static package",
         remediation
     );
+    verify_sha256(apk_tools_pkg, ctx.apk_tools_sha256);
     let apk_static = _resolve_apk_static(apk_tools_dir);
 
     if apk_static == "" {
@@ -269,8 +273,8 @@ fn acquire(ctx) {
     let remediation = "Run 'cargo run -p distro-builder --bin distro-builder -- artifact preseed-rootfs-source " + ctx.profile + " --refresh'";
     mkdir(BUILD_DIR);
     let iso_dest = join_path(BUILD_DIR, _iso_name(ctx));
-    _require_preseeded_asset(iso_dest, ctx.iso_preseed_path, "Alpine ISO", remediation);
     _require_trusted_preseed_assets(ctx, remediation);
+    _require_preseeded_asset(iso_dest, ctx.iso_preseed_path, "Alpine ISO", remediation);
     verify_sha256(iso_dest, ctx.iso_sha256);
 
     let apk_tools_dir = join_path(BUILD_DIR, "apk-tools");

@@ -3,7 +3,7 @@
 // Rule boundary (strict):
 // - This recipe never downloads/re-downloads the Fedora Server DVD in stage builds.
 // - It requires a preseeded ISO in the canonical sibling downloads cache.
-// - It requires a trust marker; no repeated checksum in normal iterations.
+// - It requires a trust marker and verifies cached/staged content before use.
 //
 let deps = ["dvd-source-deps"];
 
@@ -87,19 +87,25 @@ fn _ensure_trusted_iso(build_dir, iso_path, sha256, trust_dir_define, trust_iso_
     let trust_target = if trust_iso_path == "" { iso_path } else { trust_iso_path };
     mkdir(trust_dir);
     if _marker_is_valid(trust_dir, trust_target, sha256) {
-        log("Fedora ISO trust marker hit; skipping checksum.");
+        verify_sha256(trust_target, sha256);
+        if iso_path != trust_target {
+            verify_sha256(iso_path, sha256);
+        }
+        log("Fedora preseed and staged ISO content verified.");
         return;
     }
 
     let create_trust = trim(shell_output("printf '%s' \"${FORCE_TRUST_CREATE:-0}\"")) == "1";
     if !create_trust {
         throw "Fedora ISO trust marker missing/stale for '" + trust_target + "'.\n" +
-              "Checksum-in-build is disabled by policy.\n" +
-              "Run once with FORCE_TRUST_CREATE=1 after explicit trusted acquisition.";
+              "Run explicit trusted preseed acquisition, or use FORCE_TRUST_CREATE=1 to verify the current content.";
     }
 
     log("Creating Fedora ISO trust marker (one-time full checksum)...");
     verify_sha256(trust_target, sha256);
+    if iso_path != trust_target {
+        verify_sha256(iso_path, sha256);
+    }
     _write_verify_marker(trust_dir, trust_target, sha256);
 }
 
@@ -112,8 +118,8 @@ fn _find_rpm_path(iso_contents, pkg_name) {
 }
 
 fn _extract_rpm_into_rootfs(rootfs, rpm_path) {
-    let cmd = "bash -o pipefail -c \"rpm2cpio '" + rpm_path + "' | cpio -idmu --quiet 2>/dev/null\"";
-    shell_status_in(rootfs, cmd);
+    let cmd = "bash -o pipefail -c \"rpm2cpio '" + rpm_path + "' | cpio -idmu --quiet\"";
+    shell_in(rootfs, cmd);
 }
 
 fn is_acquired(ctx) {

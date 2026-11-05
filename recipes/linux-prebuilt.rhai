@@ -45,12 +45,6 @@ fn _normalize_kernel_target(target) {
     if normalized == "acorn" || normalized == "acornos" {
         return "acorn";
     }
-    if normalized == "iuppiter" || normalized == "iuppiteros" {
-        return "iuppiter";
-    }
-    if normalized == "ralph" || normalized == "ralphos" {
-        return "ralph";
-    }
     ""
 }
 

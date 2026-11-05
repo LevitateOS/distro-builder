@@ -14,8 +14,6 @@ pub(crate) fn normalize_distro_id(distro_id: &str, purpose: &str) -> Result<&'st
     match distro_id.trim().to_ascii_lowercase().as_str() {
         "levitate" | "leviso" => Ok("levitate"),
         "acorn" | "acornos" => Ok("acorn"),
-        "iuppiter" | "iuppiteros" => Ok("iuppiter"),
-        "ralph" | "ralphos" => Ok("ralph"),
         other => bail!("unsupported distro '{}' for {} resolution", other, purpose),
     }
 }

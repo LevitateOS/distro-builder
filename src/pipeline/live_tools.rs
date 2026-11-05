@@ -2,11 +2,9 @@ use anyhow::{bail, Context, Result};
 use serde::Deserialize;
 use std::env;
 use std::fs;
-use std::os::unix::fs::{symlink, PermissionsExt};
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-
-use crate::copy_dir_recursive;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -46,9 +44,6 @@ pub(crate) enum LiveToolsRuntimeAction {
     },
     ApkPackages {
         packages: Vec<String>,
-    },
-    IuppiterDarPayload {
-        target: Option<String>,
     },
     InstallModePayload {
         interactive_shell: String,
@@ -121,15 +116,6 @@ pub(crate) fn add_required_tools(
                         packages.join(", ")
                     )
                 })?
-            }
-            LiveToolsRuntimeAction::IuppiterDarPayload { target } => {
-                install_iuppiter_dar_payload(repo_root, rootfs_source_dir, target.as_deref())
-                    .with_context(|| {
-                        format!(
-                            "installing iuppiter DAR runtime payload for '{}'",
-                            distro_id
-                        )
-                    })?
             }
             LiveToolsRuntimeAction::InstallModePayload {
                 interactive_shell,
@@ -246,153 +232,6 @@ fn build_workspace_binary_artifact(
     Ok(built)
 }
 
-fn install_iuppiter_dar_payload(
-    repo_root: &Path,
-    rootfs_source_dir: &Path,
-    target: Option<&str>,
-) -> Result<()> {
-    let dar_root = resolve_iuppiter_dar_root(repo_root)?;
-    let dar_bin = resolve_iuppiter_dar_bin(&dar_root, target)?;
-    let dar_spa = resolve_iuppiter_dar_spa_dir(&dar_root)?;
-
-    let dar_dst = rootfs_source_dir.join("opt/iuppiter/iuppiter-dar");
-    copy_executable(&dar_bin, &dar_dst).with_context(|| {
-        format!(
-            "copying iuppiter-dar binary '{}' -> '{}'",
-            dar_bin.display(),
-            dar_dst.display()
-        )
-    })?;
-
-    ensure_symlink(
-        Path::new("/opt/iuppiter/iuppiter-dar"),
-        &rootfs_source_dir.join("usr/bin/iuppiter-dar"),
-    )
-    .context("linking iuppiter-dar into /usr/bin for PATH discovery")?;
-
-    let spa_dst = rootfs_source_dir.join("usr/share/iuppiter/spa");
-    if spa_dst.exists() {
-        fs::remove_dir_all(&spa_dst).with_context(|| {
-            format!(
-                "removing previous iuppiter SPA directory '{}'",
-                spa_dst.display()
-            )
-        })?;
-    }
-    copy_dir_recursive(&dar_spa, &spa_dst).with_context(|| {
-        format!(
-            "copying iuppiter-dar SPA '{}' -> '{}'",
-            dar_spa.display(),
-            spa_dst.display()
-        )
-    })?;
-
-    Ok(())
-}
-
-fn resolve_iuppiter_dar_root(repo_root: &Path) -> Result<PathBuf> {
-    if let Ok(path) = env::var("IUPPITER_DAR_ROOT") {
-        let root = PathBuf::from(path);
-        if root.is_dir() {
-            return Ok(root);
-        }
-        bail!(
-            "IUPPITER_DAR_ROOT is set but not a directory: '{}'",
-            root.display()
-        );
-    }
-
-    let mut candidates = vec![repo_root.join("iuppiter-dar")];
-    if let Some(parent) = repo_root.parent() {
-        candidates.push(parent.join("iuppiter-dar"));
-    }
-    if let Ok(home) = env::var("HOME") {
-        candidates.push(PathBuf::from(home).join("iuppiter-dar"));
-    }
-
-    for candidate in candidates {
-        if candidate.is_dir() {
-            return Ok(candidate);
-        }
-    }
-
-    bail!(
-        "iuppiter-dar root not found. Set IUPPITER_DAR_ROOT to a checkout containing \
-target/*/release/iuppiter-daemon and dist/ (for example: export IUPPITER_DAR_ROOT=\"$HOME/iuppiter-dar\")."
-    );
-}
-
-fn resolve_iuppiter_dar_bin(dar_root: &Path, target: Option<&str>) -> Result<PathBuf> {
-    if let Ok(path) = env::var("IUPPITER_DAR_BIN") {
-        let bin = PathBuf::from(path);
-        if bin.is_file() {
-            return Ok(bin);
-        }
-        bail!(
-            "IUPPITER_DAR_BIN is set but not a file: '{}'",
-            bin.display()
-        );
-    }
-
-    let mut candidates = Vec::new();
-    if let Some(target_triple) = target {
-        candidates.push(
-            dar_root
-                .join("target")
-                .join(target_triple)
-                .join("release")
-                .join("iuppiter-daemon"),
-        );
-    }
-    candidates.push(dar_root.join("target/release/iuppiter-daemon"));
-    candidates.push(dar_root.join("target/release/iuppiter-dar"));
-
-    for candidate in &candidates {
-        if candidate.is_file() {
-            return Ok(candidate.clone());
-        }
-    }
-
-    let target_hint = target.unwrap_or("x86_64-unknown-linux-musl");
-    bail!(
-        "iuppiter-dar binary missing under '{}'. Build it first, then rerun live-tools product preparation.\n\
-Expected one of: {}\n\
-Suggested command:\n\
-  cd '{}' && cargo build --target {} --release",
-        dar_root.display(),
-        candidates
-            .iter()
-            .map(|p| p.display().to_string())
-            .collect::<Vec<_>>()
-            .join(", "),
-        dar_root.display(),
-        target_hint
-    );
-}
-
-fn resolve_iuppiter_dar_spa_dir(dar_root: &Path) -> Result<PathBuf> {
-    if let Ok(path) = env::var("IUPPITER_DAR_SPA_DIR") {
-        let spa = PathBuf::from(path);
-        if spa.is_dir() {
-            return Ok(spa);
-        }
-        bail!(
-            "IUPPITER_DAR_SPA_DIR is set but not a directory: '{}'",
-            spa.display()
-        );
-    }
-
-    let spa = dar_root.join("dist");
-    if !spa.is_dir() {
-        bail!(
-            "iuppiter-dar SPA directory missing: '{}'. Build SPA first (for example: `cd {} && bun run build`).",
-            spa.display(),
-            dar_root.display()
-        );
-    }
-    Ok(spa)
-}
-
 fn copy_executable(source: &Path, destination: &Path) -> Result<()> {
     if let Some(parent) = destination.parent() {
         fs::create_dir_all(parent)
@@ -413,51 +252,6 @@ fn copy_executable(source: &Path, destination: &Path) -> Result<()> {
         format!(
             "setting executable permissions on '{}'",
             destination.display()
-        )
-    })?;
-    Ok(())
-}
-
-fn ensure_symlink(link_target: &Path, link_path: &Path) -> Result<()> {
-    if let Some(parent) = link_path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("creating symlink parent '{}'", parent.display()))?;
-    }
-
-    match fs::symlink_metadata(link_path) {
-        Ok(metadata) => {
-            if metadata.file_type().is_dir() && !metadata.file_type().is_symlink() {
-                fs::remove_dir_all(link_path).with_context(|| {
-                    format!(
-                        "removing existing directory before symlink '{}'",
-                        link_path.display()
-                    )
-                })?;
-            } else {
-                fs::remove_file(link_path).with_context(|| {
-                    format!(
-                        "removing existing file before symlink '{}'",
-                        link_path.display()
-                    )
-                })?;
-            }
-        }
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
-        Err(err) => {
-            return Err(err).with_context(|| {
-                format!(
-                    "reading existing symlink metadata for '{}'",
-                    link_path.display()
-                )
-            });
-        }
-    }
-
-    symlink(link_target, link_path).with_context(|| {
-        format!(
-            "creating symlink '{}' -> '{}'",
-            link_path.display(),
-            link_target.display()
         )
     })?;
     Ok(())

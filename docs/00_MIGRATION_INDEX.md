@@ -6,7 +6,7 @@ This directory tracks the current high-level distro-builder migration work as nu
 
 1. [01_MIGRATION_FEDORA_SWAP.md](01_MIGRATION_FEDORA_SWAP.md)
    Status: completed
-   Scope: replace the current Rocky Stage 01 DVD/rootfs source path with Fedora Server DVD sourcing for the Levitate/Ralph family.
+   Scope: replace the current Rocky Stage 01 DVD/rootfs source path with Fedora Server DVD sourcing for the LevitateOS family.
 
 2. [02_MIGRATION_BOOTC.md](02_MIGRATION_BOOTC.md)
    Status: cancelled

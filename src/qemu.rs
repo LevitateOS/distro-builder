@@ -221,7 +221,7 @@ pub fn find_ovmf() -> Option<PathBuf> {
 /// # Arguments
 /// * `iso_path` - Path to the ISO file
 /// * `timeout_secs` - Maximum boot time
-/// * `distro_name` - Name for messages (e.g., "acorn", "iuppiter")
+/// * `distro_name` - Name for messages (e.g., "acorn", "levitate")
 /// * `test_script_name` - Profile script name (e.g., "00-acorn-test.sh")
 /// * `cpu_mode` - QEMU CPU mode
 /// * `memory_gb` - QEMU memory in GB

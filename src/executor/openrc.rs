@@ -1,7 +1,7 @@
 //! OpenRC operation handlers: service enabling, init script copying, conf.d writing.
 //!
 //! These operations handle OpenRC-specific service management for
-//! Alpine-based distributions (AcornOS, IuppiterOS).
+//! Alpine-based distributions (AcornOS).
 
 use anyhow::{bail, Result};
 use std::fs;

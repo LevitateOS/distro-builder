@@ -8,9 +8,7 @@ use std::process::Command;
 
 const LEGACY_ROOTFS_COMPONENT_SEQUENCES: &[&[&str]] = &[
     &["leviso", "downloads", "rootfs"],
-    &["ralphos", "downloads", "rootfs"],
     &["acornos", "downloads", "rootfs"],
-    &["iuppiteros", "downloads", "rootfs"],
 ];
 
 #[derive(Debug, Clone)]

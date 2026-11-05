@@ -4,11 +4,11 @@ Status: completed
 
 ## Goal
 
-Replace the current Rocky Linux Stage 01 DVD/rootfs source path with Fedora Server DVD sourcing for the Levitate/Ralph family without adding another long-lived distro-specific branch to the default builder path.
+Replace the current Rocky Linux Stage 01 DVD/rootfs source path with Fedora Server DVD sourcing for the LevitateOS family without adding another long-lived distro-specific branch to the default builder path.
 
 ## What This Migration Covers
 
-- Stage 01 source metadata for Levitate and Ralph.
+- Stage 01 source metadata for LevitateOS.
 - Builder-side Stage 01 source policy parsing and materialization.
 - Recipe-side rootfs source preparation and ISO preseeding for the current RPM/DVD path.
 - Rocky-branded CLI and diagnostics that would become wrong once Fedora is the canonical source.
@@ -23,7 +23,6 @@ Replace the current Rocky Linux Stage 01 DVD/rootfs source path with Fedora Serv
 ## Current Canonical Owners
 
 - `distro-variants/levitate/01Boot.toml`
-- `distro-variants/ralph/01Boot.toml`
 - `distro-builder/src/pipeline/config.rs`
 - `distro-builder/src/pipeline/source.rs`
 - `distro-builder/src/stages/s01_boot_inputs.rs`
@@ -40,7 +39,6 @@ Replace the current Rocky Linux Stage 01 DVD/rootfs source path with Fedora Serv
 
 - Levitate Stage 01 now uses `kind = "recipe_rpm_dvd"` in `distro-variants/levitate/01Boot.toml`.
 - Levitate now points at the Fedora Stage 01 source recipes in `distro-variants/levitate/01Boot.toml`.
-- Ralph now declares an explicit Fedora-backed `rootfs_source` in `distro-variants/ralph/01Boot.toml`.
 - The current Stage 01 source parser in `distro-builder/src/pipeline/source.rs` supports the neutral `recipe_rpm_dvd` path and `recipe_custom`.
 - The Stage 01 recipe path is now self-contained for the canonical case: the Rocky, Fedora, and Alpine Stage 01 recipes no longer require large injected metadata define maps.
 - The Stage 01 source adapter now lives in `distro-builder/src/recipe/stage01_source.rs` and exposes neutral rootfs materialization and preseed APIs.
@@ -76,7 +74,7 @@ Do not add `recipe_fedora` as a second permanent distro-specific default kind un
 The final shape is:
 
 - generic RPM/DVD source kind and adapter
-- Fedora Server DVD as the canonical Stage 01 source for Levitate/Ralph
+- Fedora Server DVD as the canonical Stage 01 source for LevitateOS
 
 ## Current Chosen Fedora Artifact
 
@@ -91,8 +89,6 @@ This is the current concrete migration target for the first Fedora-backed presee
 
 - [x] Decide the new source kind name.
   Recommended: `recipe_rpm_dvd`.
-- [x] Decide whether Ralph becomes explicit in `distro-variants/ralph/01Boot.toml`.
-  Chosen: yes, keep Ralph explicit so the source policy is inspectable and not inherited implicitly.
 - [x] Decide whether the Fedora path should keep the current preseed concept or rename it to neutral DVD/source preparation language.
   Recommended: keep the behavior, neutralize the naming.
 
@@ -141,16 +137,10 @@ Exit criteria:
 - [x] Replace the old Rocky-specific source kind with the generic `recipe_rpm_dvd` kind.
 - [x] Replace the Stage 01 recipe script path with the Fedora-backed RPM/DVD recipe path.
 - [x] Move the canonical Fedora ISO filename, SHA256, checksum URL, and torrent/download metadata into the Fedora recipes rather than variant TOML.
-- [x] Decide whether `distro-variants/ralph/01Boot.toml` should gain its own explicit `rootfs_source` block.
-
-Recommended Ralph decision:
-
-- make Ralph explicit once the Fedora path works for Levitate, so the source policy is inspectable and not inherited implicitly
 
 Exit criteria:
 
 - Levitate no longer points at Rocky metadata
-- Ralph's ownership is explicit, either as an intentional explicit source block or an intentional documented inheritance choice
 
 ## Phase 3: Remove Rocky-Specific CLI and Diagnostics
 
@@ -196,7 +186,6 @@ Out-of-scope unless explicitly chosen:
 - [x] Canonical Fedora preseed is idempotent after trust-marker creation.
 - [x] Stage 01 source output is non-legacy and policy-clean.
 - [x] The builder no longer requires Rocky-branded CLI commands for the default Fedora path.
-- [x] Any Ralph source-path choice is explicit and documented.
 - [x] Docs and migration index point at the new canonical Fedora document.
 
 ## Residual Notes
@@ -217,5 +206,4 @@ This migration is done when all of the following are true:
 
 - Levitate Stage 01 uses Fedora Server DVD metadata through a neutral source-policy path.
 - The canonical builder path no longer requires Rocky-branded Rust types, recipe defines, commands, or diagnostics.
-- Ralph's source-path ownership is explicit.
 - The default Stage 01 source path is reproducible and policy-clean.

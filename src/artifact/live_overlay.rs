@@ -1,8 +1,8 @@
 //! Shared live overlay builders.
 //!
 //! This module provides:
-//! - OpenRC live overlay generation (AcornOS, IuppiterOS style)
-//! - Systemd live overlay generation (LevitateOS, RalphOS style)
+//! - OpenRC live overlay generation (AcornOS style)
+//! - Systemd live overlay generation (LevitateOS style)
 
 use anyhow::{Context, Result};
 use std::fs;
@@ -17,14 +17,14 @@ use crate::copy_dir_recursive;
 pub enum InittabVariant {
     /// Desktop: 6 VTYs + serial console with autologin (AcornOS).
     DesktopWithSerial,
-    /// Headless appliance: serial console only (IuppiterOS).
+    /// Headless appliance: serial console only.
     SerialOnly,
 }
 
 /// Configuration for creating an OpenRC live overlay.
 #[derive(Debug)]
 pub struct LiveOverlayConfig<'a> {
-    /// OS display name (e.g., "AcornOS", "IuppiterOS").
+    /// OS display name (e.g., "AcornOS").
     pub os_name: &'a str,
     /// Which inittab variant to generate.
     pub inittab: InittabVariant,
@@ -37,7 +37,7 @@ pub struct LiveOverlayConfig<'a> {
 /// Configuration for creating a systemd live overlay.
 #[derive(Debug)]
 pub struct SystemdLiveOverlayConfig<'a> {
-    /// OS display name (e.g., "LevitateOS", "RalphOS").
+    /// OS display name (e.g., "LevitateOS").
     pub os_name: &'a str,
     /// Optional override for `/etc/issue`.
     pub issue_message: Option<&'a str>,

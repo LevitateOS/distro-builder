@@ -46,8 +46,6 @@ pub fn linux(
             match base_dir.file_name().and_then(|s| s.to_str()).unwrap_or("") {
                 "leviso" => "levitate",
                 "AcornOS" => "acorn",
-                "IuppiterOS" => "iuppiter",
-                "RalphOS" => "ralph",
                 other => other,
             },
         )

@@ -9,7 +9,7 @@ X                                                                         X
 X  THIS TRACK IS CANCELLED.                                               X
 X                                                                         X
 X  The repository is keeping the current A/B model instead of migrating   X
-X  LevitateOS/RalphOS/AcornOS/IuppiterOS to `bootc`.                      X
+X  LevitateOS/AcornOS to `bootc`.                               X
 X                                                                         X
 X  Do not start new `bootc` implementation work from this document.       X
 X                                                                         X
@@ -21,8 +21,8 @@ The repo will keep its current A/B runtime/update model as the canonical directi
 
 Reason:
 
-- `bootc` may fit the Levitate/Ralph family, but it is not justified as the universal backend for all variants.
-- AcornOS and IuppiterOS are Alpine/OpenRC/musl/EROFS-shaped and should not be forced into a Fedora/systemd-shaped migration by default.
+- `bootc` may fit the LevitateOS family, but it is not justified as the universal backend for all variants.
+- AcornOS is Alpine/OpenRC/musl/EROFS-shaped and should not be forced into a Fedora/systemd-shaped migration by default.
 - A repo-wide runtime/update model matters more than switching to `bootc` for only part of the variant set.
 
 ## What This Means

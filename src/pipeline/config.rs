@@ -258,14 +258,6 @@ fn live_tools_runtime_action_from_contract(
             }
             LiveToolsRuntimeAction::ApkPackages { packages }
         }
-        RuntimeActionContract::IuppiterDarPayload { target } => {
-            LiveToolsRuntimeAction::IuppiterDarPayload {
-                target: target
-                    .as_deref()
-                    .map(|value| normalize_string(value, "target"))
-                    .transpose()?,
-            }
-        }
         RuntimeActionContract::InstallModePayload {
             interactive_shell,
             ux_docs_frontend,

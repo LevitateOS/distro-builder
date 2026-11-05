@@ -19,7 +19,7 @@ pub trait DiskImageConfig {
     /// Hostname to write to /etc/hostname.
     fn hostname(&self) -> &str;
 
-    /// Boot entry filename (e.g., "iuppiter.conf").
+    /// Boot entry filename (e.g., "acorn.conf").
     fn boot_entry_filename(&self) -> &str;
 
     /// Boot entry content for systemd-boot (loader/entries/*.conf).

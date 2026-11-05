@@ -1,4 +1,4 @@
-// Fedora Server 43 DVD rootfs source producer for Levitate/Ralph.
+// Fedora Server 43 DVD rootfs source producer for LevitateOS.
 //
 // Rule boundary (strict):
 // - This recipe never downloads/re-downloads the Fedora Server DVD in stage builds.

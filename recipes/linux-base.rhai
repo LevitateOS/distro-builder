@@ -38,12 +38,6 @@ fn _normalize_kernel_target(target) {
     if normalized == "acorn" || normalized == "acornos" {
         return "acorn";
     }
-    if normalized == "iuppiter" || normalized == "iuppiteros" {
-        return "iuppiter";
-    }
-    if normalized == "ralph" || normalized == "ralphos" {
-        return "ralph";
-    }
     ""
 }
 
@@ -79,22 +73,6 @@ fn _kernel_spec_or_throw(build_dir, kconfig_path) {
             version: "6.19",
             sha256: "303079a8250b8f381f82b03f90463d12ac98d4f6b149b761ea75af1323521357",
             localversion: "-acorn",
-            module_install_path: "/usr/lib/modules",
-        };
-    }
-    if target == "iuppiter" {
-        return #{
-            version: "6.12.71",
-            sha256: "143e8bc76cc41f831b51aa5e75819bed55bed41f299d35922820f1d2d2b02600",
-            localversion: "-iuppiter",
-            module_install_path: "/usr/lib/modules",
-        };
-    }
-    if target == "ralph" {
-        return #{
-            version: "6.12.71",
-            sha256: "143e8bc76cc41f831b51aa5e75819bed55bed41f299d35922820f1d2d2b02600",
-            localversion: "-ralph",
             module_install_path: "/usr/lib/modules",
         };
     }

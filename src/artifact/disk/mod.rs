@@ -4,7 +4,7 @@
 //! without requiring root privileges. Distros implement `DiskImageConfig`
 //! to customize rootfs preparation, boot entries, and services.
 //!
-//! Used by both leviso (LevitateOS → qcow2) and IuppiterOS (→ raw .img).
+//! Supports qcow2 and raw .img disk images for distribution builders.
 
 pub mod assembly;
 pub mod helpers;

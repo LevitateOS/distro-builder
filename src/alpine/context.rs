@@ -2,8 +2,7 @@
 //!
 //! Provides paths needed to build Alpine-based system images.
 //!
-//! Both AcornOS and IuppiterOS use musl libc and Alpine rootfs sources,
-//! so the context is identical.
+//! AcornOS uses musl libc and Alpine rootfs sources.
 
 use anyhow::Result;
 use std::path::{Path, PathBuf};

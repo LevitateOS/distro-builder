@@ -573,9 +573,7 @@ Acceptance:
 - [x] Remove `default_iso_path()` as a canonical `DistroContext` contract in `testing/install-tests/src/distro/mod.rs`.
 - [x] Replace per-distro hardcoded `s01-boot` ISO paths in:
   `testing/install-tests/src/distro/levitate.rs`,
-  `testing/install-tests/src/distro/ralph.rs`,
   `testing/install-tests/src/distro/acorn.rs`,
-  `testing/install-tests/src/distro/iuppiter.rs`.
 - [x] Make `testing/install-tests/src/qemu/session.rs` consume explicitly resolved scenario artifacts instead of calling `ctx.default_iso_path()`.
 - [x] Update `testing/install-tests/src/bin/stages.rs` so the internal semantics are scenario-first even if `--stage` remains as a compatibility flag.
 - [x] Replace `xtask` stage-native testing/boot routing in:

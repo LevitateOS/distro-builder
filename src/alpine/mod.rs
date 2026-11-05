@@ -1,4 +1,4 @@
-//! Alpine Linux shared infrastructure for AcornOS and IuppiterOS.
+//! Alpine Linux shared infrastructure for AcornOS.
 //!
 //! This module contains code shared between both Alpine-based distributions.
 //! Functions accept path parameters or parameterized strings to remain

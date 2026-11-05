@@ -7,24 +7,12 @@
 // consume it through non-legacy rootfs_source wiring.
 // Stage builds never download/redownload Alpine assets.
 
-fn _work_root(build_dir) {
-    dirname(dirname(build_dir))
-}
-
 fn _downloads_dir(build_dir) {
     let parent = dirname(build_dir);
     if basename(parent) == "rootfs-source-provider" {
         return join_path(dirname(parent), "downloads");
     }
     join_path(parent, "downloads")
-}
-
-fn _default_profile(build_dir) {
-    let distro = basename(_work_root(build_dir)).to_lower();
-    if distro == "acorn" {
-        return "acorn";
-    }
-    "iuppiter"
 }
 
 let ctx = #{
@@ -38,7 +26,7 @@ let ctx = #{
     iso_preseed_path: join_path(_downloads_dir(BUILD_DIR), "alpine-extended-3.23.2-x86_64.iso"),
     iso_sha256: "8d50854936dba58e7616ac3bfa07ad67dac0347305fec1cba6d288cf5df1577d",
     name: "alpine-live-source-rootfs",
-    profile: _default_profile(BUILD_DIR),
+    profile: "acorn",
     release_branch: "v3.23",
     rootfs_path: "",
     rootfs_recipe_version: "alpine-live-source-v5",
@@ -136,12 +124,7 @@ fn _profile_packages(profile) {
                "musl-locales musl-locales-lang";
     }
 
-    // Default profile is iuppiter.
-    "alpine-base busybox openrc openrc-init " +
-    "openssh openssh-server util-linux e2fsprogs dosfstools " +
-    "systemd-boot " +
-    "iproute2 iputils dhcpcd less grep findutils " +
-    "musl-locales musl-locales-lang"
+    throw "Unsupported Alpine live source profile '" + profile + "'. Use profile 'acorn'.";
 }
 
 fn _network_interfaces() {

@@ -305,7 +305,6 @@ They must not be copied into per-variant tree layout as a second canonical owner
 | Current path | Target path |
 |---|---|
 | `acorn/profile/live-overlay/**` | `acorn/ring2/overlays/live/**` |
-| `iuppiter/profile/live-overlay/**` | `iuppiter/ring2/overlays/live/**` |
 
 ### Shared Mapping
 
@@ -420,17 +419,14 @@ no longer point at root-level paths.
 Current variant-specific overlay declarations include:
 
 - `distro-variants/acorn/profile/live-overlay`
-- `distro-variants/iuppiter/profile/live-overlay`
 
 Those declarations should move to:
 
 - `distro-variants/acorn/ring2/overlays/live`
-- `distro-variants/iuppiter/ring2/overlays/live`
 
 Code and tests that must follow:
 
 - `testing/install-tests/src/distro/acorn.rs`
-- `testing/install-tests/src/distro/iuppiter.rs`
 - any builder/runtime code or docs that still mention `profile/live-overlay`
 
 ### 6. Scenario config readers should stop bypassing the contract loader
@@ -552,7 +548,6 @@ Also, the variant-specific distro files still hardcode compile-time overlay
 paths:
 
 - `testing/install-tests/src/distro/acorn.rs`
-- `testing/install-tests/src/distro/iuppiter.rs`
 
 via `include_str!(...)` pointing at:
 
@@ -800,11 +795,10 @@ Goal:
 
 Required work:
 
-- move `acorn` and `iuppiter` overlay directories
+- move `acorn` overlay directories
 - update ring2 manifest values
 - update compile-time `include_str!` paths in:
   - `testing/install-tests/src/distro/acorn.rs`
-  - `testing/install-tests/src/distro/iuppiter.rs`
 - update any user-facing diagnostics that still mention `profile/live-overlay`
 
 Why late:
@@ -907,8 +901,6 @@ Scope:
 - all active variants:
   - `levitate`
   - `acorn`
-  - `ralph`
-  - `iuppiter`
 - manifest discovery code
 - manifest-focused tests
 
@@ -963,7 +955,6 @@ Goal:
 Scope:
 
 - `acorn`
-- `iuppiter`
 - overlay declarations
 - install-test hardcoded paths
 

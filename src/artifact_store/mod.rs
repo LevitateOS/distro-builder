@@ -763,8 +763,6 @@ pub fn central_output_dir_for_distro(base_dir: &Path) -> PathBuf {
     let output_name = match distro_name {
         "leviso" => "levitate",
         "AcornOS" => "acorn",
-        "IuppiterOS" => "iuppiter",
-        "RalphOS" => "ralph",
         other => other,
     };
     repo_root

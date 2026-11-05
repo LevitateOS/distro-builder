@@ -6,7 +6,7 @@ use crate::contracts::kernel::KernelInstallConfig;
 
 /// Configuration for a specific distribution.
 ///
-/// Implemented by leviso for LevitateOS, AcornOS, and IuppiterOS.
+/// Implemented by leviso for LevitateOS and AcornOS.
 /// This trait provides distro-specific constants and behavior.
 pub trait DistroConfig: KernelInstallConfig {
     /// OS name for display (e.g., "LevitateOS", "AcornOS").
@@ -33,7 +33,7 @@ pub trait DistroConfig: KernelInstallConfig {
 pub enum PackageManager {
     /// RPM (used by LevitateOS)
     Rpm,
-    /// APK (used by AcornOS, IuppiterOS / Alpine Linux)
+    /// APK (used by AcornOS / Alpine Linux)
     Apk,
 }
 
@@ -42,7 +42,7 @@ pub enum PackageManager {
 pub enum InitSystem {
     /// systemd (used by LevitateOS)
     Systemd,
-    /// OpenRC (used by AcornOS, IuppiterOS)
+    /// OpenRC (used by AcornOS)
     OpenRC,
 }
 

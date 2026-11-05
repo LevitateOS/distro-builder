@@ -11,7 +11,7 @@ use super::context::BuildContext;
 ///
 /// # Arguments
 /// * `ctx` - Build context
-/// * `host_comment` - Comment for the key (e.g., "root@acornos" or "root@iuppiter")
+/// * `host_comment` - Comment for the key (e.g., "root@acornos")
 /// * `sshd_settings` - Key/value pairs to set in sshd_config
 pub fn setup_ssh(
     ctx: &BuildContext,

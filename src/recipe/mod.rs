@@ -293,33 +293,12 @@ pub fn run_recipe_phase_json_with_defines(
     defines: &[(&str, &str)],
     recipes_path: Option<&Path>,
 ) -> Result<serde_json::Value> {
-    run_recipe_phase_json_with_defines_and_env(
-        recipe_bin,
-        phase,
-        recipe_path,
-        build_dir,
-        defines,
-        &[],
-        recipes_path,
-    )
-}
-
-pub fn run_recipe_phase_json_with_defines_and_env(
-    recipe_bin: &Path,
-    phase: &str,
-    recipe_path: &Path,
-    build_dir: &Path,
-    defines: &[(&str, &str)],
-    envs: &[(&str, &str)],
-    recipes_path: Option<&Path>,
-) -> Result<serde_json::Value> {
     run_recipe_phase_json_impl(
         recipe_bin,
         phase,
         recipe_path,
         build_dir,
         defines,
-        envs,
         recipes_path,
         &[],
         false,
@@ -344,10 +323,9 @@ pub fn run_recipe_phase_json_with_inputs(
         recipe_path,
         build_dir,
         defines,
-        &[],
         recipes_path,
         inputs,
-        true,
+        false,
     )
 }
 
@@ -357,10 +335,9 @@ fn run_recipe_phase_json_impl(
     recipe_path: &Path,
     build_dir: &Path,
     defines: &[(&str, &str)],
-    envs: &[(&str, &str)],
     recipes_path: Option<&Path>,
     inputs: &[(&str, &Path)],
-    persist: bool,
+    force_acquire: bool,
 ) -> Result<serde_json::Value> {
     eprintln!("  Running recipe: {}", recipe_path.display());
     eprintln!("    Phase: {}", phase);
@@ -384,10 +361,9 @@ fn run_recipe_phase_json_impl(
         .arg(build_dir)
         .arg("--json-output")
         .arg(&json_path);
-    if persist {
-        cmd.arg("--state-dir").arg(build_dir.join("recipe-state"));
-    } else {
-        cmd.arg("--no-persist-state");
+    cmd.arg("--state-dir").arg(build_dir.join("recipe-state"));
+    if force_acquire {
+        cmd.args(["--force-acquire", "--force-install"]);
     }
     for (name, path) in inputs {
         let path = path.to_str().context("recipe input path is not UTF-8")?;
@@ -400,10 +376,6 @@ fn run_recipe_phase_json_impl(
 
     for (key, value) in defines {
         cmd.arg("--define").arg(format!("{}={}", key, value));
-    }
-
-    for (key, value) in envs {
-        cmd.env(key, value);
     }
 
     #[cfg(unix)]

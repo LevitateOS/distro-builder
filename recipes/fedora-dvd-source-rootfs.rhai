@@ -1,91 +1,22 @@
-// Fedora Server 43 DVD rootfs source producer for LevitateOS.
-//
-// Rule boundary (strict):
-// - This recipe never downloads/re-downloads the Fedora Server DVD in stage builds.
-// - It requires a preseeded ISO in the canonical sibling downloads cache.
-// - It requires a trust marker and verifies cached/staged content before use.
-//
+// Materialize a rootfs from the explicit immutable iso input.
+const RECIPE_API = 2;
 let deps = ["dvd-source-deps"];
-
-fn _work_root(build_dir) {
-    dirname(dirname(build_dir))
-}
-
-fn _downloads_dir(build_dir) {
-    let parent = dirname(build_dir);
-    if basename(parent) == "rootfs-source-provider" {
-        return join_path(dirname(parent), "downloads");
-    }
-    join_path(parent, "downloads")
-}
-
 import "sources/fedora.rhai" as source;
 let assets = source::facts();
-
 let ctx = #{
-    outputs: #{},
-    checksum_url: assets.checksum_url,
-    description: "Fedora Server 43 DVD rootfs source producer",
-    iso_contents_path: join_path(BUILD_DIR, "iso-contents"),
-    iso_name: assets.iso_name,
-    iso_path: join_path(BUILD_DIR, assets.iso_name),
     name: "fedora-dvd-source-rootfs",
-    preseed_iso_path: join_path(_downloads_dir(BUILD_DIR), assets.iso_name),
-    rootfs_path: join_path(BUILD_DIR, "rootfs-minimal"),
+    description: "Fedora Server 43 DVD rootfs source producer",
+    iso_contents_path: join_path(RUNTIME.paths.build, "iso-contents"),
+    iso_name: assets.iso_name,
+    iso_path: join_path(RUNTIME.paths.inputs, "iso"),
+    rootfs_path: join_path(RUNTIME.paths.output, "rootfs"),
     rootfs_recipe_version: "fedora-dvd-source-v2",
     sha256: assets.sha256,
-    torrent_url: assets.torrent_url,
-    trust_dir: _downloads_dir(BUILD_DIR),
 };
 
-fn _ensure_build_iso_present(iso_path, preseed_iso) {
-    if is_file(iso_path) {
-        return;
-    }
-    if preseed_iso == "" || !is_file(preseed_iso) {
-        return;
-    }
-    let dst_dir = dirname(iso_path);
-    mkdir(dst_dir);
-    copy_file_reflink(preseed_iso, iso_path);
-    log("Staged Fedora ISO from trusted preseed cache: " + preseed_iso);
-}
-
-fn _require_preseeded_iso(iso_path, preseed_iso) {
-    _ensure_build_iso_present(iso_path, preseed_iso);
-    if is_file(iso_path) {
-        return;
-    }
-    throw "Fedora ISO is missing at '" + iso_path + "'.\n" +
-          "Stage builds forbid download/redownload.\n" +
-          "Pre-seed canonical cache at '" + preseed_iso + "', then run once with FORCE_TRUST_CREATE=1.";
-}
-
-fn _ensure_trusted_iso(build_dir, iso_path, sha256, trust_dir_define, trust_iso_path) {
-    let trust_dir = if trust_dir_define == "" { build_dir } else { trust_dir_define };
-    let trust_target = if trust_iso_path == "" { iso_path } else { trust_iso_path };
-    mkdir(trust_dir);
-    if source::marker_is_valid(trust_dir, trust_target, sha256) {
-        verify_sha256(trust_target, sha256);
-        if iso_path != trust_target {
-            verify_sha256(iso_path, sha256);
-        }
-        log("Fedora preseed and staged ISO content verified.");
-        return;
-    }
-
-    let create_trust = trim(shell_output("printf '%s' \"${FORCE_TRUST_CREATE:-0}\"")) == "1";
-    if !create_trust {
-        throw "Fedora ISO trust marker missing/stale for '" + trust_target + "'.\n" +
-              "Run explicit trusted preseed acquisition, or use FORCE_TRUST_CREATE=1 to verify the current content.";
-    }
-
-    log("Creating Fedora ISO trust marker (one-time full checksum)...");
-    verify_sha256(trust_target, sha256);
-    if iso_path != trust_target {
-        verify_sha256(iso_path, sha256);
-    }
-    source::write_marker(trust_dir, trust_target, sha256);
+fn _verify_iso(ctx) {
+    if !is_file(ctx.iso_path) { throw "Import the named iso output from explicit preseed acquisition"; }
+    verify_sha256(ctx.iso_path, ctx.sha256);
 }
 
 fn _find_rpm_path(iso_contents, pkg_name) {
@@ -102,37 +33,33 @@ fn _extract_rpm_into_rootfs(rootfs, rpm_path) {
 }
 
 fn is_acquired(ctx) {
-    let iso = join_path(BUILD_DIR, ctx.iso_name);
-    _require_preseeded_iso(iso, ctx.preseed_iso_path);
-    _ensure_trusted_iso(BUILD_DIR, iso, ctx.sha256, ctx.trust_dir, ctx.preseed_iso_path);
+    let iso = ctx.iso_path;
+    _verify_iso(ctx);
 
     ctx.iso_path = iso;
-    ctx.iso_contents_path = join_path(BUILD_DIR, "iso-contents");
-    ctx.rootfs_path = join_path(BUILD_DIR, "rootfs-minimal");
-    ctx
+    ctx.iso_contents_path = join_path(ctx.runtime.paths.build, "iso-contents");
+    ready(ctx)
 }
 
 fn acquire(ctx) {
-    mkdir(BUILD_DIR);
-    let iso = join_path(BUILD_DIR, ctx.iso_name);
-    _require_preseeded_iso(iso, ctx.preseed_iso_path);
-    _ensure_trusted_iso(BUILD_DIR, iso, ctx.sha256, ctx.trust_dir, ctx.preseed_iso_path);
+    mkdir(ctx.runtime.paths.build);
+    let iso = ctx.iso_path;
+    _verify_iso(ctx);
 
     ctx.iso_path = iso;
-    ctx.iso_contents_path = join_path(BUILD_DIR, "iso-contents");
-    ctx.rootfs_path = join_path(BUILD_DIR, "rootfs-minimal");
+    ctx.iso_contents_path = join_path(ctx.runtime.paths.build, "iso-contents");
     ctx
 }
 
 fn is_built(ctx) {
-    let rootfs = join_path(BUILD_DIR, "rootfs-minimal");
+    let rootfs = ctx.rootfs_path;
     if !is_dir(join_path(rootfs, "usr")) {
-        throw "rootfs not built";
+        return needs_work(ctx, "rootfs not built");
     }
     let marker_path = join_path(rootfs, ".source-rootfs.recipe-version");
     let marker = trim(read_file_or_empty(marker_path));
     if marker != ctx.rootfs_recipe_version {
-        throw "rootfs recipe version mismatch (" + marker + " != " + ctx.rootfs_recipe_version + ")";
+        return needs_work(ctx, "rootfs recipe version mismatch (" + marker + " != " + ctx.rootfs_recipe_version + ")");
     }
     let required_paths = [
         "usr/lib/systemd/systemd",
@@ -184,23 +111,22 @@ fn is_built(ctx) {
     for rel in required_paths {
         let full = join_path(rootfs, rel);
         if !exists(full) {
-            throw "minimal source rootfs incomplete: missing " + rel;
+            return needs_work(ctx, "minimal source rootfs incomplete: missing " + rel);
         }
     }
 
-    ctx.iso_path = join_path(BUILD_DIR, ctx.iso_name);
-    ctx.iso_contents_path = join_path(BUILD_DIR, "iso-contents");
+    ctx.iso_path = join_path(ctx.runtime.paths.inputs, "iso");
+    ctx.iso_contents_path = join_path(ctx.runtime.paths.build, "iso-contents");
     ctx.rootfs_path = rootfs;
-    ctx
+    ready(ctx)
 }
 
 fn build(ctx) {
-    let iso = join_path(BUILD_DIR, ctx.iso_name);
-    let iso_contents = join_path(BUILD_DIR, "iso-contents");
-    let rootfs = join_path(BUILD_DIR, "rootfs-minimal");
+    let iso = ctx.iso_path;
+    let iso_contents = join_path(ctx.runtime.paths.build, "iso-contents");
+    let rootfs = ctx.rootfs_path;
 
-    _require_preseeded_iso(iso, ctx.preseed_iso_path);
-    _ensure_trusted_iso(BUILD_DIR, iso, ctx.sha256, ctx.trust_dir, ctx.preseed_iso_path);
+    _verify_iso(ctx);
 
     if !is_dir(join_path(iso_contents, "Packages")) && !is_dir(join_path(iso_contents, "os/Packages")) {
         log("Extracting Fedora ISO contents...");
@@ -216,7 +142,7 @@ fn build(ctx) {
 
     // Build the source rootfs from ISO RPMs via recipe-native extraction.
     // No dnf/microdnf/yum in stage builds.
-    shell("chmod -R u+rwX " + rootfs + " >/dev/null 2>&1 || true");
+    if is_dir(rootfs) { shell("chmod -R u+rwX " + rootfs); }
     shell("rm -rf " + rootfs);
     mkdir(rootfs);
     let packages = [
@@ -326,7 +252,7 @@ fn build(ctx) {
         _extract_rpm_into_rootfs(rootfs, rpm_path);
         // RPM payloads can carry restrictive directory modes; keep tree writable
         // so subsequent package extraction can add files into existing dirs.
-        shell("chmod -R u+rwX " + rootfs + " >/dev/null 2>&1 || true");
+        if is_dir(rootfs) { shell("chmod -R u+rwX " + rootfs); }
     }
 
     // Normalize expected producer source directories even when package layout is sparse.
@@ -472,7 +398,7 @@ fn build(ctx) {
     // Keep rootfs recipe outputs deterministic and lean.
     shell("rm -rf '" + join_path(rootfs, "var/cache") + "' '" + join_path(rootfs, "var/log") + "'");
     shell("mkdir -p '" + join_path(rootfs, "var/cache") + "' '" + join_path(rootfs, "var/log") + "' '" + join_path(rootfs, "var/log/audit") + "'");
-    shell("chmod 0700 '" + join_path(rootfs, "var/log/audit") + "' >/dev/null 2>&1 || true");
+    chmod(join_path(rootfs, "var/log/audit"), 0o700);
     write_file(join_path(rootfs, ".source-rootfs.recipe-version"), ctx.rootfs_recipe_version + "\n");
 
     ctx.iso_path = iso;
@@ -482,28 +408,33 @@ fn build(ctx) {
 }
 
 fn is_installed(ctx) {
-    // Force deterministic refresh of the stage source every invocation.
-    // Returning a throwing path here ensures the recipe executes acquire/build/install
-    // instead of returning early on cached state.
-    throw "forced reinstall";
+    let status = is_built(ctx);
+    ctx = status.ctx;
+    if status.status != "ready" { return status; }
+    ctx.outputs = #{rootfs: ctx.rootfs_path};
+    ready(ctx)
 }
 
 fn install(ctx) {
-    let rootfs = join_path(BUILD_DIR, "rootfs-minimal");
-    if !is_dir(join_path(rootfs, "usr")) {
-        throw "cannot install: rootfs missing at " + rootfs;
-    }
-    ctx.rootfs_path = rootfs;
+    let status = is_built(ctx);
+    if status.status != "ready" { throw status.reason; }
+    ctx = status.ctx;
     ctx.outputs = #{rootfs: ctx.rootfs_path};
     ctx
 }
 
 fn cleanup(ctx, reason) {
     if reason == "manual" {
-        let marker = join_path(join_path(BUILD_DIR, "rootfs-minimal"), ".source-rootfs.recipe-version");
+        let marker = join_path(ctx.rootfs_path, ".source-rootfs.recipe-version");
         if is_file(marker) {
             rm(marker);
         }
     }
+    ctx
+}
+
+fn remove(ctx) {
+    if is_dir(ctx.rootfs_path) { rm(ctx.rootfs_path); }
+    ctx.outputs = #{};
     ctx
 }

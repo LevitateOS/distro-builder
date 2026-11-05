@@ -2,10 +2,7 @@ use anyhow::{bail, Context, Result};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use super::{
-    find_recipe, recipe_work_dir, run_recipe_phase_json_with_defines_and_env,
-    run_recipe_phase_json_with_inputs,
-};
+use super::{find_recipe, recipe_work_dir, run_recipe_phase_json_with_inputs};
 
 #[derive(Debug, Clone)]
 pub struct RootfsSourceRecipeSpec {
@@ -105,22 +102,18 @@ pub fn preseed_rootfs_source(
     })?;
     let recipe_bin =
         find_recipe(repo_root).context("resolving recipe binary for rootfs source preseed")?;
-    let envs = if refresh {
-        vec![("ROOTFS_SOURCE_FORCE_REFRESH", "1")]
-    } else {
-        Vec::new()
-    };
-    let ctx = run_recipe_phase_json_with_defines_and_env(
+    let ctx = super::run_recipe_phase_json_impl(
         &recipe_bin.path,
         "install",
         &recipe_path,
         &build_dir,
         &[],
-        &envs,
         recipe_path.parent(),
+        &[],
+        refresh,
     )
     .with_context(|| format!("preseeding rootfs source via '{}'", recipe_path.display()))?;
-    required_outputs
+    let outputs: BTreeMap<String, PathBuf> = required_outputs
         .iter()
         .map(|(name, kind)| {
             let path = match kind {
@@ -132,23 +125,66 @@ pub fn preseed_rootfs_source(
             Ok((name.clone(), path))
         })
         .collect::<Result<_>>()
-        .with_context(|| format!("preseed recipe '{}' output contract", recipe_path.display()))
+        .with_context(|| format!("preseed recipe '{}' output contract", recipe_path.display()))?;
+    save_preseed_outputs(&build_dir, &recipe_path, &outputs)?;
+    Ok(outputs)
 }
 
-/// Compatibility convenience for callers explicitly requesting the DVD ISO.
-pub fn preseed_rootfs_source_dvd(
-    repo_root: &Path,
-    distro_id: &str,
-    recipe_script: &Path,
-    refresh: bool,
-) -> Result<PathBuf> {
-    preseed_rootfs_source(
-        repo_root,
-        distro_id,
-        recipe_script,
-        &BTreeMap::from([("iso".into(), distro_contract::RecipeOutputKind::File)]),
-        refresh,
-    )?
-    .remove("iso")
-    .context("preseed did not report its iso output")
+#[derive(serde::Serialize, serde::Deserialize)]
+struct PreseedOutputs {
+    recipe: PathBuf,
+    outputs: BTreeMap<String, PathBuf>,
+}
+
+fn save_preseed_outputs(
+    work: &Path,
+    recipe: &Path,
+    outputs: &BTreeMap<String, PathBuf>,
+) -> Result<()> {
+    let record = PreseedOutputs {
+        recipe: recipe.canonicalize()?,
+        outputs: outputs.clone(),
+    };
+    let mut file = tempfile::NamedTempFile::new_in(work)?;
+    serde_json::to_writer(file.as_file_mut(), &record)?;
+    file.as_file().sync_all()?;
+    file.persist(work.join("rootfs-source-inputs.json"))?;
+    std::fs::File::open(work)?.sync_all()?;
+    Ok(())
+}
+
+pub(crate) fn preseed_inputs(
+    repo: &Path,
+    distro: &str,
+    recipe: &Path,
+    required: &BTreeMap<String, distro_contract::RecipeOutputKind>,
+) -> Result<BTreeMap<String, PathBuf>> {
+    let record_path = recipe_work_dir(repo, distro)?.join("rootfs-source-inputs.json");
+    let bytes = std::fs::read(&record_path).with_context(|| {
+        format!(
+            "no declared rootfs source inputs at {}; run explicit preseed acquisition",
+            record_path.display()
+        )
+    })?;
+    let record: PreseedOutputs = serde_json::from_slice(&bytes)?;
+    if record.recipe != recipe.canonicalize()? {
+        bail!("rootfs preseed inputs belong to a different recipe");
+    }
+    for (name, kind) in required {
+        let path = record
+            .outputs
+            .get(name)
+            .with_context(|| format!("preseed output {name} is missing"))?;
+        let valid = match kind {
+            distro_contract::RecipeOutputKind::File => path.is_file(),
+            distro_contract::RecipeOutputKind::Directory => path.is_dir(),
+        };
+        if !valid {
+            bail!(
+                "preseed output {name} is unavailable or has the wrong kind: {}",
+                path.display()
+            );
+        }
+    }
+    Ok(record.outputs)
 }

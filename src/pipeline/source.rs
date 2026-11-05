@@ -69,13 +69,27 @@ pub(crate) fn materialize_source_rootfs(
             build_dir.display()
         )
     })?;
+    let mut inputs = source.inputs.clone();
+    if let Some(preseed_recipe) = &source.preseed_recipe_script {
+        let acquired = crate::recipe::rootfs_source::preseed_inputs(
+            repo_root,
+            distro_id,
+            preseed_recipe,
+            &source.preseed_outputs,
+        )?;
+        for (name, path) in acquired {
+            if inputs.insert(name.clone(), path).is_some() {
+                anyhow::bail!("duplicate rootfs input {name}");
+            }
+        }
+    }
     let source_rootfs_dir = materialize_rootfs_from_recipe(
         repo_root,
         &build_dir,
         &RootfsSourceRecipeSpec {
             recipe_script: source.recipe_script.clone(),
             defines: source.defines.clone(),
-            inputs: source.inputs.clone(),
+            inputs,
         },
     )
     .with_context(|| format!("materializing rootfs source recipe output for '{distro_id}'"))?;

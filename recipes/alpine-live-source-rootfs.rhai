@@ -1,93 +1,31 @@
-// Alpine live rootfs source producer for OpenRC variants.
-//
-// Produces:
-// - BUILD_DIR/rootfs
-//
-// This recipe intentionally keeps all outputs under BUILD_DIR so live boot can
-// consume it through non-legacy rootfs_source wiring.
-// Stage builds never download/redownload Alpine assets.
-
-fn _downloads_dir(build_dir) {
-    let parent = dirname(build_dir);
-    if basename(parent) == "rootfs-source-provider" {
-        return join_path(dirname(parent), "downloads");
-    }
-    join_path(parent, "downloads")
-}
-
+// Materialize one rootfs from explicit immutable iso/apk_tools inputs.
+const RECIPE_API = 2;
 import "sources/alpine.rhai" as source;
 let assets = source::facts();
-
 let ctx = #{
-    outputs: #{},
+    name: "alpine-live-source-rootfs",
+    description: "Alpine live rootfs source producer",
     alpine_version: assets.iso_version,
     apk_static_path: "",
-    apk_tools_preseed_path: join_path(_downloads_dir(BUILD_DIR), assets.apk_tools_name),
+    apk_tools_path: join_path(RUNTIME.paths.inputs, "apk_tools"),
     apk_tools_sha256: assets.apk_tools_sha256,
     apk_tools_version: assets.apk_tools_version,
-    description: "Alpine live rootfs source producer",
-    iso_path: "",
-    iso_preseed_path: join_path(_downloads_dir(BUILD_DIR), assets.iso_name),
+    iso_path: join_path(RUNTIME.paths.inputs, "iso"),
     iso_sha256: assets.iso_sha256,
     iso_name: assets.iso_name,
     apk_tools_name: assets.apk_tools_name,
-    name: "alpine-live-source-rootfs",
     profile: "acorn",
     release_branch: assets.release_branch,
-    rootfs_path: "",
+    rootfs_path: join_path(RUNTIME.paths.output, "rootfs"),
     rootfs_recipe_version: "alpine-live-source-v6",
-    trust_dir: _downloads_dir(BUILD_DIR),
 };
 
-fn _ensure_parent_dir(path) {
-    let parent = dirname(path);
-    if parent != "" {
-        mkdir(parent);
+fn _verify_inputs(ctx) {
+    if !is_file(ctx.iso_path) || !is_file(ctx.apk_tools_path) {
+        throw "Import the named iso and apk_tools outputs from explicit preseed acquisition";
     }
-}
-
-fn _ensure_build_asset_present(build_path, preseed_path, label) {
-    if is_file(build_path) {
-        return;
-    }
-    if preseed_path == "" || !is_file(preseed_path) {
-        return;
-    }
-    _ensure_parent_dir(build_path);
-    copy_file_reflink(preseed_path, build_path);
-    log("Staged " + label + " from trusted preseed cache: " + preseed_path);
-}
-
-fn _require_preseeded_asset(build_path, preseed_path, label, remediation) {
-    _ensure_build_asset_present(build_path, preseed_path, label);
-    if is_file(build_path) {
-        return;
-    }
-    throw label + " is missing at '" + build_path + "'.\n" +
-          "Stage builds forbid download/redownload.\n" +
-          "Pre-seed canonical cache at '" + preseed_path + "'.\n" +
-          remediation;
-}
-
-fn _require_trusted_preseed_assets(ctx, remediation) {
-    if !is_file(ctx.iso_preseed_path) {
-        throw "Alpine preseed ISO missing at '" + ctx.iso_preseed_path + "'.\n" + remediation;
-    }
-    if !is_file(ctx.apk_tools_preseed_path) {
-        throw "Alpine preseed apk-tools package missing at '" + ctx.apk_tools_preseed_path + "'.\n" + remediation;
-    }
-    verify_sha256(ctx.iso_preseed_path, ctx.iso_sha256);
-    verify_sha256(ctx.apk_tools_preseed_path, ctx.apk_tools_sha256);
-    if !source::marker_is_valid(
-        ctx.trust_dir,
-        ctx.iso_preseed_path,
-        ctx.iso_sha256,
-        ctx.apk_tools_preseed_path,
-        ctx.apk_tools_sha256
-    ) {
-        throw "Alpine rootfs source trust marker missing/stale under '" + ctx.trust_dir + "'.\n" +
-              remediation;
-    }
+    verify_sha256(ctx.iso_path, ctx.iso_sha256);
+    verify_sha256(ctx.apk_tools_path, ctx.apk_tools_sha256);
 }
 
 fn _profile_packages(profile) {
@@ -229,74 +167,33 @@ fn _ensure_openrc_live_source_completeness(rootfs) {
 }
 
 fn is_acquired(ctx) {
-    let remediation = "Run 'cargo run -p distro-builder --bin distro-builder -- artifact preseed-rootfs-source " + ctx.profile + " --refresh'";
-    let iso_path = join_path(BUILD_DIR, ctx.iso_name);
-    _require_trusted_preseed_assets(ctx, remediation);
-    _require_preseeded_asset(iso_path, ctx.iso_preseed_path, "Alpine ISO", remediation);
-    verify_sha256(iso_path, ctx.iso_sha256);
-    let apk_tools_dir = join_path(BUILD_DIR, "apk-tools");
-    let apk_tools_pkg = join_path(apk_tools_dir, ctx.apk_tools_name);
-    _require_preseeded_asset(
-        apk_tools_pkg,
-        ctx.apk_tools_preseed_path,
-        "apk-tools-static package",
-        remediation
-    );
-    verify_sha256(apk_tools_pkg, ctx.apk_tools_sha256);
-    let apk_static = _resolve_apk_static(apk_tools_dir);
-
-    if apk_static == "" {
-        throw "apk.static not acquired under " + apk_tools_dir;
-    }
-
-    ctx.iso_path = iso_path;
+    _verify_inputs(ctx);
+    let tools = join_path(ctx.runtime.paths.build, "apk-tools");
+    let apk_static = _resolve_apk_static(tools);
+    if apk_static == "" { return needs_work(ctx, "apk.static has not been extracted"); }
     ctx.apk_static_path = apk_static;
-    ctx
+    ready(ctx)
 }
 
 fn acquire(ctx) {
-    let remediation = "Run 'cargo run -p distro-builder --bin distro-builder -- artifact preseed-rootfs-source " + ctx.profile + " --refresh'";
-    mkdir(BUILD_DIR);
-    let iso_dest = join_path(BUILD_DIR, ctx.iso_name);
-    _require_trusted_preseed_assets(ctx, remediation);
-    _require_preseeded_asset(iso_dest, ctx.iso_preseed_path, "Alpine ISO", remediation);
-    verify_sha256(iso_dest, ctx.iso_sha256);
-
-    let apk_tools_dir = join_path(BUILD_DIR, "apk-tools");
-    let apk_tools_pkg = join_path(apk_tools_dir, ctx.apk_tools_name);
-    let apk_static = _resolve_apk_static(apk_tools_dir);
-    mkdir(apk_tools_dir);
-
-    _require_preseeded_asset(
-        apk_tools_pkg,
-        ctx.apk_tools_preseed_path,
-        "apk-tools-static package",
-        remediation
-    );
-    verify_sha256(apk_tools_pkg, ctx.apk_tools_sha256);
-
-    if apk_static == "" {
-        log("Extracting apk-tools-static...");
-        ctx.apk_static_path = _extract_apk_tools_static(apk_tools_pkg, apk_tools_dir);
-    } else {
-        ctx.apk_static_path = apk_static;
-    }
-
-    ctx.iso_path = iso_dest;
+    _verify_inputs(ctx);
+    let tools = join_path(ctx.runtime.paths.build, "apk-tools");
+    mkdir(tools);
+    ctx.apk_static_path = _extract_apk_tools_static(ctx.apk_tools_path, tools);
     ctx
 }
 
 fn is_built(ctx) {
-    let rootfs = join_path(BUILD_DIR, "rootfs");
+    let rootfs = ctx.rootfs_path;
     if !_rootfs_valid(rootfs, ctx.rootfs_recipe_version) {
-        throw "rootfs not built";
+        return needs_work(ctx, "rootfs not built");
     }
     ctx.rootfs_path = rootfs;
-    ctx
+    ready(ctx)
 }
 
 fn build(ctx) {
-    let iso_contents = join_path(BUILD_DIR, "iso-contents");
+    let iso_contents = join_path(ctx.runtime.paths.build, "iso-contents");
     if !is_dir(join_path(iso_contents, "apks")) {
         log("Extracting Alpine ISO...");
         shell("rm -rf '" + iso_contents + "'");
@@ -319,7 +216,7 @@ fn build(ctx) {
         throw "Alpine ISO extraction missing apks dir under " + iso_contents;
     }
 
-    let rootfs = join_path(BUILD_DIR, "rootfs");
+    let rootfs = ctx.rootfs_path;
     if is_dir(rootfs) {
         // Normalize readability on cached rootfs before validity checks.
         _normalize_rootfs_permissions(rootfs, "cached rootfs preflight");
@@ -365,17 +262,17 @@ fn build(ctx) {
 }
 
 fn is_installed(ctx) {
-    let rootfs = join_path(BUILD_DIR, "rootfs");
+    let rootfs = ctx.rootfs_path;
     if !_rootfs_valid(rootfs, ctx.rootfs_recipe_version) {
-        throw "rootfs not installed";
+        return needs_work(ctx, "rootfs not installed");
     }
     ctx.rootfs_path = rootfs;
     ctx.outputs = #{rootfs: ctx.rootfs_path};
-    ctx
+    ready(ctx)
 }
 
 fn install(ctx) {
-    let rootfs = join_path(BUILD_DIR, "rootfs");
+    let rootfs = ctx.rootfs_path;
     if !_rootfs_valid(rootfs, ctx.rootfs_recipe_version) {
         throw "cannot install: rootfs missing or stale at " + rootfs;
     }
@@ -386,11 +283,17 @@ fn install(ctx) {
 
 fn cleanup(ctx, reason) {
     if reason == "manual" {
-        let rootfs = join_path(BUILD_DIR, "rootfs");
+        let rootfs = ctx.rootfs_path;
         let marker = _rootfs_marker(rootfs);
         if is_file(marker) {
             rm(marker);
         }
     }
+    ctx
+}
+
+fn remove(ctx) {
+    if is_dir(ctx.rootfs_path) { rm(ctx.rootfs_path); }
+    ctx.outputs = #{};
     ctx
 }

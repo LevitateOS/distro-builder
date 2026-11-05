@@ -1,34 +1,12 @@
 // Shared kernel source facts, path guards, and release checks. No lifecycle hooks.
 
-fn normalize_target(target) {
-    let normalized = target.to_lower();
-    if normalized == "levitate" || normalized == "leviso" {
-        return "levitate";
-    }
-    if normalized == "acorn" || normalized == "acornos" {
-        return "acorn";
-    }
-    ""
+fn target(value) {
+    if value == "levitate" || value == "acorn" { return value; }
+    throw "KERNEL_TARGET must be levitate or acorn";
 }
 
-fn target(build_dir, kconfig_path) {
-    let build_target = normalize_target(basename(dirname(build_dir)));
-    if build_target != "" {
-        return build_target;
-    }
-
-    if kconfig_path != "" {
-        let kconfig_target = normalize_target(basename(dirname(kconfig_path)));
-        if kconfig_target != "" {
-            return kconfig_target;
-        }
-    }
-
-    throw "Cannot determine kernel target from build dir '" + build_dir + "'";
-}
-
-fn source_spec(build_dir, kconfig_path) {
-    let target = target(build_dir, kconfig_path);
+fn source_spec(selected_target) {
+    let target = target(selected_target);
 
     if target == "levitate" {
         return #{
@@ -50,8 +28,8 @@ fn source_spec(build_dir, kconfig_path) {
     throw "No kernel recipe spec registered for target '" + target + "'";
 }
 
-fn apply_source_spec(ctx, build_dir, kconfig_path) {
-    let spec = source_spec(build_dir, kconfig_path);
+fn apply_source_spec(ctx) {
+    let spec = source_spec(ctx.target);
     let major = spec.version.split(".")[0];
     ctx.description = "Linux kernel (" + spec.version + ")";
     ctx.kernel_localversion = spec.localversion;
@@ -60,12 +38,13 @@ fn apply_source_spec(ctx, build_dir, kconfig_path) {
     ctx.source_dir_name = "linux-" + spec.version;
     ctx.tarball_filename = "linux-" + spec.version + ".tar.xz";
     ctx.tarball_url = "https://cdn.kernel.org/pub/linux/kernel/v" + major + ".x/" + ctx.tarball_filename;
+    ctx.source_path = join_path(ctx.runtime.paths.build, ctx.source_dir_name);
     ctx
 }
 
 fn artifact_root(kernel_artifact_root) {
     if kernel_artifact_root == "" {
-        throw "KERNEL_ARTIFACT_ROOT is required";
+        throw "kernel artifact root is required";
     }
     if basename(kernel_artifact_root) == "" || kernel_artifact_root == "." ||
        kernel_artifact_root.contains("*") || kernel_artifact_root.contains("?") ||
@@ -99,7 +78,7 @@ fn release(build_dir, expected_version, expected_localversion) {
 
 // Product names are shared by source and prebuilt kernel lifecycles. Rust
 // selects/validates named products; it does not reconstruct package paths.
-fn output_paths(kernel_root, release, module_install_path, source_path) {
+fn output_paths(kernel_root, release, module_install_path) {
     let modules = if module_install_path == "/usr/lib/modules" {
         "staging/usr/lib/modules/"
     } else if module_install_path == "/lib/modules" {
@@ -107,8 +86,7 @@ fn output_paths(kernel_root, release, module_install_path, source_path) {
     } else {
         throw "unsupported module installation path: " + module_install_path;
     };
-    let outputs = #{kernel: join_path(kernel_root, "staging/boot/vmlinuz"),
+    let outputs = #{bundle: kernel_root, kernel: join_path(kernel_root, "staging/boot/vmlinuz"),
                     modules: join_path(kernel_root, modules + release)};
-    if source_path != "" { outputs.source = source_path; }
     outputs
 }

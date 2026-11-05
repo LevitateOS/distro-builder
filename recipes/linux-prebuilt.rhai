@@ -1,27 +1,14 @@
-// Linux kernel - prebuilt artifact recipe (separate from source-build flow)
-//
-// This recipe installs prebuilt kernel artifacts from GitHub Releases into
-// KERNEL_ARTIFACT_ROOT, preserving the canonical layout expected by builder:
-// - kernel-build/include/config/kernel.release
-// - staging/boot/vmlinuz
-// - staging/{usr/lib,lib}/modules/<kernel.release>/
-//
-// Required defines:
-// - KERNEL_ARTIFACT_ROOT
-//
-// Orchestrators may also provide:
-// - KERNEL_KCONFIG_PATH (used only to resolve the canonical distro target)
-// - KERNEL_FORCE_REBUILD=1 (takes precedence over the legacy environment variable)
-//
-// Optional env:
-// - KERNEL_FORCE_REBUILD=1 forces re-download/reinstall
-
+// Kernel products use the owned target tree; imports select configuration explicitly.
+const RECIPE_API = 2;
 import "kernel/metadata.rhai" as kernel;
 
 let build_deps = [];
 
 let ctx = #{
     outputs: #{},
+    target: KERNEL_TARGET,
+    kconfig_path: join_path(RUNTIME.paths.inputs, "kconfig"),
+    kconfig_fragments: join_path(RUNTIME.paths.inputs, "kconfig_fragments"),
     build_dir: "",
     description: "Prebuilt Linux kernel artifacts",
     kernel_localversion: "",
@@ -33,16 +20,8 @@ let ctx = #{
     tarball_url: "",
 };
 
-// Invocation options are refreshed on load, independently of persisted state.
-ctx.kconfig_path = if is_def_var("KERNEL_KCONFIG_PATH") { KERNEL_KCONFIG_PATH } else { "" };
-ctx.force_rebuild = if is_def_var("KERNEL_FORCE_REBUILD") {
-    trim(KERNEL_FORCE_REBUILD) == "1"
-} else {
-    trim(env("KERNEL_FORCE_REBUILD")) == "1"
-};
-
-fn _prebuilt_spec_or_throw(build_dir, kconfig_path) {
-    let target = kernel::target(build_dir, kconfig_path);
+fn _prebuilt_spec_or_throw(selected_target) {
+    let target = kernel::target(selected_target);
 
     // Pinned release facts are independent of the source recipe's current version.
     // Keep this table explicit so callers do not discover URLs/hashes manually.
@@ -82,8 +61,8 @@ fn _resolve_asset_url(spec) {
     "https://github.com/" + spec.repo + "/releases/download/" + spec.release_tag + "/" + spec.asset_name
 }
 
-fn _apply_prebuilt_spec(ctx, build_dir, kconfig_path) {
-    let spec = _prebuilt_spec_or_throw(build_dir, kconfig_path);
+fn _apply_prebuilt_spec(ctx) {
+    let spec = _prebuilt_spec_or_throw(ctx.target);
     ctx.build_dir = "";
     ctx.description = "Prebuilt Linux kernel artifacts (" + spec.expected_release + ")";
     ctx.kernel_localversion = spec.localversion;
@@ -133,18 +112,19 @@ fn _payload_context(ctx, kernel_root, release, module_install_path) {
     ctx.kernel_version = release;
     ctx.build_dir = join_path(kernel_root, "kernel-build");
     ctx.source_path = "";
-    ctx.outputs = kernel::output_paths(kernel_root, release, module_install_path, "");
+    ctx.outputs = kernel::output_paths(kernel_root, release, module_install_path);
     ctx
 }
 
 fn is_acquired(ctx) {
-    ctx = _apply_prebuilt_spec(ctx, BUILD_DIR, ctx.kconfig_path);
-    let spec = _prebuilt_spec_or_throw(BUILD_DIR, ctx.kconfig_path);
-    if ctx.force_rebuild {
-        throw "forced prebuilt refresh requested";
-    }
+    ctx = _apply_prebuilt_spec(ctx);
+    let spec = _prebuilt_spec_or_throw(ctx.target);
 
-    let kernel_root = kernel::artifact_root(KERNEL_ARTIFACT_ROOT);
+    let kernel_root = kernel::artifact_root(ctx.runtime.paths.target);
+    if !is_file(join_path(kernel_root, "kernel-build/include/config/kernel.release")) ||
+       !is_file(join_path(kernel_root, "staging/boot/vmlinuz")) {
+        return needs_work(ctx, "kernel payload is missing");
+    }
     let rel = _validate_payload_or_throw(
         kernel_root,
         spec.expected_release,
@@ -153,22 +133,28 @@ fn is_acquired(ctx) {
         spec.module_install_path
     );
 
-    _payload_context(ctx, kernel_root, rel, spec.module_install_path)
+    ready(_payload_context(ctx, kernel_root, rel, spec.module_install_path))
 }
 
 fn acquire(ctx) {
-    ctx = _apply_prebuilt_spec(ctx, BUILD_DIR, ctx.kconfig_path);
-    let spec = _prebuilt_spec_or_throw(BUILD_DIR, ctx.kconfig_path);
-    let kernel_root = kernel::artifact_root(KERNEL_ARTIFACT_ROOT);
+    ctx = _apply_prebuilt_spec(ctx);
+    let spec = _prebuilt_spec_or_throw(ctx.target);
+    let kernel_root = kernel::artifact_root(ctx.runtime.paths.target);
     let asset_url = _resolve_asset_url(spec);
 
-    mkdir(BUILD_DIR);
-    let tarball_path = join_path(BUILD_DIR, spec.asset_name);
-    let extract_tmp = kernel_root + ".prebuilt.tmp";
+    mkdir(ctx.runtime.paths.build);
+    let tarball_path = join_path(ctx.runtime.paths.build, spec.asset_name);
+    let extract_tmp = join_path(ctx.runtime.paths.build, "prebuilt.tmp");
 
     log("Downloading prebuilt kernel artifact...");
     log("  URL: " + asset_url);
-    download(asset_url, tarball_path, spec.asset_sha256);
+    let supplied_archive = join_path(ctx.runtime.paths.inputs, "kernel_archive");
+    if is_file(supplied_archive) {
+        verify_sha256(supplied_archive, spec.asset_sha256);
+        copy_file(supplied_archive, tarball_path);
+    } else {
+        download(asset_url, tarball_path, spec.asset_sha256);
+    }
 
     log("Extracting prebuilt kernel artifact...");
     rm(extract_tmp);
@@ -183,8 +169,14 @@ fn acquire(ctx) {
         spec.module_install_path
     );
 
-    rm(kernel_root);
-    mv(extract_tmp, kernel_root);
+    // Publication happens only after the successful hook checkpoint. Keep the
+    // previous coordinator-owned publication intact if this copy fails.
+    for entry in ["kernel-build", "staging"] {
+        let path = join_path(kernel_root, entry);
+        if exists(path) { rm(path); }
+    }
+    copy_tree_contents(extract_tmp, kernel_root);
+    rm(extract_tmp);
 
     // Validate again in canonical destination for explicit diagnostics.
     _validate_payload_or_throw(
@@ -202,12 +194,13 @@ fn acquire(ctx) {
 }
 
 fn is_built(ctx) {
-    ctx = _apply_prebuilt_spec(ctx, BUILD_DIR, ctx.kconfig_path);
-    let spec = _prebuilt_spec_or_throw(BUILD_DIR, ctx.kconfig_path);
-    if ctx.force_rebuild {
-        throw "forced prebuilt refresh requested";
+    ctx = _apply_prebuilt_spec(ctx);
+    let spec = _prebuilt_spec_or_throw(ctx.target);
+    let kernel_root = kernel::artifact_root(ctx.runtime.paths.target);
+    if !is_file(join_path(kernel_root, "kernel-build/include/config/kernel.release")) ||
+       !is_file(join_path(kernel_root, "staging/boot/vmlinuz")) {
+        return needs_work(ctx, "kernel payload is missing");
     }
-    let kernel_root = kernel::artifact_root(KERNEL_ARTIFACT_ROOT);
     let rel = _validate_payload_or_throw(
         kernel_root,
         spec.expected_release,
@@ -215,14 +208,14 @@ fn is_built(ctx) {
         spec.localversion,
         spec.module_install_path
     );
-    _payload_context(ctx, kernel_root, rel, spec.module_install_path)
+    ready(_payload_context(ctx, kernel_root, rel, spec.module_install_path))
 }
 
 fn build(ctx) {
     // Prebuilt recipe has no compile step; treat build as validated no-op.
-    ctx = _apply_prebuilt_spec(ctx, BUILD_DIR, ctx.kconfig_path);
-    let spec = _prebuilt_spec_or_throw(BUILD_DIR, ctx.kconfig_path);
-    let kernel_root = kernel::artifact_root(KERNEL_ARTIFACT_ROOT);
+    ctx = _apply_prebuilt_spec(ctx);
+    let spec = _prebuilt_spec_or_throw(ctx.target);
+    let kernel_root = kernel::artifact_root(ctx.runtime.paths.target);
     let rel = _validate_payload_or_throw(
         kernel_root,
         spec.expected_release,
@@ -234,12 +227,13 @@ fn build(ctx) {
 }
 
 fn is_installed(ctx) {
-    ctx = _apply_prebuilt_spec(ctx, BUILD_DIR, ctx.kconfig_path);
-    let spec = _prebuilt_spec_or_throw(BUILD_DIR, ctx.kconfig_path);
-    if ctx.force_rebuild {
-        throw "forced prebuilt refresh requested";
+    ctx = _apply_prebuilt_spec(ctx);
+    let spec = _prebuilt_spec_or_throw(ctx.target);
+    let kernel_root = kernel::artifact_root(ctx.runtime.paths.target);
+    if !is_file(join_path(kernel_root, "kernel-build/include/config/kernel.release")) ||
+       !is_file(join_path(kernel_root, "staging/boot/vmlinuz")) {
+        return needs_work(ctx, "kernel payload is missing");
     }
-    let kernel_root = kernel::artifact_root(KERNEL_ARTIFACT_ROOT);
     let rel = _validate_payload_or_throw(
         kernel_root,
         spec.expected_release,
@@ -247,14 +241,14 @@ fn is_installed(ctx) {
         spec.localversion,
         spec.module_install_path
     );
-    _payload_context(ctx, kernel_root, rel, spec.module_install_path)
+    ready(_payload_context(ctx, kernel_root, rel, spec.module_install_path))
 }
 
 fn install(ctx) {
     // Prebuilt recipe already installs in acquire; install is a validated no-op.
-    ctx = _apply_prebuilt_spec(ctx, BUILD_DIR, ctx.kconfig_path);
-    let spec = _prebuilt_spec_or_throw(BUILD_DIR, ctx.kconfig_path);
-    let kernel_root = kernel::artifact_root(KERNEL_ARTIFACT_ROOT);
+    ctx = _apply_prebuilt_spec(ctx);
+    let spec = _prebuilt_spec_or_throw(ctx.target);
+    let kernel_root = kernel::artifact_root(ctx.runtime.paths.target);
     let rel = _validate_payload_or_throw(
         kernel_root,
         spec.expected_release,
@@ -267,12 +261,11 @@ fn install(ctx) {
 
 fn cleanup(ctx, reason) {
     if reason == "auto.acquire.failure" {
-        let root = kernel::artifact_root(KERNEL_ARTIFACT_ROOT);
-        rm(root + ".prebuilt.tmp");
+        rm(join_path(ctx.runtime.paths.build, "prebuilt.tmp"));
     }
     // Remove downloaded prebuilt tarball after successful acquire.
     if reason == "auto.acquire.success" {
-        let tarball = join_path(BUILD_DIR, ctx.tarball_filename);
+        let tarball = join_path(ctx.runtime.paths.build, ctx.tarball_filename);
         if is_file(tarball) {
             rm(tarball);
         }
@@ -281,7 +274,7 @@ fn cleanup(ctx, reason) {
 }
 
 fn remove(ctx) {
-    let kernel_root = kernel::artifact_root(KERNEL_ARTIFACT_ROOT);
+    let kernel_root = kernel::artifact_root(ctx.runtime.paths.target);
     for name in ["kernel-build", "kernel-build.tmp", "staging", "staging.tmp"] {
         let path = join_path(kernel_root, name);
         if exists(path) {

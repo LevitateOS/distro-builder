@@ -1,13 +1,14 @@
-// Linux kernel source lifecycle for all supported targets.
-// Recipe-owned metadata and common checks live in kernel/metadata.rhai.
-// Orchestrators supply artifact/configuration paths and force policy.
-
+// Kernel products use the owned target tree; imports select configuration explicitly.
+const RECIPE_API = 2;
 import "kernel/metadata.rhai" as kernel;
 
 let build_deps = ["linux-deps"];
 
 let ctx = #{
     outputs: #{},
+    target: KERNEL_TARGET,
+    kconfig_path: join_path(RUNTIME.paths.inputs, "kconfig"),
+    kconfig_fragments: join_path(RUNTIME.paths.inputs, "kconfig_fragments"),
     build_dir: "",
     description: "Linux kernel",
     kernel_version: "?",
@@ -18,17 +19,6 @@ let ctx = #{
     source_path: "",
     tarball_filename: "",
     tarball_url: "",
-};
-
-ctx.source_path = "";
-ctx.build_dir = "";
-ctx.kconfig_path = if is_def_var("KERNEL_KCONFIG_PATH") { KERNEL_KCONFIG_PATH } else { "" };
-
-// Recompute invocation policy on load even if the legacy executor saved ctx.
-ctx.force_rebuild = if is_def_var("KERNEL_FORCE_REBUILD") {
-    trim(KERNEL_FORCE_REBUILD) == "1"
-} else {
-    trim(env("KERNEL_FORCE_REBUILD")) == "1"
 };
 
 // AUTOFIX_PROMPT: This recipe is the SSOT for all kernel builds. Keep distros in parity.
@@ -104,19 +94,22 @@ fn _kernel_make_env_prefix() {
 /// This supports both:
 /// - a single <distro>/kconfig file
 /// - optional fragments in <distro>/kconfig.d/*.config (applied after kconfig)
-fn _apply_kconfig(src, build_dir, kconfig, kernel_localversion) {
+fn _kconfig_identity(kconfig, frag_dir) {
+    let files = [kconfig];
+    if is_dir(frag_dir) {
+        for file in glob_list(join_path(frag_dir, "*.config")) { files.push(file); }
+    }
+    trim(exec_output("sha256sum", files))
+}
+
+fn _apply_kconfig(src, build_dir, kconfig, frag_dir, kernel_localversion) {
     let config_file = join_path(build_dir, ".config");
     let hash_file = join_path(build_dir, ".config.kconfig-hash");
 
     // Hash kconfig + fragments so we can avoid re-seeding defconfig on every run.
-    let kconfig_dir = dirname(kconfig);
-    let frag_dir = join_path(kconfig_dir, "kconfig.d");
     let fragments = if is_dir(frag_dir) { glob_list(join_path(frag_dir, "*.config")) } else { [] };
 
-    let hash_cmd = " (sha256sum " + kconfig + " 2>/dev/null; " +
-        "for f in " + join_path(frag_dir, "*.config") + "; do [ -f \"$f\" ] && sha256sum \"$f\"; done) " +
-        " | sha256sum | cut -d' ' -f1 ";
-    let kconfig_hash = trim(shell_output(hash_cmd));
+    let kconfig_hash = _kconfig_identity(kconfig, frag_dir);
     let cached_hash = trim(read_file_or_empty(hash_file));
 
     if cached_hash != kconfig_hash || !is_file(config_file) {
@@ -183,22 +176,27 @@ fn _cleanup_modules(staging, version, module_install_path) {
 // === ACQUIRE ===
 
 fn is_acquired(ctx) {
-    ctx = kernel::apply_source_spec(ctx, BUILD_DIR, ctx.kconfig_path);
-    let tarball_source = join_path(BUILD_DIR, ctx.source_dir_name);
+    ctx = kernel::apply_source_spec(ctx);
+    let tarball_source = join_path(ctx.runtime.paths.build, ctx.source_dir_name);
     if is_file(join_path(tarball_source, "Makefile")) {
         ctx.source_path = tarball_source;
-        return ctx;
+        return ready(ctx);
     }
-    throw "linux source not acquired";
+    return needs_work(ctx, "linux source not acquired");
 }
 
 fn acquire(ctx) {
-    ctx = kernel::apply_source_spec(ctx, BUILD_DIR, ctx.kconfig_path);
-    mkdir(BUILD_DIR);
-    let spec = kernel::source_spec(BUILD_DIR, ctx.kconfig_path);
+    ctx = kernel::apply_source_spec(ctx);
+    mkdir(ctx.runtime.paths.build);
+    let spec = kernel::source_spec(ctx.target);
 
-    let tarball_path = join_path(BUILD_DIR, ctx.tarball_filename);
-    let tarball_source = join_path(BUILD_DIR, ctx.source_dir_name);
+    let tarball_path = join_path(ctx.runtime.paths.build, ctx.tarball_filename);
+    let supplied_archive = join_path(ctx.runtime.paths.inputs, "kernel_archive");
+    if is_file(supplied_archive) {
+        verify_sha256(supplied_archive, spec.sha256);
+        copy_file(supplied_archive, tarball_path);
+    }
+    let tarball_source = join_path(ctx.runtime.paths.build, ctx.source_dir_name);
 
     if !is_file(join_path(tarball_source, "Makefile")) {
         if !is_file(tarball_path) {
@@ -209,7 +207,7 @@ fn acquire(ctx) {
         }
 
         log("Extracting kernel source...");
-        extract(tarball_path, BUILD_DIR);
+        extract(tarball_path, ctx.runtime.paths.build);
     }
 
     if is_file(join_path(tarball_source, "Makefile")) {
@@ -221,39 +219,42 @@ fn acquire(ctx) {
     throw "Failed to acquire linux source from cdn.kernel.org";
 }
 
-
 // === BUILD / INSTALL ===
 
 fn is_built(ctx) {
-    ctx = kernel::apply_source_spec(ctx, BUILD_DIR, ctx.kconfig_path);
-    let spec = kernel::source_spec(BUILD_DIR, ctx.kconfig_path);
-    let kernel_root = kernel::artifact_root(KERNEL_ARTIFACT_ROOT);
+    ctx = kernel::apply_source_spec(ctx);
+    let spec = kernel::source_spec(ctx.target);
+    let kernel_root = kernel::artifact_root(ctx.runtime.paths.target);
     let build_dir = join_path(kernel_root, "kernel-build");
     let bzimage = join_path(build_dir, "arch/x86/boot/bzImage");
 
-    if ctx.force_rebuild {
-        throw "force rebuild requested";
-    }
-
     if !is_file(bzimage) {
-        throw "kernel not built";
+        return needs_work(ctx, "kernel not built");
     }
 
+    if !is_file(join_path(build_dir, "include/config/kernel.release")) {
+        return needs_work(ctx, "kernel release metadata is missing");
+    }
+    if !is_file(ctx.kconfig_path) { throw "kconfig input is missing"; }
+    let identity = _kconfig_identity(ctx.kconfig_path, ctx.kconfig_fragments);
+    if trim(read_file_or_empty(join_path(build_dir, ".config.kconfig-hash"))) != identity {
+        return needs_work(ctx, "kernel configuration changed");
+    }
     let rel = kernel::release(build_dir, spec.version, spec.localversion);
     ctx.kernel_version = rel;
     ctx.build_dir = build_dir;
-    ctx
+    ready(ctx)
 }
 
 fn build(ctx) {
-    ctx = kernel::apply_source_spec(ctx, BUILD_DIR, ctx.kconfig_path);
-    let spec = kernel::source_spec(BUILD_DIR, ctx.kconfig_path);
+    ctx = kernel::apply_source_spec(ctx);
+    let spec = kernel::source_spec(ctx.target);
     let kconfig = if ctx.kconfig_path == "" {
-        throw "KERNEL_KCONFIG_PATH is required";
+        throw "kconfig input is required";
     } else {
         ctx.kconfig_path
     };
-    let kernel_root = kernel::artifact_root(KERNEL_ARTIFACT_ROOT);
+    let kernel_root = kernel::artifact_root(ctx.runtime.paths.target);
     let build_dir = join_path(kernel_root, "kernel-build");
     let build_dir_tmp = join_path(kernel_root, "kernel-build.tmp");
 
@@ -271,9 +272,9 @@ fn build(ctx) {
     log("  Output: " + build_dir);
 
     try {
-        _apply_kconfig(ctx.source_path, build_dir_tmp, kconfig, spec.localversion);
+        _apply_kconfig(ctx.source_path, build_dir_tmp, kconfig, ctx.kconfig_fragments, spec.localversion);
 
-        let jobs = trim(shell_output("nproc"));
+        let jobs = ctx.runtime.options.jobs.to_string();
         shell(_kernel_make_env_prefix() + "make -C " + ctx.source_path + " O=" + build_dir_tmp + " -j" + jobs);
     } catch (e) {
         // Best-effort cleanup of temp outputs.
@@ -291,17 +292,22 @@ fn build(ctx) {
 }
 
 fn is_installed(ctx) {
-    ctx = kernel::apply_source_spec(ctx, BUILD_DIR, ctx.kconfig_path);
-    let spec = kernel::source_spec(BUILD_DIR, ctx.kconfig_path);
-    let kernel_root = kernel::artifact_root(KERNEL_ARTIFACT_ROOT);
+    ctx = kernel::apply_source_spec(ctx);
+    let spec = kernel::source_spec(ctx.target);
+    let kernel_root = kernel::artifact_root(ctx.runtime.paths.target);
     let staging = join_path(kernel_root, "staging");
     let vmlinuz = join_path(staging, "boot/vmlinuz");
     let build_dir = join_path(kernel_root, "kernel-build");
+    if !is_file(join_path(build_dir, "include/config/kernel.release")) {
+        return needs_work(ctx, "kernel release metadata is missing");
+    }
+    if !is_file(ctx.kconfig_path) { throw "kconfig input is missing"; }
+    let identity = _kconfig_identity(ctx.kconfig_path, ctx.kconfig_fragments);
+    if trim(read_file_or_empty(join_path(build_dir, ".config.kconfig-hash"))) != identity {
+        return needs_work(ctx, "kernel configuration changed");
+    }
     let rel = kernel::release(build_dir, spec.version, spec.localversion);
 
-    if ctx.force_rebuild {
-        throw "force rebuild requested";
-    }
 
     let modules = if spec.module_install_path == "/usr/lib/modules" {
         join_path(staging, "usr/lib/modules/" + rel)
@@ -310,24 +316,24 @@ fn is_installed(ctx) {
     };
 
     if !is_file(vmlinuz) {
-        throw "vmlinuz not installed";
+        return needs_work(ctx, "vmlinuz not installed");
     }
     if !is_dir(modules) {
-        throw "modules not installed";
+        return needs_work(ctx, "modules not installed");
     }
 
     ctx.kernel_version = rel;
     ctx.build_dir = build_dir;
-    let source = join_path(BUILD_DIR, ctx.source_dir_name);
+    let source = join_path(ctx.runtime.paths.build, ctx.source_dir_name);
     ctx.source_path = if is_file(join_path(source, "Makefile")) { source } else { "" };
-    ctx.outputs = kernel::output_paths(kernel_root, ctx.kernel_version, spec.module_install_path, ctx.source_path);
-    ctx
+    ctx.outputs = kernel::output_paths(kernel_root, ctx.kernel_version, spec.module_install_path);
+    ready(ctx)
 }
 
 fn install(ctx) {
-    ctx = kernel::apply_source_spec(ctx, BUILD_DIR, ctx.kconfig_path);
-    let spec = kernel::source_spec(BUILD_DIR, ctx.kconfig_path);
-    let kernel_root = kernel::artifact_root(KERNEL_ARTIFACT_ROOT);
+    ctx = kernel::apply_source_spec(ctx);
+    let spec = kernel::source_spec(ctx.target);
+    let kernel_root = kernel::artifact_root(ctx.runtime.paths.target);
     let staging = join_path(kernel_root, "staging");
     let staging_tmp = join_path(kernel_root, "staging.tmp");
     let build_dir = ctx.build_dir;
@@ -379,7 +385,7 @@ fn install(ctx) {
     shell("rm -rf '" + staging + "'");
     shell("mv '" + staging_tmp + "' '" + staging + "'");
 
-    ctx.outputs = kernel::output_paths(kernel_root, ctx.kernel_version, spec.module_install_path, ctx.source_path);
+    ctx.outputs = kernel::output_paths(kernel_root, ctx.kernel_version, spec.module_install_path);
     ctx
 }
 
@@ -403,14 +409,14 @@ fn cleanup(ctx, reason) {
     }
     // Manual cleanup can run before any acquire/build hook initializes ctx.
     if ctx.source_dir_name == "" || ctx.tarball_filename == "" {
-        ctx = kernel::apply_source_spec(ctx, BUILD_DIR, "");
+        ctx = kernel::apply_source_spec(ctx);
     }
     if !ctx.source_dir_name.starts_with("linux-") ||
        ctx.tarball_filename != ctx.source_dir_name + ".tar.xz" {
         throw "unsafe kernel cleanup: source and archive names do not identify a kernel source";
     }
-    let downloaded = _kernel_cleanup_path(BUILD_DIR, ctx.source_dir_name);
-    let tarball = _kernel_cleanup_path(BUILD_DIR, ctx.tarball_filename);
+    let downloaded = _kernel_cleanup_path(ctx.runtime.paths.build, ctx.source_dir_name);
+    let tarball = _kernel_cleanup_path(ctx.runtime.paths.build, ctx.tarball_filename);
 
     // IMPORTANT:
     // - After acquire succeeds, the extracted source is still needed for build/install.
@@ -454,7 +460,7 @@ fn cleanup(ctx, reason) {
 
 
 fn remove(ctx) {
-    let kernel_root = kernel::artifact_root(KERNEL_ARTIFACT_ROOT);
+    let kernel_root = kernel::artifact_root(ctx.runtime.paths.target);
     for name in ["kernel-build", "kernel-build.tmp", "staging", "staging.tmp"] {
         let path = join_path(kernel_root, name);
         if exists(path) {

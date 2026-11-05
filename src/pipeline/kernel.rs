@@ -43,21 +43,26 @@ pub fn check_kernel_installed_with_recipe(
         })?
         .to_path_buf();
     let build_dir = work_dir_for_distro(repo_root, distro_id)?;
-    let kernel_kconfig_path = variant_paths
-        .build_host_declared_path(&spec.kernel_kconfig_path)
-        .to_string_lossy()
-        .to_string();
+    let kconfig = variant_paths.build_host_declared_path(&spec.kernel_kconfig_path);
+    let fragments = kconfig
+        .parent()
+        .context("kconfig has no parent")?
+        .join("kconfig.d");
 
     let recipe_bin = crate::recipe::find_recipe(repo_root)
         .context("Resolving recipe binary for build kernel")?;
-    let kernel_artifact_root = kernel_output_dir.to_string_lossy().to_string();
-    let defines = kernel_recipe_defines(&kernel_kconfig_path, &kernel_artifact_root);
-    crate::recipe::run_recipe_phase_json_with_defines(
+    let defines = [("KERNEL_TARGET", distro_id)];
+    let mut inputs: Vec<(&str, &Path)> = vec![("kconfig", &kconfig), ("target", kernel_output_dir)];
+    if fragments.is_dir() {
+        inputs.push(("kconfig_fragments", &fragments));
+    }
+    crate::recipe::run_recipe_phase_json_with_inputs(
         &recipe_bin.path,
         "isinstalled",
         &recipe_script,
         &build_dir,
         &defines,
+        &inputs,
         Some(&recipes_path),
     )
     .context("build kernel isinstalled check failed")?;
@@ -147,14 +152,4 @@ fn work_dir_for_distro(repo_root: &Path, distro_id: &str) -> Result<PathBuf> {
         )
     })?;
     Ok(build_dir)
-}
-
-fn kernel_recipe_defines<'a>(
-    kernel_kconfig_path: &'a str,
-    kernel_artifact_root: &'a str,
-) -> Vec<(&'a str, &'a str)> {
-    vec![
-        ("KERNEL_KCONFIG_PATH", kernel_kconfig_path),
-        ("KERNEL_ARTIFACT_ROOT", kernel_artifact_root),
-    ]
 }

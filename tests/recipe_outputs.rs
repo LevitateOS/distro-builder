@@ -137,3 +137,74 @@ fn real_cli_success_without_a_fresh_json_result_cannot_reuse_stale_context() {
     assert_eq!(std::fs::read(stale).unwrap(), old_result);
     assert_eq!(std::fs::read_dir(work).unwrap().count(), 1);
 }
+
+/// Consumes the executable produced by the separate real compiler scenario.
+/// No fake launcher or shell stub substitutes for the tool or Recipe.
+#[test]
+fn managed_recfstab_input_install_reuse_and_removal() {
+    use distro_builder::recipe::{find_recipe, run_recipe_phase_json_with_inputs};
+    use std::os::unix::fs::PermissionsExt;
+    let program =
+        std::path::PathBuf::from(std::env::var_os("RECFSTAB_PROGRAM").expect(
+            "build recfstab explicitly and set RECFSTAB_PROGRAM to its published executable",
+        ));
+    let original = std::fs::read(&program).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+    let recipe = repo.join("distro-builder/recipes/recfstab.rhai");
+    let binary = find_recipe(repo).unwrap();
+    let invoke = |phase| {
+        run_recipe_phase_json_with_inputs(
+            &binary.path,
+            phase,
+            &recipe,
+            dir.path(),
+            &[],
+            &[("program", program.as_path())],
+            None,
+        )
+        .unwrap()
+    };
+    let first = invoke("install");
+    let first_path = Path::new(first["outputs"]["program"].as_str().unwrap());
+    assert_eq!(std::fs::read(first_path).unwrap(), original);
+    assert_eq!(
+        std::fs::metadata(first_path).unwrap().permissions().mode() & 0o777,
+        0o755
+    );
+    let reused = invoke("isinstalled");
+    assert_eq!(
+        std::fs::read(reused["outputs"]["program"].as_str().unwrap()).unwrap(),
+        original
+    );
+    invoke("remove");
+    assert!(
+        run_recipe_phase_json_with_inputs(
+            &binary.path,
+            "isinstalled",
+            &recipe,
+            dir.path(),
+            &[],
+            &[("program", program.as_path())],
+            None,
+        )
+        .is_err(),
+        "removed tool must not remain ready"
+    );
+    let reinstalled = invoke("install");
+    assert_eq!(
+        std::fs::read(reinstalled["outputs"]["program"].as_str().unwrap()).unwrap(),
+        original
+    );
+    invoke("cleanup");
+    assert_eq!(
+        std::fs::read(&program).unwrap(),
+        original,
+        "consumer mutated source executable"
+    );
+    assert_eq!(
+        std::fs::read(first_path).unwrap(),
+        original,
+        "later invocation changed an earlier publication"
+    );
+}

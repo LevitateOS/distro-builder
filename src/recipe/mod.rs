@@ -313,6 +313,55 @@ pub fn run_recipe_phase_json_with_defines_and_env(
     envs: &[(&str, &str)],
     recipes_path: Option<&Path>,
 ) -> Result<serde_json::Value> {
+    run_recipe_phase_json_impl(
+        recipe_bin,
+        phase,
+        recipe_path,
+        build_dir,
+        defines,
+        envs,
+        recipes_path,
+        &[],
+        false,
+    )
+}
+
+/// Run a managed API 2 recipe with explicit read-only file/tree inputs. State
+/// belongs to this artifact work directory; returned outputs are published host
+/// paths, not worker paths or guesses under build_dir.
+pub fn run_recipe_phase_json_with_inputs(
+    recipe_bin: &Path,
+    phase: &str,
+    recipe_path: &Path,
+    build_dir: &Path,
+    defines: &[(&str, &str)],
+    inputs: &[(&str, &Path)],
+    recipes_path: Option<&Path>,
+) -> Result<serde_json::Value> {
+    run_recipe_phase_json_impl(
+        recipe_bin,
+        phase,
+        recipe_path,
+        build_dir,
+        defines,
+        &[],
+        recipes_path,
+        inputs,
+        true,
+    )
+}
+
+fn run_recipe_phase_json_impl(
+    recipe_bin: &Path,
+    phase: &str,
+    recipe_path: &Path,
+    build_dir: &Path,
+    defines: &[(&str, &str)],
+    envs: &[(&str, &str)],
+    recipes_path: Option<&Path>,
+    inputs: &[(&str, &Path)],
+    persist: bool,
+) -> Result<serde_json::Value> {
     eprintln!("  Running recipe: {}", recipe_path.display());
     eprintln!("    Phase: {}", phase);
     eprintln!("    Build dir: {}", build_dir.display());
@@ -333,9 +382,17 @@ pub fn run_recipe_phase_json_with_defines_and_env(
         .arg(recipe_path)
         .arg("--build-dir")
         .arg(build_dir)
-        .arg("--no-persist-ctx")
         .arg("--json-output")
         .arg(&json_path);
+    if persist {
+        cmd.arg("--state-dir").arg(build_dir.join("recipe-state"));
+    } else {
+        cmd.arg("--no-persist-state");
+    }
+    for (name, path) in inputs {
+        let path = path.to_str().context("recipe input path is not UTF-8")?;
+        cmd.arg("--input").arg(format!("{name}={path}"));
+    }
 
     if let Some(rp) = recipes_path {
         cmd.arg("--recipes-path").arg(rp);

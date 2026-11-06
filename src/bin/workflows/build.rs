@@ -106,7 +106,7 @@ pub(crate) fn build_one(distro_id: &str, product: BuildProduct) -> Result<()> {
             &crate::BuildRunMetadata {
                 run_id: run_id.to_string(),
                 distro_id: distro_id.to_string(),
-                target_kind: "release-product".to_string(),
+                target_kind: distro_builder::run_history::TARGET_KIND_RELEASE_PRODUCT.to_string(),
                 target_name: product.canonical.to_string(),
                 status: "building".to_string(),
                 created_at_utc: created_at_utc.clone(),
@@ -174,16 +174,16 @@ pub(crate) fn build_one(distro_id: &str, product: BuildProduct) -> Result<()> {
         let metadata_path = crate::run_history::run_manifest_path(&output_dir);
         let finished_at_utc = Some(now_utc_compact()?);
         let status = if build_result.is_ok() {
-            "success".to_string()
+            distro_builder::run_history::STATUS_SUCCESS.to_string()
         } else {
-            "failed".to_string()
+            distro_builder::run_history::STATUS_FAILED.to_string()
         };
         let metadata_result = crate::run_manifest::write_run_metadata(
             &metadata_path,
             &crate::BuildRunMetadata {
                 run_id: run_id.to_string(),
                 distro_id: distro_id.to_string(),
-                target_kind: "release-product".to_string(),
+                target_kind: distro_builder::run_history::TARGET_KIND_RELEASE_PRODUCT.to_string(),
                 target_name: product.canonical.to_string(),
                 status,
                 created_at_utc,

@@ -8,6 +8,32 @@ use anyhow::{bail, Context, Result};
 use serde::Deserialize;
 
 const RUN_MANIFEST_FILENAME: &str = "run-manifest.json";
+
+/// `status` of a finished, successful run.
+pub const STATUS_SUCCESS: &str = "success";
+/// `status` of a failed run.
+pub const STATUS_FAILED: &str = "failed";
+/// `target_kind` of a release product build.
+pub const TARGET_KIND_RELEASE_PRODUCT: &str = "release-product";
+
+/// `<repo>/.artifacts/out/<distro>`: everything built for one variant.
+pub fn distro_output_dir(repo_root: &Path, distro_id: &str) -> PathBuf {
+    repo_root.join(".artifacts").join("out").join(distro_id)
+}
+
+/// The runs of one release product, `<distro output>/releases/<product>`.
+pub fn release_product_dir(repo_root: &Path, distro_id: &str, product: &str) -> PathBuf {
+    distro_output_dir(repo_root, distro_id).join("releases").join(product)
+}
+
+/// The current kernel build of a variant.
+pub fn kernel_output_dir(repo_root: &Path, distro_id: &str) -> PathBuf {
+    repo_root
+        .join(".artifacts")
+        .join("kernel")
+        .join(distro_id)
+        .join("current")
+}
 const RUN_ID_SALT_BITS: u32 = 32;
 static RUN_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -17,18 +43,28 @@ pub struct RunMetadata {
     pub status: String,
     pub created_at_utc: String,
     pub finished_at_utc: Option<String>,
+    #[serde(default)]
+    pub target_kind: Option<String>,
+    #[serde(default)]
+    pub target_name: Option<String>,
+    #[serde(default)]
+    pub iso_path: Option<String>,
 }
 
-pub fn manifest_path(run_dir: &Path) -> PathBuf {
-    run_manifest_path(run_dir)
+/// The run manifest in `run_dir`, if there is one.
+pub fn read_run_manifest(run_dir: &Path) -> Result<Option<RunMetadata>> {
+    let path = run_manifest_path(run_dir);
+    if !path.is_file() {
+        return Ok(None);
+    }
+    let bytes = fs::read(&path).with_context(|| format!("reading run metadata '{}'", path.display()))?;
+    Ok(Some(serde_json::from_slice(&bytes).with_context(|| {
+        format!("parsing run metadata '{}'", path.display())
+    })?))
 }
 
 pub fn run_manifest_path(run_dir: &Path) -> PathBuf {
     run_dir.join(RUN_MANIFEST_FILENAME)
-}
-
-pub fn load_runs_metadata(release_root_dir: &Path) -> Result<Vec<RunMetadata>> {
-    load_run_metadata(release_root_dir)
 }
 
 pub fn load_run_metadata(run_root_dir: &Path) -> Result<Vec<RunMetadata>> {
@@ -51,22 +87,16 @@ pub fn load_run_metadata(run_root_dir: &Path) -> Result<Vec<RunMetadata>> {
         if run_name.starts_with('.') {
             continue;
         }
-        let path = run_manifest_path(&run_dir);
-        if !path.is_file() {
-            continue;
+        if let Some(parsed) = read_run_manifest(&run_dir)? {
+            runs.push(parsed);
         }
-        let bytes = fs::read(&path)
-            .with_context(|| format!("reading run metadata '{}'", path.display()))?;
-        let parsed: RunMetadata = serde_json::from_slice(&bytes)
-            .with_context(|| format!("parsing run metadata '{}'", path.display()))?;
-        runs.push(parsed);
     }
     Ok(runs)
 }
 
 pub fn latest_successful_run_id(run_root_dir: &Path) -> Result<Option<String>> {
     let mut runs = load_run_metadata(run_root_dir)?;
-    runs.retain(|run| run.status == "success");
+    runs.retain(|run| run.status == STATUS_SUCCESS);
     runs.sort_by_key(|run| Reverse(run_sort_key(run)));
     Ok(runs.first().map(|r| r.run_id.clone()))
 }

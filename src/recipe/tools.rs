@@ -187,9 +187,14 @@ pub fn build_tool_program(
     binary: Option<&str>,
     target: Option<&str>,
 ) -> Result<PathBuf> {
-    let (default_binary, binaries): (&str, &[&str]) = match package {
-        "recstrap" => ("recstrap", &["recstrap", "recchroot", "recfstab"]),
-        "install-split-pane" => ("levitate-install-docs-split", &["levitate-install-docs-split"]),
+    let (recipe_name, default_binary, binaries): (&str, &str, &[&str]) = match package {
+        "recpart" => ("install-tools", "recpart", &["recpart"]),
+        "recstrap" => ("install-tools", "recstrap", &["recstrap", "recchroot", "recfstab"]),
+        "install-split-pane" => (
+            "install-split-pane",
+            "levitate-install-docs-split",
+            &["levitate-install-docs-split"],
+        ),
         _ => bail!("no managed live-tool recipe declared for {package}"),
     };
     let binary = binary.unwrap_or(default_binary);
@@ -206,7 +211,7 @@ pub fn build_tool_program(
     let source = prepare_tool_source(repo, package)?;
     let recipe = repo
         .join("distro-builder/recipes")
-        .join(format!("{package}.rhai"));
+        .join(format!("{recipe_name}.rhai"));
     let recipe_bin = super::find_recipe(repo)?;
     let work = repo
         .join(".artifacts/work/recipe-tools")

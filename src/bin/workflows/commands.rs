@@ -89,6 +89,12 @@ pub(crate) fn dispatch_non_release_command(args: &[String]) -> Result<()> {
         {
             crate::workflows::build_overlayfs_erofs(Path::new(source_dir), Path::new(output))
         }
+        [artifact, prepare] if artifact == "artifact" && prepare == "prepare-qemu-tools" => {
+            let repo = crate::workflows::locate_repo_root()?;
+            let tools = distro_builder::recipe::qemu::prepare_qemu_tools(&repo)?;
+            println!("{}", tools.display());
+            Ok(())
+        }
         [artifact, prepare_source, package, output]
             if artifact == "artifact" && prepare_source == "prepare-tool-source" =>
         {

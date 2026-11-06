@@ -96,38 +96,8 @@ pub fn linux_for_distro(repo_root: &Path, distro_id: &str) -> Result<LinuxPaths>
 /// consumers. Existing physical artifact trees are retained, never overwritten.
 #[cfg(unix)]
 pub fn select_kernel_bundle(ctx: &serde_json::Value, destination: &Path) -> Result<()> {
-    use std::fs;
-    use std::os::unix::fs::symlink;
     let bundle = super::outputs::directory(ctx, "bundle")?;
     super::outputs::file(ctx, "kernel")?;
     super::outputs::directory(ctx, "modules")?;
-    let parent = destination
-        .parent()
-        .context("kernel destination has no parent")?;
-    fs::create_dir_all(parent)?;
-    let next = tempfile::Builder::new()
-        .prefix(".kernel-next-")
-        .tempfile_in(parent)?;
-    fs::remove_file(next.path())?;
-    symlink(&bundle, next.path())?;
-    let mut previous = None;
-    if let Ok(metadata) = fs::symlink_metadata(destination) {
-        if !metadata.file_type().is_symlink() {
-            let saved = tempfile::Builder::new()
-                .prefix("previous-")
-                .tempdir_in(parent)?
-                .keep();
-            fs::remove_dir(&saved)?;
-            fs::rename(destination, &saved)?;
-            previous = Some(saved);
-        }
-    }
-    if let Err(error) = fs::rename(next.path(), destination) {
-        if let Some(previous) = previous {
-            fs::rename(previous, destination)?;
-        }
-        return Err(error).context("selecting published kernel bundle");
-    }
-    fs::File::open(parent)?.sync_all()?;
-    Ok(())
+    super::outputs::select_directory(&bundle, destination)
 }

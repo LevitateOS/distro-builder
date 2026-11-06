@@ -10,9 +10,9 @@
 //! 4. Monorepo submodule (`../tools/recipe`, built from source if needed)
 //! 5. System PATH (`which recipe`)
 
-pub mod alpine_rootfs_source;
 pub mod linux;
 mod outputs;
+pub mod qemu;
 pub mod rootfs_source;
 pub mod tools;
 
@@ -65,21 +65,6 @@ impl RecipeBinary {
             }
             Err(_) => false,
         }
-    }
-
-    /// Run a recipe file with this binary.
-    pub fn run(&self, recipe_path: &Path, build_dir: &Path) -> Result<()> {
-        run_recipe(&self.path, recipe_path, build_dir, None)
-    }
-
-    /// Run a recipe file with this binary, passing a recipes search path.
-    pub fn run_with_recipes_path(
-        &self,
-        recipe_path: &Path,
-        build_dir: &Path,
-        recipes_path: Option<&Path>,
-    ) -> Result<()> {
-        run_recipe(&self.path, recipe_path, build_dir, recipes_path)
     }
 }
 
@@ -244,33 +229,6 @@ fn recipe_build_release() -> bool {
         .unwrap_or(false)
 }
 
-/// Run a recipe using the recipe binary, returning the ctx as JSON.
-pub fn run_recipe_json(
-    recipe_bin: &Path,
-    recipe_path: &Path,
-    build_dir: &Path,
-) -> Result<serde_json::Value> {
-    run_recipe_json_with_defines(recipe_bin, recipe_path, build_dir, &[], None)
-}
-
-/// Run a recipe with user-defined scope constants injected via --define.
-pub fn run_recipe_json_with_defines(
-    recipe_bin: &Path,
-    recipe_path: &Path,
-    build_dir: &Path,
-    defines: &[(&str, &str)],
-    recipes_path: Option<&Path>,
-) -> Result<serde_json::Value> {
-    run_recipe_phase_json_with_defines(
-        recipe_bin,
-        "install",
-        recipe_path,
-        build_dir,
-        defines,
-        recipes_path,
-    )
-}
-
 /// Run a specific recipe lifecycle command (`install`, `isinstalled`, etc),
 /// returning the ctx as JSON.
 pub fn run_recipe_phase_json_with_defines(
@@ -411,17 +369,6 @@ fn run_recipe_phase_json_impl(
         bail!("recipe result must be a ctx JSON object");
     }
     Ok(ctx)
-}
-
-/// Run a recipe using the recipe binary (legacy, no JSON parsing).
-pub fn run_recipe(
-    recipe_bin: &Path,
-    recipe_path: &Path,
-    build_dir: &Path,
-    recipes_path: Option<&Path>,
-) -> Result<()> {
-    run_recipe_json_with_defines(recipe_bin, recipe_path, build_dir, &[], recipes_path)?;
-    Ok(())
 }
 
 /// Clear the recipe cache directory (~/.cache/levitate/).

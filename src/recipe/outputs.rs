@@ -77,3 +77,46 @@ pub(super) fn metadata_string<'a>(ctx: &'a Value, name: &str) -> Result<&'a str>
         .filter(|value| !value.trim().is_empty())
         .with_context(|| format!("recipe must report ctx.{name} as a nonempty metadata string"))
 }
+
+/// Atomically select one already-published directory. A pre-existing physical
+/// tree is retained beside the selection rather than destroyed or overwritten.
+#[cfg(unix)]
+pub(super) fn select_directory(
+    published: &std::path::Path,
+    destination: &std::path::Path,
+) -> Result<()> {
+    use std::fs;
+    use std::os::unix::fs::symlink;
+    if !published.is_absolute() || !published.is_dir() {
+        bail!("selected publication must be an existing absolute directory");
+    }
+    let parent = destination
+        .parent()
+        .context("selection destination has no parent")?;
+    fs::create_dir_all(parent)?;
+    let next = tempfile::Builder::new()
+        .prefix(".selection-next-")
+        .tempfile_in(parent)?;
+    fs::remove_file(next.path())?;
+    symlink(published, next.path())?;
+    let mut previous = None;
+    if let Ok(metadata) = fs::symlink_metadata(destination) {
+        if !metadata.file_type().is_symlink() {
+            let saved = tempfile::Builder::new()
+                .prefix("previous-")
+                .tempdir_in(parent)?
+                .keep();
+            fs::remove_dir(&saved)?;
+            fs::rename(destination, &saved)?;
+            previous = Some(saved);
+        }
+    }
+    if let Err(error) = fs::rename(next.path(), destination) {
+        if let Some(previous) = previous {
+            fs::rename(previous, destination)?;
+        }
+        return Err(error).context("selecting published directory");
+    }
+    fs::File::open(parent)?.sync_all()?;
+    Ok(())
+}

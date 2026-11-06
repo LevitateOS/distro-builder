@@ -13,7 +13,6 @@ macro_rules! scripts {
 }
 
 scripts! {
-    ACPI_HANDLER = "live/acpi-handler.sh";
     EFIVARFS_START = "live/efivarfs.start";
     LIVE_HELP = "live/live-help.sh";
     LIVE_NET_SETUP = "live/live-net-setup.sh";

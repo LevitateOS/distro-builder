@@ -1,14 +1,13 @@
 use anyhow::{bail, Result};
 use distro_contract::{
-    ConformanceContract, InstallUxContract, OpenRcInittab, OverlayContract, OverlayKind,
-    PayloadProducerContract, RuntimeActionContract,
+    ConformanceContract, InstallUxContract, OverlayContract, OverlayKind, PayloadProducerContract,
+    RuntimeActionContract,
 };
 use std::path::Path;
 
-use crate::pipeline::overlay::BootOverlayPolicy;
 use crate::pipeline::plan::RootfsProducer;
 
-use crate::artifact::live_overlay::InittabVariant;
+use crate::artifact::live_overlay::InitSystem;
 use crate::pipeline::source::{rootfs_source_policy_from_contract, RootfsSourcePolicy};
 
 #[derive(Debug, Clone)]
@@ -16,7 +15,7 @@ pub(crate) struct BootLoadedConfig {
     pub(crate) os_name: String,
     pub(crate) required_services: Vec<String>,
     pub(crate) rootfs_source_policy: Option<RootfsSourcePolicy>,
-    pub(crate) overlay: BootOverlayPolicy,
+    pub(crate) overlay: InitSystem,
     pub(crate) payload_producers: Vec<RootfsProducer>,
 }
 
@@ -209,20 +208,11 @@ fn rootfs_producer_from_contract(producer: &PayloadProducerContract) -> Result<R
     })
 }
 
-fn overlay_policy_from_contract(overlay: &OverlayContract) -> Result<BootOverlayPolicy> {
-    match overlay.kind {
-        OverlayKind::Systemd => Ok(BootOverlayPolicy::Systemd),
-        OverlayKind::OpenRc => {
-            let inittab = match overlay.openrc_inittab {
-                Some(OpenRcInittab::DesktopWithSerial) => InittabVariant::DesktopWithSerial,
-                Some(OpenRcInittab::SerialOnly) => InittabVariant::SerialOnly,
-                None => bail!(
-                    "invalid canonical live-overlay config: openrc overlay requires openrc_inittab"
-                ),
-            };
-            Ok(BootOverlayPolicy::OpenRc { inittab })
-        }
-    }
+fn overlay_policy_from_contract(overlay: &OverlayContract) -> Result<InitSystem> {
+    Ok(match overlay.kind {
+        OverlayKind::Systemd => InitSystem::Systemd,
+        OverlayKind::OpenRc => InitSystem::OpenRc,
+    })
 }
 
 fn normalize_services(raw_services: Vec<String>) -> Vec<String> {

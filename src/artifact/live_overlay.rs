@@ -12,7 +12,7 @@
 //!   on the install-UX consoles
 //!
 //! Then per init system. OpenRC: `/etc/inittab`, a tmpfs `/var/log` in `/etc/fstab`,
-//! efivarfs, and suspend disabled (ACPI handler, sysctl, elogind). systemd: getty
+//! efivarfs, and magic SysRq. systemd: getty
 //! drop-ins, the network-setup and shutdown-cleanup units, `/run/sshd`, and an empty
 //! `/etc/machine-id` so each boot gets its own.
 //!
@@ -28,18 +28,9 @@ use std::path::{Path, PathBuf};
 
 use crate::artifact::filesystem::write_file;
 
-/// Which consoles an OpenRC inittab runs getty on.
-#[derive(Debug, Clone, Copy)]
-pub enum InittabVariant {
-    /// Six VTs and the serial console.
-    DesktopWithSerial,
-    /// The serial console only.
-    SerialOnly,
-}
-
 #[derive(Debug, Clone, Copy)]
 pub enum InitSystem {
-    OpenRc(InittabVariant),
+    OpenRc,
     Systemd,
 }
 
@@ -93,23 +84,16 @@ pub fn create_live_overlay(output_dir: &Path, config: &LiveOverlayConfig) -> Res
     )?;
 
     match config.init {
-        InitSystem::OpenRc(inittab) => write_openrc(&live_overlay, config, inittab)?,
+        InitSystem::OpenRc => write_openrc(&live_overlay, config)?,
         InitSystem::Systemd => write_systemd(&live_overlay, config)?,
     }
     Ok(live_overlay)
 }
 
-fn write_openrc(
-    live_overlay: &Path,
-    config: &LiveOverlayConfig,
-    inittab: InittabVariant,
-) -> Result<()> {
+fn write_openrc(live_overlay: &Path, config: &LiveOverlayConfig) -> Result<()> {
     let launcher = format!("/{}", crate::install_ux::LAUNCHER);
     let install_ux = |tty: &str| config.install_ux_consoles.iter().any(|c| c == tty);
-    let vts: &[&str] = match inittab {
-        InittabVariant::DesktopWithSerial => &["tty1", "tty2", "tty3", "tty4", "tty5", "tty6"],
-        InittabVariant::SerialOnly => &[],
-    };
+    let vts = ["tty1", "tty2", "tty3", "tty4", "tty5", "tty6"];
     if let Some(console) = config
         .install_ux_consoles
         .iter()
@@ -165,40 +149,11 @@ fn write_openrc(
         0o755,
     )?;
 
-    // No suspend during an install: ACPI events, sysctl and elogind.
-    fs::create_dir_all(live_overlay.join("etc/acpi"))?;
-    write_file(
-        &live_overlay.join("etc/acpi/handler.sh"),
-        &crate::guest::render(crate::guest::ACPI_HANDLER, &[("OS_NAME", config.os_name)])?,
-        0o755,
-    )?;
+    // Magic SysRq keys, for recovering a hung install.
     fs::create_dir_all(live_overlay.join("etc/sysctl.d"))?;
     fs::write(
-        live_overlay.join("etc/sysctl.d/50-live-no-suspend.conf"),
-        format!(
-            "# {} Live: Disable suspend\n\
-             # Prevent accidental suspend during installation\n\
-             \n\
-             # Disable suspend-to-RAM\n\
-             kernel.sysrq = 1\n",
-            config.os_name
-        ),
-    )?;
-    fs::create_dir_all(live_overlay.join("etc/elogind/logind.conf.d"))?;
-    fs::write(
-        live_overlay.join("etc/elogind/logind.conf.d/00-live-no-suspend.conf"),
-        format!(
-            "# {} Live: Disable suspend triggers\n\
-             [Login]\n\
-             HandlePowerKey=ignore\n\
-             HandleSuspendKey=ignore\n\
-             HandleHibernateKey=ignore\n\
-             HandleLidSwitch=ignore\n\
-             HandleLidSwitchExternalPower=ignore\n\
-             HandleLidSwitchDocked=ignore\n\
-             IdleAction=ignore\n",
-            config.os_name
-        ),
+        live_overlay.join("etc/sysctl.d/50-live-sysrq.conf"),
+        "kernel.sysrq = 1\n",
     )?;
     Ok(())
 }
@@ -223,7 +178,7 @@ fn write_systemd(live_overlay: &Path, config: &LiveOverlayConfig) -> Result<()> 
     if let Some(console) = config
         .install_ux_consoles
         .iter()
-        .find(|c| !(c.starts_with("ttyS") || c.as_str() == "tty1"))
+        .find(|c| !matches!(c.as_str(), "tty1" | "ttyS0"))
     {
         bail!("install_ux console '{console}' has no getty in the systemd live overlay");
     }

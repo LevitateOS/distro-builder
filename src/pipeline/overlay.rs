@@ -4,15 +4,9 @@ use std::os::unix::fs::symlink;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
-use crate::artifact::live_overlay::{self, InitSystem, InittabVariant, LiveOverlayConfig};
 use crate::artifact::filesystem::write_file;
+use crate::artifact::live_overlay::{self, InitSystem, LiveOverlayConfig};
 use crate::pipeline::io::rename_live_overlay_dir;
-
-#[derive(Debug, Clone)]
-pub enum BootOverlayPolicy {
-    Systemd,
-    OpenRc { inittab: InittabVariant },
-}
 
 pub(crate) fn create_live_overlay(
     output_dir: &Path,
@@ -20,23 +14,19 @@ pub(crate) fn create_live_overlay(
     os_name: &str,
     overlay_label: &str,
     dir_name: &str,
-    overlay: &BootOverlayPolicy,
+    overlay: &InitSystem,
     install_ux_consoles: &[String],
 ) -> Result<PathBuf> {
     let issue = format!(
         "\n{os_name} {overlay_label} - \\l\n\n{}\n\n",
         crate::install_ux::LIVE_LOGIN_HINT
     );
-    let init = match overlay {
-        BootOverlayPolicy::Systemd => InitSystem::Systemd,
-        BootOverlayPolicy::OpenRc { inittab } => InitSystem::OpenRc(*inittab),
-    };
     let live_overlay_dir = live_overlay::create_live_overlay(
         output_dir,
         &LiveOverlayConfig {
             os_name,
             issue: &issue,
-            init,
+            init: *overlay,
             install_ux_consoles,
         },
     )
@@ -148,12 +138,12 @@ pub(crate) fn ensure_systemd_locale_completeness(rootfs_dir: &Path) -> Result<()
 
 pub(crate) fn ensure_required_service_wiring(
     live_overlay_dir: &Path,
-    overlay_policy: &BootOverlayPolicy,
+    overlay_policy: &InitSystem,
     required_services: &[String],
 ) -> Result<()> {
     for service in required_services {
         match (overlay_policy, service.as_str()) {
-            (BootOverlayPolicy::Systemd { .. }, service_name) => {
+            (InitSystem::Systemd, service_name) => {
                 if service_name.is_empty()
                     || !service_name
                         .chars()
@@ -187,7 +177,7 @@ pub(crate) fn ensure_required_service_wiring(
                     format!("linking '{}' -> '{}'", wants_link.display(), service_source)
                 })?;
             }
-            (BootOverlayPolicy::OpenRc { .. }, "sshd") => {
+            (InitSystem::OpenRc, "sshd") => {
                 let runlevel_dir = live_overlay_dir.join("etc/runlevels/default");
                 fs::create_dir_all(&runlevel_dir)
                     .with_context(|| format!("creating '{}'", runlevel_dir.display()))?;
@@ -200,7 +190,7 @@ pub(crate) fn ensure_required_service_wiring(
                     format!("linking '{}' -> '/etc/init.d/sshd'", service_link.display())
                 })?;
             }
-            (BootOverlayPolicy::OpenRc { .. }, "networking") => {
+            (InitSystem::OpenRc, "networking") => {
                 let runlevel_dir = live_overlay_dir.join("etc/runlevels/boot");
                 fs::create_dir_all(&runlevel_dir)
                     .with_context(|| format!("creating '{}'", runlevel_dir.display()))?;
@@ -216,7 +206,7 @@ pub(crate) fn ensure_required_service_wiring(
                     )
                 })?;
             }
-            (BootOverlayPolicy::OpenRc { .. }, "dhcpcd") => {
+            (InitSystem::OpenRc, "dhcpcd") => {
                 let runlevel_dir = live_overlay_dir.join("etc/runlevels/default");
                 fs::create_dir_all(&runlevel_dir)
                     .with_context(|| format!("creating '{}'", runlevel_dir.display()))?;
@@ -240,11 +230,7 @@ pub(crate) fn ensure_required_service_wiring(
     Ok(())
 }
 
-pub(crate) fn ensure_openrc_shell(
-    rootfs_source_dir: &Path,
-    os_name: &str,
-    inittab: InittabVariant,
-) -> Result<()> {
+pub(crate) fn ensure_openrc_shell(rootfs_source_dir: &Path, os_name: &str) -> Result<()> {
     let etc_dir = rootfs_source_dir.join("etc");
     let usr_local_bin = rootfs_source_dir.join("usr/local/bin");
     fs::create_dir_all(&etc_dir)
@@ -262,9 +248,8 @@ pub(crate) fn ensure_openrc_shell(
         0o755,
     )?;
 
-    let inittab_content = match inittab {
-        InittabVariant::DesktopWithSerial => format!(
-            r#"# /etc/inittab - {os_name} Live
+    let inittab_content = format!(
+        r#"# /etc/inittab - {os_name} Live
 # Live boot starts in a minimal interactive shell.
 ::sysinit:/sbin/openrc sysinit
 ::sysinit:/sbin/openrc boot
@@ -279,19 +264,7 @@ ttyS0::respawn:/sbin/getty -L -n -l /usr/local/bin/serial-autologin 115200 ttyS0
 ::ctrlaltdel:/sbin/reboot
 ::shutdown:/sbin/openrc shutdown
 "#
-        ),
-        InittabVariant::SerialOnly => format!(
-            r#"# /etc/inittab - {os_name} Live
-# Live boot starts in a minimal interactive shell.
-::sysinit:/sbin/openrc sysinit
-::sysinit:/sbin/openrc boot
-ttyS0::respawn:/sbin/getty -L -n -l /usr/local/bin/serial-autologin 115200 ttyS0 vt100
-::wait:/sbin/openrc default
-::ctrlaltdel:/sbin/reboot
-::shutdown:/sbin/openrc shutdown
-"#
-        ),
-    };
+    );
     let inittab_path = etc_dir.join("inittab");
     fs::write(&inittab_path, inittab_content)
         .with_context(|| format!("writing '{}'", inittab_path.display()))?;

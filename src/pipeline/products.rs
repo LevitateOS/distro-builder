@@ -15,8 +15,8 @@ use distro_contract::{InstallUxContract, RuntimeActionContract};
 use crate::pipeline::overlay::{
     create_live_overlay, ensure_openrc_shell, ensure_required_service_wiring,
     ensure_systemd_default_target, ensure_systemd_locale_completeness, ensure_systemd_sshd_dirs,
-    BootOverlayPolicy,
 };
+use crate::artifact::live_overlay::InitSystem;
 
 use crate::pipeline::plan::{
     apply_producer_plan, build_baseline_producers, ProducerPlan, RootfsProducer,
@@ -98,7 +98,7 @@ pub struct LiveBootProductSpec {
     add_plan: ProducerPlan,
     required_services: Vec<String>,
     rootfs_source_policy: Option<RootfsSourcePolicy>,
-    pub overlay: BootOverlayPolicy,
+    pub overlay: InitSystem,
 }
 
 impl LiveBootProductSpec {
@@ -137,7 +137,7 @@ pub struct LiveToolsProductSpec {
     parent_rootfs: ParentRootfsInput,
     resolved_parent_rootfs_image: Option<PathBuf>,
     live_overlay: OverlayLayout,
-    overlay: BootOverlayPolicy,
+    overlay: InitSystem,
     required_services: Vec<String>,
 }
 
@@ -303,15 +303,15 @@ pub fn prepare_live_boot_product(
             spec.distro_id
         )
     })?;
-    if let BootOverlayPolicy::OpenRc { inittab, .. } = spec.overlay {
-        ensure_openrc_shell(&rootfs_source_dir, &spec.os_name, inittab).with_context(|| {
+    if let InitSystem::OpenRc = spec.overlay {
+        ensure_openrc_shell(&rootfs_source_dir, &spec.os_name).with_context(|| {
             format!(
                 "ensuring OpenRC live boot serial shell for '{}'",
                 spec.distro_id
             )
         })?;
     }
-    if matches!(&spec.overlay, BootOverlayPolicy::Systemd { .. }) {
+    if matches!(&spec.overlay, InitSystem::Systemd) {
         ensure_systemd_default_target(&rootfs_source_dir).with_context(|| {
             format!(
                 "ensuring systemd live boot default target for '{}'",
@@ -454,7 +454,7 @@ pub fn prepare_live_tools_product(
             spec.distro_id
         )
     })?;
-    if matches!(&spec.overlay, BootOverlayPolicy::Systemd { .. }) {
+    if matches!(&spec.overlay, InitSystem::Systemd) {
         ensure_systemd_locale_completeness(&rootfs_source_dir).with_context(|| {
             format!(
                 "ensuring systemd live tools locale completeness for '{}'",
@@ -483,7 +483,7 @@ pub fn prepare_live_tools_product(
     .with_context(|| format!("adding required live tools for '{}'", spec.distro_id))?;
     crate::install_ux::write_payload(
         &spec.repo_root,
-        &rootfs_source_dir,
+        &live_overlay_dir,
         &spec.os_name,
         &spec.install_ux,
     )

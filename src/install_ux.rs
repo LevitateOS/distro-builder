@@ -8,7 +8,8 @@
 //! the screen only when the boot-injection payload sets [`SERIAL_KEY`]`=1`; otherwise
 //! it gets the shell straight away.
 //!
-//! Paths are relative to the rootfs.
+//! Everything goes into the live overlay: the rootfs is what `recstrap` installs, and an
+//! installed system has no use for the install screen. Paths are relative to a layer's root.
 
 use anyhow::{bail, Context, Result};
 use distro_contract::{InstallDocs, InstallUxContract};
@@ -21,9 +22,9 @@ use crate::artifact::filesystem::{copy_executable, write_file};
 /// What getty starts on an install-screen console; `--probe` prints
 /// `PROBE_PREFIX<split pane path>`.
 pub const LAUNCHER: &str = "usr/local/bin/install-ux";
-/// The split pane (`install-split-pane`'s `install-split`); a runtime action in the
-/// variant installs it here.
-pub const SPLIT: &str = "usr/local/bin/install-split";
+/// The split pane (`install-split-pane`'s `install-split`); the variant's
+/// `tool_payload_workspace_binary` action puts it here.
+pub const SPLIT: &str = "usr/bin/install-split";
 /// The docs command, in the right pane and on the shell's PATH.
 pub const DOCS: &str = "usr/local/bin/install-docs";
 const DOCS_BUNDLE: &str = "usr/share/install-ux/install-docs.js";
@@ -41,24 +42,25 @@ pub const SPLIT_SMOKE_OK: &str = "split-smoke:ok";
 /// serial console being ready.
 pub const LIVE_LOGIN_HINT: &str = "Login as 'root' (no password)";
 
-/// Writes the install screen into `rootfs`: the docs, their command and the
+/// Writes the install screen into `overlay`: the docs, their command and the
 /// launcher. The split pane must already be there.
 pub(crate) fn write_payload(
     repo_root: &Path,
-    rootfs: &Path,
+    overlay: &Path,
     os_name: &str,
     install_ux: &InstallUxContract,
 ) -> Result<()> {
-    if !rootfs.join(SPLIT).is_file() {
+    if !overlay.join(SPLIT).is_file() {
         bail!(
-            "the install screen needs /{SPLIT}: declare a rootfs_workspace_binary action for \
-             install-split-pane's install-split with that destination"
+            "the install screen needs /{SPLIT}: declare a tool_payload_workspace_binary action for \
+             install-split-pane's install-split"
         );
     }
 
     let docs_argv = match &install_ux.docs {
         InstallDocs::TuiApp { app, page } => {
-            write_bun_docs(repo_root, rootfs, app)
+            let docs_app = distro_contract::tui_apps::find(repo_root, app)?;
+            write_bun_docs(repo_root, overlay, &docs_app)
                 .with_context(|| format!("bundling the docs app '{app}'"))?;
             let mut argv = vec![
                 format!("/{DOCS}"),
@@ -66,7 +68,11 @@ pub(crate) fn write_payload(
                 format!("{os_name} install guide"),
             ];
             if let Some(page) = page {
-                argv.extend(["--slug".to_string(), page.clone()]);
+                // The flag that opens a page is the one the app's manifest declares.
+                let pages = docs_app.inspect.pages.as_ref().with_context(|| {
+                    format!("install_ux opens page '{page}', but {app} declares no inspect.pages")
+                })?;
+                argv.extend([pages.arg.clone(), page.clone()]);
             }
             argv
         }
@@ -77,12 +83,12 @@ pub(crate) fn write_payload(
                     guide.display()
                 )
             })?;
-            write_file(&rootfs.join(DOCS_TEXT), text, 0o644)?;
+            write_file(&overlay.join(DOCS_TEXT), text, 0o644)?;
             let docs = crate::guest::render(
                 crate::guest::DOCS_TEXT,
                 &[("GUIDE", &format!("/{DOCS_TEXT}"))],
             )?;
-            write_file(&rootfs.join(DOCS), docs, 0o755)?;
+            write_file(&overlay.join(DOCS), docs, 0o755)?;
             vec![format!("/{DOCS}")]
         }
     };
@@ -99,12 +105,15 @@ pub(crate) fn write_payload(
             ("SMOKE", SMOKE_ENV),
         ],
     )?;
-    write_file(&rootfs.join(LAUNCHER), launcher, 0o755)
+    write_file(&overlay.join(LAUNCHER), launcher, 0o755)
 }
 
 /// Bundles the TUI app with bun into [`DOCS_BUNDLE`] and installs bun and [`DOCS`].
-fn write_bun_docs(repo_root: &Path, rootfs: &Path, app: &str) -> Result<()> {
-    let docs_app = distro_contract::tui_apps::find(repo_root, app)?;
+fn write_bun_docs(
+    repo_root: &Path,
+    overlay: &Path,
+    docs_app: &distro_contract::tui_apps::TuiApp,
+) -> Result<()> {
     let bun = crate::process::which("bun").context(
         "bun is required to bundle the install docs: install it and put it on PATH (https://bun.sh)",
     )?;
@@ -117,7 +126,7 @@ fn write_bun_docs(repo_root: &Path, rootfs: &Path, app: &str) -> Result<()> {
         "bun install --frozen-lockfile at the repo root",
     )?;
 
-    let bundle = rootfs.join(DOCS_BUNDLE);
+    let bundle = overlay.join(DOCS_BUNDLE);
     if let Some(parent) = bundle.parent() {
         fs::create_dir_all(parent).with_context(|| format!("creating '{}'", parent.display()))?;
     }
@@ -134,7 +143,7 @@ fn write_bun_docs(repo_root: &Path, rootfs: &Path, app: &str) -> Result<()> {
         bail!("bun build wrote no bundle at '{}'", bundle.display());
     }
 
-    copy_executable(Path::new(&bun), &rootfs.join(BUN))?;
+    copy_executable(Path::new(&bun), &overlay.join(BUN))?;
     let docs = crate::guest::render(
         crate::guest::DOCS_BUN,
         &[
@@ -142,7 +151,7 @@ fn write_bun_docs(repo_root: &Path, rootfs: &Path, app: &str) -> Result<()> {
             ("BUN", &format!("/{BUN}")),
         ],
     )?;
-    write_file(&rootfs.join(DOCS), docs, 0o755)
+    write_file(&overlay.join(DOCS), docs, 0o755)
 }
 
 fn run(command: &mut Command, what: &str) -> Result<()> {

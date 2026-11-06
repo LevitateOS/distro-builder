@@ -30,11 +30,9 @@ pub(crate) enum LiveToolsRuntimeAction {
 }
 
 use crate::live_ux::{
-    INSTALL_ENTRYPOINT as CANONICAL_INSTALL_ENTRYPOINT,
-    INSTALL_EXPERIENCE_MARKER as CANONICAL_INSTALL_EXPERIENCE_MARKER,
-    INSTALL_UX_PROFILE as CANONICAL_INSTALL_UX_PROFILE, PROBE_PREFIX, SMOKE_ENV, SPLIT_HELPER,
+    INSTALL_DOCS, INSTALL_DOCS_TEXT, INSTALL_ENTRYPOINT, INSTALL_EXPERIENCE_MARKER,
+    INSTALL_UX_PROFILE, PROBE_PREFIX, SMOKE_ENV, SPLIT_HELPER,
 };
-const CANONICAL_INSTALL_DOCS_TEXT: &str = "usr/local/share/levitate/install-docs.txt";
 
 pub(crate) fn add_required_tools(
     repo_root: &Path,
@@ -418,7 +416,7 @@ fn install_mode_payload(
     interactive_shell: &str,
     ux_docs_frontend: InstallDocsFrontend,
 ) -> Result<()> {
-    let marker_path = rootfs_source_dir.join(CANONICAL_INSTALL_EXPERIENCE_MARKER);
+    let marker_path = rootfs_source_dir.join(INSTALL_EXPERIENCE_MARKER);
     write_text(&marker_path, &format!("{}\n", install_experience.as_str())).with_context(|| {
         format!(
             "writing install experience marker '{}'",
@@ -433,9 +431,9 @@ fn install_mode_payload(
     })?;
 
     if install_experience == InstallExperience::Ux {
-        let docs_cmd_path = rootfs_source_dir.join("usr/local/bin/levitate-install-docs");
+        let docs_cmd_path = rootfs_source_dir.join(INSTALL_DOCS);
         let docs_tui_cmd_path = rootfs_source_dir.join("usr/local/bin/docs-tui");
-        let docs_text_path = rootfs_source_dir.join(CANONICAL_INSTALL_DOCS_TEXT);
+        let docs_text_path = rootfs_source_dir.join(INSTALL_DOCS_TEXT);
         let docs_text = format!(
             "LevitateOS Live Install Tools\n\
              Distro: {distro}\n\
@@ -467,7 +465,7 @@ fn install_mode_payload(
                     "#!/bin/sh\n\
 set -eu\n\
 \n\
-DOCS_FILE=\"/usr/local/share/levitate/install-docs.txt\"\n\
+DOCS_FILE=\"/{docs_text}\"\n\
 case \"${{TERM:-}}\" in\n\
     \"\"|dumb|vt100|vt102|linux)\n\
         export TERM=xterm-256color\n\
@@ -495,7 +493,8 @@ else\n\
 fi\n\
 \n\
 exec \"${{SHELL:-{shell}}}\" -l\n",
-                    shell = interactive_shell
+                    shell = interactive_shell,
+                    docs_text = INSTALL_DOCS_TEXT
                 );
                 write_executable(&docs_cmd_path, &docs_cmd).with_context(|| {
                     format!(
@@ -507,9 +506,8 @@ exec \"${{SHELL:-{shell}}}\" -l\n",
         }
 
         // Canonical docs-tui command alias for split-pane right-side launchers.
-        let docs_tui_cmd = "#!/bin/sh\n\
-exec /usr/local/bin/levitate-install-docs \"$@\"\n";
-        write_executable(&docs_tui_cmd_path, docs_tui_cmd).with_context(|| {
+        let docs_tui_cmd = format!("#!/bin/sh\nexec /{INSTALL_DOCS} \"$@\"\n");
+        write_executable(&docs_tui_cmd_path, &docs_tui_cmd).with_context(|| {
             format!(
                 "installing install docs-tui alias '{}'",
                 docs_tui_cmd_path.display()
@@ -517,7 +515,7 @@ exec /usr/local/bin/levitate-install-docs \"$@\"\n";
         })?;
     }
 
-    let entrypoint_path = rootfs_source_dir.join(CANONICAL_INSTALL_ENTRYPOINT);
+    let entrypoint_path = rootfs_source_dir.join(INSTALL_ENTRYPOINT);
     let entrypoint_script = match install_experience {
         InstallExperience::Ux => format!(
             "#!/bin/sh\n\
@@ -594,7 +592,7 @@ exec \"${{SHELL:-{shell}}}\" -l\n",
         )
     })?;
     if install_experience == InstallExperience::Ux {
-        let ux_profile_path = rootfs_source_dir.join(CANONICAL_INSTALL_UX_PROFILE);
+        let ux_profile_path = rootfs_source_dir.join(INSTALL_UX_PROFILE);
         let ux_profile = "#!/bin/sh\n\
 case \"$-\" in\n\
     *i*) ;;\n\
@@ -631,15 +629,7 @@ fi\n\
 echo \"[install-ux] Launching install UX on $TTY...\"\n\
 export LEVITATE_INSTALL_UX_LAUNCHED=1\n\
 exec @INSTALL_ENTRYPOINT@\n";
-        let ux_profile = ux_profile
-            .replace(
-                "@BOOT_INJECTION_IMPORT@",
-                &distro_spec::shared::live_boot::boot_injection_import_sh(),
-            )
-            .replace(
-                "@INSTALL_ENTRYPOINT@",
-                &format!("/{}", CANONICAL_INSTALL_ENTRYPOINT),
-            );
+        let ux_profile = crate::artifact::live_overlay::fill_guest_script(ux_profile);
         write_text(&ux_profile_path, &ux_profile).with_context(|| {
             format!(
                 "installing install UX profile hook '{}'",

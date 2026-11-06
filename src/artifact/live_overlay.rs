@@ -116,7 +116,7 @@ exec /bin/sh -l
 "#;
     write_executable(
         &live_overlay.join("usr/local/bin/serial-autologin"),
-        &with_ready_marker(autologin_script),
+        &fill_guest_script(autologin_script),
     )?;
 
     // /etc/issue
@@ -363,7 +363,6 @@ LevitateOS Live Quick Help
 
 Common commands:
   levitate-install-entrypoint --probe
-  install.sh
   live-net-setup.service (systemd unit)
   recpart / recstrap / recfstab / recchroot
   docs-tui --slug installation
@@ -450,7 +449,7 @@ exec /bin/bash -il
 "#;
     write_executable(
         &live_overlay.join("usr/local/bin/serial-autologin"),
-        &with_ready_marker(serial_autologin_script),
+        &fill_guest_script(serial_autologin_script),
     )?;
 
     let serial_autologin = "[Service]\nExecStart=\nExecStart=-/sbin/agetty --autologin root --keep-baud 115200,57600,38400,9600 %I vt100\n";
@@ -701,7 +700,7 @@ fn write_serial_test_profile(live_overlay: &Path) -> Result<()> {
 
 /// Fill the boot-protocol pieces into a guest script: the serial readiness
 /// marker, the boot-injection import and the install entrypoint.
-fn with_ready_marker(script: &str) -> String {
+pub(crate) fn fill_guest_script(script: &str) -> String {
     script
         .replace(
             "@INSTALL_ENTRYPOINT@",

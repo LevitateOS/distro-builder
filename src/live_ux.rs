@@ -7,6 +7,11 @@ pub const INSTALL_EXPERIENCE_MARKER: &str = "usr/lib/levitate/install-experience
 pub const INSTALL_ENTRYPOINT: &str = "usr/local/bin/levitate-install-entrypoint";
 /// Login profile hook that starts the install UX (UX experience only).
 pub const INSTALL_UX_PROFILE: &str = "etc/profile.d/30-install-ux.sh";
+/// The install docs command (UX experience only); the split helper runs it
+/// in its right pane.
+pub const INSTALL_DOCS: &str = "usr/local/bin/levitate-install-docs";
+/// The plain-text install docs `INSTALL_DOCS` shows.
+pub const INSTALL_DOCS_TEXT: &str = "usr/local/share/levitate/install-docs.txt";
 /// The split-pane install helper.
 pub const SPLIT_HELPER: &str = "levitate-install-docs-split";
 pub const PROBE_PREFIX: &str = "install-entrypoint-helper=";

@@ -10,7 +10,9 @@ use std::process::Command;
 /// dependency must remain an exact member of the original lock.
 pub fn prepare_tool_source(repo: &Path, package: &str) -> Result<tempfile::TempDir> {
     let relative = match package {
+        "recpart" => PathBuf::from("tools/recpart"),
         "recstrap" => PathBuf::from("tools/recstrap"),
+        "recab" => PathBuf::from("tools/recab"),
         "install-split-pane" => PathBuf::from("distro/builder/install-split-pane"),
         _ => bail!("no live-tool source producer declared for {package}"),
     };
@@ -190,6 +192,7 @@ pub fn build_tool_program(
     let (recipe_name, default_binary, binaries): (&str, &str, &[&str]) = match package {
         "recpart" => ("install-tools", "recpart", &["recpart"]),
         "recstrap" => ("install-tools", "recstrap", &["recstrap", "recchroot", "recfstab"]),
+        "recab" => ("install-tools", "recab", &["recab"]),
         "install-split-pane" => (
             "install-split-pane",
             "levitate-install-docs-split",

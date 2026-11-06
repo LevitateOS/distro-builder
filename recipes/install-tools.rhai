@@ -1,5 +1,6 @@
 // Build one of the install tools (recpart from its crate; recstrap, recchroot
-// and recfstab from the recstrap crate) from an explicit offline source
+// and recfstab from the recstrap crate; recab, the installed system's A/B
+// slot manager, from its crate) from an explicit offline source
 // closure, or use an explicitly supplied executable. Host paths are selected
 // by the caller:
 //   --input source=<standalone vendored tree of the tool's crate>
@@ -8,7 +9,7 @@
 // published by Recipe for the consumer to install.
 const RECIPE_API = 2;
 let bin = if is_def_var("BIN") { BIN } else { "recstrap" };
-if bin != "recpart" && bin != "recstrap" && bin != "recchroot" && bin != "recfstab" {
+if bin != "recpart" && bin != "recstrap" && bin != "recchroot" && bin != "recfstab" && bin != "recab" {
     throw "Unknown install tool: " + bin;
 }
 let ctx = #{

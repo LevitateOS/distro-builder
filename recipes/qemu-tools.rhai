@@ -8,6 +8,7 @@ let ctx = #{
     description: "QEMU and OVMF for boot scenarios",
     tools: RUNTIME.paths.output,
     rpms: [
+        ["https://dl.rockylinux.org/vault/rocky/10.1/AppStream/x86_64/os/Packages/q/qemu-img-10.0.0-14.el10_1.x86_64.rpm", "qemu-img.rpm", "131e20dbdc855fec860fee6943c02a20c74abe406522b9064b1e8c319b7bd068"],
     ["https://dl.rockylinux.org/vault/rocky/10.1/AppStream/x86_64/os/Packages/q/qemu-kvm-core-10.0.0-14.el10_1.x86_64.rpm", "qemu-kvm-core.rpm", "36cd677807ab9f7aa6122b76220244ad939db7cf3c324c78e916121231986af4"],
     ["https://dl.rockylinux.org/vault/rocky/10.1/AppStream/x86_64/os/Packages/q/qemu-kvm-common-10.0.0-14.el10_1.x86_64.rpm", "qemu-kvm-common.rpm", "f9d599b8b87ace482bb4724d8ab2ae75e5bfaee7d4eba5440bdcf688e4865595"],
     ["https://dl.rockylinux.org/vault/rocky/10.1/AppStream/x86_64/os/Packages/e/edk2-ovmf-20250523-2.el10.noarch.rpm", "edk2-ovmf.rpm", "7888d70358b76f7740a3c64c63d5ef61293d443e2d8ddc0c49ca1988c26d8726"],

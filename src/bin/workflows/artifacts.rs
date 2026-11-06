@@ -344,6 +344,7 @@ pub(crate) fn preseed_rootfs_source_cmd(distro_id: &str, refresh: bool) -> Resul
         distro_id,
         recipe_script,
         outputs,
+        &bundle.contract.sources.rootfs_source.preseed_network_hosts,
         refresh,
     )
     .with_context(|| format!("preseeding rootfs source for '{distro_id}'"))?;

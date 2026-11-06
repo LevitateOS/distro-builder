@@ -74,6 +74,7 @@ pub fn linux_for_distro(repo_root: &Path, distro_id: &str) -> Result<LinuxPaths>
         &work_dir,
         &defines,
         &inputs,
+        &[],
         Some(&recipes_dir),
     )?;
 

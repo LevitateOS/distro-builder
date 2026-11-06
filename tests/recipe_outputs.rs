@@ -58,6 +58,7 @@ fn install(ctx) {{
             recipe_script: recipe,
             defines: BTreeMap::new(),
             inputs: BTreeMap::new(),
+            network_hosts: Vec::new(),
         },
     );
     assert_eq!(
@@ -162,6 +163,7 @@ fn managed_recfstab_input_install_reuse_and_removal() {
             dir.path(),
             &[],
             &[("program", program.as_path())],
+            &[],
             None,
         )
         .unwrap()
@@ -187,6 +189,7 @@ fn managed_recfstab_input_install_reuse_and_removal() {
             dir.path(),
             &[],
             &[("program", program.as_path())],
+            &[],
             None,
         )
         .is_err(),
@@ -207,5 +210,87 @@ fn managed_recfstab_input_install_reuse_and_removal() {
         std::fs::read(first_path).unwrap(),
         original,
         "later invocation changed an earlier publication"
+    );
+}
+
+#[test]
+fn managed_custom_rootfs_preserves_inputs_and_published_generations() {
+    use distro_builder::recipe::{find_recipe, run_recipe_phase_json_with_inputs};
+    use std::os::unix::fs::{symlink, MetadataExt, PermissionsExt};
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path();
+    let source = root.join("explicit source rootfs");
+    let tool = source.join("usr/bin/tool");
+    std::fs::create_dir_all(tool.parent().unwrap()).unwrap();
+    std::fs::write(&tool, "first product").unwrap();
+    std::fs::set_permissions(&tool, std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::fs::hard_link(&tool, source.join("usr/bin/tool-alias")).unwrap();
+    symlink("tool", source.join("usr/bin/tool-link")).unwrap();
+    std::fs::create_dir_all(source.join("etc")).unwrap();
+    symlink("/proc/mounts", source.join("etc/mtab")).unwrap();
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+    let recipe = repo.join("distro-builder/recipes/custom-source-rootfs.rhai");
+    let work = root.join("managed work");
+    let binary = find_recipe(repo).unwrap();
+    let invoke = |phase| {
+        run_recipe_phase_json_with_inputs(
+            &binary.path,
+            phase,
+            &recipe,
+            &work,
+            &[],
+            &[("rootfs", source.as_path())],
+            &[],
+            None,
+        )
+    };
+    let first = invoke("install").unwrap();
+    let published = Path::new(first["outputs"]["rootfs"].as_str().unwrap());
+    assert_ne!(published, source);
+    assert_eq!(
+        std::fs::read(published.join("usr/bin/tool")).unwrap(),
+        b"first product"
+    );
+    assert_eq!(
+        std::fs::metadata(published.join("usr/bin/tool"))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777,
+        0o755
+    );
+    assert_eq!(
+        std::fs::metadata(published.join("usr/bin/tool"))
+            .unwrap()
+            .ino(),
+        std::fs::metadata(published.join("usr/bin/tool-alias"))
+            .unwrap()
+            .ino()
+    );
+    assert_eq!(
+        std::fs::read_link(published.join("usr/bin/tool-link")).unwrap(),
+        Path::new("tool")
+    );
+    assert_eq!(
+        std::fs::read_link(published.join("etc/mtab")).unwrap(),
+        Path::new("/proc/mounts")
+    );
+    invoke("isinstalled").unwrap();
+    invoke("remove").unwrap();
+    assert!(invoke("isinstalled").is_err());
+    invoke("install").unwrap();
+    invoke("cleanup").unwrap();
+    assert!(invoke("isinstalled").is_err());
+    assert_eq!(std::fs::read(&tool).unwrap(), b"first product");
+    std::fs::write(&tool, "changed source").unwrap();
+    let changed = invoke("install").unwrap();
+    let changed = Path::new(changed["outputs"]["rootfs"].as_str().unwrap());
+    assert_eq!(
+        std::fs::read(changed.join("usr/bin/tool")).unwrap(),
+        b"changed source"
+    );
+    assert_eq!(
+        std::fs::read(published.join("usr/bin/tool")).unwrap(),
+        b"first product"
     );
 }

@@ -9,6 +9,7 @@ pub struct RootfsSourceRecipeSpec {
     pub recipe_script: PathBuf,
     pub defines: BTreeMap<String, String>,
     pub inputs: BTreeMap<String, PathBuf>,
+    pub network_hosts: Vec<String>,
 }
 
 fn resolve_recipe_path(repo_root: &Path, recipe_script: &Path) -> PathBuf {
@@ -57,6 +58,7 @@ pub fn materialize_rootfs_from_recipe(
         build_dir,
         &defines,
         &inputs,
+        &spec.network_hosts,
         Some(recipes_path),
     )
     .with_context(|| {
@@ -81,6 +83,7 @@ pub fn preseed_rootfs_source(
     distro_id: &str,
     recipe_script: &Path,
     required_outputs: &BTreeMap<String, distro_contract::RecipeOutputKind>,
+    network_hosts: &[String],
     refresh: bool,
 ) -> Result<BTreeMap<String, PathBuf>> {
     if required_outputs.is_empty() {
@@ -110,6 +113,7 @@ pub fn preseed_rootfs_source(
         &[],
         recipe_path.parent(),
         &[],
+        network_hosts,
         refresh,
     )
     .with_context(|| format!("preseeding rootfs source via '{}'", recipe_path.display()))?;

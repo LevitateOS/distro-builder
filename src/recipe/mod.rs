@@ -289,6 +289,7 @@ pub fn run_recipe_phase_json_with_defines(
         defines,
         recipes_path,
         &[],
+        &[],
         false,
     )
 }
@@ -303,6 +304,7 @@ pub fn run_recipe_phase_json_with_inputs(
     build_dir: &Path,
     defines: &[(&str, &str)],
     inputs: &[(&str, &Path)],
+    network_hosts: &[String],
     recipes_path: Option<&Path>,
 ) -> Result<serde_json::Value> {
     run_recipe_phase_json_impl(
@@ -313,6 +315,7 @@ pub fn run_recipe_phase_json_with_inputs(
         defines,
         recipes_path,
         inputs,
+        network_hosts,
         false,
     )
 }
@@ -325,6 +328,7 @@ fn run_recipe_phase_json_impl(
     defines: &[(&str, &str)],
     recipes_path: Option<&Path>,
     inputs: &[(&str, &Path)],
+    network_hosts: &[String],
     force_acquire: bool,
 ) -> Result<serde_json::Value> {
     eprintln!("  Running recipe: {}", recipe_path.display());
@@ -352,6 +356,9 @@ fn run_recipe_phase_json_impl(
     cmd.arg("--state-dir").arg(build_dir.join("recipe-state"));
     if force_acquire {
         cmd.args(["--force-acquire", "--force-install"]);
+    }
+    for host in network_hosts {
+        cmd.arg("--network-host").arg(host);
     }
     for (name, path) in inputs {
         let path = path.to_str().context("recipe input path is not UTF-8")?;

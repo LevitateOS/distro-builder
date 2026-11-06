@@ -20,6 +20,7 @@ pub fn preseed_alpine_rootfs_source_assets(
             ("iso".into(), distro_contract::RecipeOutputKind::File),
             ("apk_tools".into(), distro_contract::RecipeOutputKind::File),
         ]),
+        &["dl-cdn.alpinelinux.org:443".into()],
         refresh,
     )?;
     Ok(AlpineRootfsSourcePreseedOutput {

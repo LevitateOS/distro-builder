@@ -46,7 +46,7 @@ struct BuildRunMetadata {
 }
 
 fn usage() -> &'static str {
-    "Usage:\n  distro-builder release build iso [<distro_id|product>] [<distro_id|product>]\n    product defaults to base-rootfs, distro defaults to levitate\n    release products: base-rootfs | live-boot | live-tools\n  distro-builder release build-all iso [base-rootfs|live-boot|live-tools]\n  distro-builder product prepare <base-rootfs|live-boot|live-tools|installed-boot> <distro_id> <output_dir>\n  distro-builder transform build rootfs-erofs <source_dir> <output>\n  distro-builder transform build overlayfs-erofs <source_dir> <output>\n  distro-builder transform build product-erofs <prepared_product_dir>\n  distro-builder artifact preseed-rootfs-source <distro_id> [--refresh]\n  distro-builder artifact materialize-rootfs-source <distro_id>"
+    "Usage:\n  distro-builder release build iso [<distro_id|product>] [<distro_id|product>]\n    product defaults to base-rootfs, distro defaults to levitate\n    release products: base-rootfs | live-boot | live-tools\n  distro-builder release build-all iso [base-rootfs|live-boot|live-tools]\n  distro-builder product prepare <base-rootfs|live-boot|live-tools|installed-boot> <distro_id> <output_dir>\n  distro-builder transform build rootfs-erofs <source_dir> <output>\n  distro-builder transform build overlayfs-erofs <source_dir> <output>\n  distro-builder transform build product-erofs <prepared_product_dir>\n  distro-builder artifact prepare-tool-source <package> <output_dir>\n  distro-builder artifact preseed-rootfs-source <distro_id> [--refresh]\n  distro-builder artifact materialize-rootfs-source <distro_id>"
 }
 
 fn main() -> Result<()> {

@@ -89,6 +89,28 @@ pub(crate) fn dispatch_non_release_command(args: &[String]) -> Result<()> {
         {
             crate::workflows::build_overlayfs_erofs(Path::new(source_dir), Path::new(output))
         }
+        [artifact, prepare_source, package, output]
+            if artifact == "artifact" && prepare_source == "prepare-tool-source" =>
+        {
+            let repo = crate::workflows::locate_repo_root()?;
+            let output = Path::new(output);
+            if std::fs::symlink_metadata(output).is_ok() {
+                bail!("source output already exists: {}", output.display());
+            }
+            let parent = output
+                .parent()
+                .filter(|path| !path.as_os_str().is_empty())
+                .unwrap_or(Path::new("."));
+            std::fs::create_dir_all(parent)?;
+            let source = distro_builder::recipe::tools::prepare_tool_source(&repo, package)?;
+            let pending = tempfile::Builder::new()
+                .prefix(".source-")
+                .tempdir_in(parent)?;
+            distro_builder::copy_dir_recursive(source.path(), pending.path())?;
+            std::fs::rename(pending.path(), output)?;
+            println!("{}", output.display());
+            Ok(())
+        }
         [artifact, preseed_source, distro]
             if artifact == "artifact" && preseed_source == "preseed-rootfs-source" =>
         {

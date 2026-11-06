@@ -7,11 +7,14 @@ const RECIPE_API = 2;
 let ctx = #{
     name: "recchroot",
     version: "0.1.4",
+    rust_target: if is_def_var("RUST_TARGET") { RUST_TARGET } else { "x86_64-unknown-linux-gnu" },
     source: "/inputs/source",
     supplied_program: "/inputs/program",
-    built_program: join_path(RUNTIME.paths.build, "target/release/recchroot"),
+    built_program: "",
     program: join_path(RUNTIME.paths.output, "bin/recchroot"),
 };
+
+ctx.built_program = join_path(RUNTIME.paths.build, "target/" + ctx.rust_target + "/release/recchroot");
 
 fn _verify(ctx, program) {
     let actual = trim(exec_output(program, ["--version"]));
@@ -46,7 +49,7 @@ fn build(ctx) {
         _verify(ctx, ctx.supplied_program);
         return ctx;
     }
-    exec_checked("cargo", ["build", "--release", "--locked", "--offline", "--bin", "recchroot",
+    exec_checked("cargo", ["build", "--release", "--locked", "--offline", "--target", ctx.rust_target, "--bin", "recchroot",
         "--manifest-path", join_path(ctx.source, "Cargo.toml"),
         "--target-dir", join_path(work, "target")], #{
         cwd: ctx.source,

@@ -15,6 +15,7 @@ pub mod alpine_rootfs_source;
 pub mod linux;
 mod outputs;
 pub mod rootfs_source;
+pub mod tools;
 
 pub use crate::pipeline::paths::recipe_work_dir;
 
@@ -434,53 +435,15 @@ pub fn run_recipe(
 /// # Arguments
 /// * `base_dir` - distro crate root (e.g., `/path/to/AcornOS`)
 pub fn install_tools(base_dir: &Path) -> Result<()> {
-    let distro_name = distro_name(base_dir);
-    let monorepo_dir = base_dir
-        .parent()
-        .map(|p| p.to_path_buf())
-        .unwrap_or_else(|| base_dir.to_path_buf());
-
-    let downloads_dir = base_dir.join("downloads");
-    let staging_bin =
+    let repo = base_dir.parent().unwrap_or(base_dir);
+    let staging =
         crate::artifact_store::central_output_dir_for_distro(base_dir).join("staging/usr/bin");
-
-    // Find recipe binary once
-    let recipe_bin = find_recipe(&monorepo_dir)?;
-
-    // Run each tool recipe
+    std::fs::create_dir_all(&staging)?;
     for tool in LEVITATE_CARGO_TOOLS {
-        let recipe_path = base_dir.join(format!("deps/{}.rhai", tool));
-        let installed_path = staging_bin.join(tool);
-
-        // Skip if already installed
-        if installed_path.exists() {
-            println!("  {} already installed", tool);
-            continue;
-        }
-
-        ensure_exists(&recipe_path, &format!("{} recipe", tool)).map_err(|_| {
-            anyhow::anyhow!(
-                "{} recipe not found at: {}\n\
-                 Expected {}.rhai in {}/deps/",
-                tool,
-                recipe_path.display(),
-                tool,
-                distro_name
-            )
-        })?;
-
-        recipe_bin.run(&recipe_path, &downloads_dir)?;
-
-        // Verify installation
-        if !installed_path.exists() {
-            bail!(
-                "Recipe completed but {} not found at: {}",
-                tool,
-                installed_path.display()
-            );
-        }
+        let program = tools::build_tool_program(repo, tool, None, None)?;
+        std::fs::copy(&program, staging.join(tool))
+            .with_context(|| format!("installing published {tool} program"))?;
     }
-
     Ok(())
 }
 

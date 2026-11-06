@@ -217,19 +217,7 @@ fn build_workspace_binary_artifact(
     binary_name: Option<&str>,
     target: Option<&str>,
 ) -> Result<PathBuf> {
-    let built = match binary_name {
-        Some(binary_name) => {
-            build_workspace_binary_named(repo_root, package_name, binary_name, target)
-        }
-        None => build_workspace_binary(repo_root, package_name, target),
-    }?;
-    if !built.is_file() {
-        bail!(
-            "expected built workspace binary not found at '{}'",
-            built.display()
-        );
-    }
-    Ok(built)
+    crate::recipe::tools::build_tool_program(repo_root, package_name, binary_name, target)
 }
 
 fn copy_executable(source: &Path, destination: &Path) -> Result<()> {
@@ -302,96 +290,6 @@ fn ensure_apk_packages(rootfs_source_dir: &Path, packages: &[String]) -> Result<
     bail!(
         "apk package install failed for packages [{}]: {}\n{}",
         pkg_string,
-        stdout.trim(),
-        stderr.trim()
-    )
-}
-
-fn build_workspace_binary(
-    repo_root: &Path,
-    package_name: &str,
-    target: Option<&str>,
-) -> Result<PathBuf> {
-    let mut cmd = Command::new("cargo");
-    cmd.arg("build").arg("-q").arg("-p").arg(package_name);
-    if let Some(target_triple) = target {
-        cmd.arg("--target").arg(target_triple);
-    }
-
-    let output = cmd.current_dir(repo_root).output().with_context(|| {
-        format!(
-            "running cargo build for package '{}' at '{}'",
-            package_name,
-            repo_root.display()
-        )
-    })?;
-
-    if output.status.success() {
-        let built = match target {
-            Some(target_triple) => repo_root
-                .join("target")
-                .join(target_triple)
-                .join("debug")
-                .join(package_name),
-            None => repo_root.join("target/debug").join(package_name),
-        };
-        return Ok(built);
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    bail!(
-        "cargo build failed for package '{}': {}\n{}",
-        package_name,
-        stdout.trim(),
-        stderr.trim()
-    )
-}
-
-fn build_workspace_binary_named(
-    repo_root: &Path,
-    package_name: &str,
-    binary_name: &str,
-    target: Option<&str>,
-) -> Result<PathBuf> {
-    let mut cmd = Command::new("cargo");
-    cmd.arg("build")
-        .arg("-q")
-        .arg("-p")
-        .arg(package_name)
-        .arg("--bin")
-        .arg(binary_name);
-    if let Some(target_triple) = target {
-        cmd.arg("--target").arg(target_triple);
-    }
-
-    let output = cmd.current_dir(repo_root).output().with_context(|| {
-        format!(
-            "running cargo build for package '{}' (bin '{}') at '{}'",
-            package_name,
-            binary_name,
-            repo_root.display()
-        )
-    })?;
-
-    if output.status.success() {
-        let built = match target {
-            Some(target_triple) => repo_root
-                .join("target")
-                .join(target_triple)
-                .join("debug")
-                .join(binary_name),
-            None => repo_root.join("target/debug").join(binary_name),
-        };
-        return Ok(built);
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    bail!(
-        "cargo build failed for package '{}' (bin '{}'): {}\n{}",
-        package_name,
-        binary_name,
         stdout.trim(),
         stderr.trim()
     )

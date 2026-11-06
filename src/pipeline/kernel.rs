@@ -52,7 +52,11 @@ pub fn check_kernel_installed_with_recipe(
     let recipe_bin = crate::recipe::find_recipe(repo_root)
         .context("Resolving recipe binary for build kernel")?;
     let defines = [("KERNEL_TARGET", distro_id)];
-    let mut inputs: Vec<(&str, &Path)> = vec![("kconfig", &kconfig), ("target", kernel_output_dir)];
+    // The kernel output is a symlink to the selected bundle; Recipe stages
+    // only real files and directories, so pass the bundle itself.
+    let target = std::fs::canonicalize(kernel_output_dir)
+        .unwrap_or_else(|_| kernel_output_dir.to_path_buf());
+    let mut inputs: Vec<(&str, &Path)> = vec![("kconfig", &kconfig), ("target", &target)];
     if fragments.is_dir() {
         inputs.push(("kconfig_fragments", &fragments));
     }

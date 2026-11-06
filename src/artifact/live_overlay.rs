@@ -140,7 +140,10 @@ exec /bin/sh -l
         live_overlay.join("etc/issue"),
         config.issue_message.unwrap_or(&default_issue),
     )?;
-    fs::write(live_overlay.join(".live-payload-role"), "overlay\n")?;
+    fs::write(
+        live_overlay.join(distro_spec::shared::live_boot::PAYLOAD_ROLE_FILE),
+        format!("{}\n", distro_spec::shared::live_boot::ROLE_OVERLAY),
+    )?;
 
     // Empty root password for live session
     let shadow_content = "root::0:0:99999:7:::\n\
@@ -699,7 +702,10 @@ unset LC_ALL LC_CTYPE LC_NUMERIC LC_TIME LC_COLLATE LC_MESSAGES \
     let mut perms = fs::metadata(live_overlay.join("etc/shadow"))?.permissions();
     perms.set_mode(0o600);
     fs::set_permissions(live_overlay.join("etc/shadow"), perms)?;
-    fs::write(live_overlay.join(".live-payload-role"), "overlay\n")?;
+    fs::write(
+        live_overlay.join(distro_spec::shared::live_boot::PAYLOAD_ROLE_FILE),
+        format!("{}\n", distro_spec::shared::live_boot::ROLE_OVERLAY),
+    )?;
 
     println!(
         "  Systemd live overlay created at {}",

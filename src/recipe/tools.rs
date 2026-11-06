@@ -30,6 +30,10 @@ pub fn prepare_tool_source(repo: &Path, package: &str) -> Result<tempfile::TempD
         "default-members".into(),
         vec![relative.to_string_lossy().to_string()].into(),
     );
+    let root_manifest: toml::Value = toml::from_str(&fs::read_to_string(repo.join("Cargo.toml"))?)?;
+    if let Some(package) = root_manifest.get("workspace").and_then(|w| w.get("package")) {
+        workspace.insert("package".into(), package.clone());
+    }
     fs::write(
         source.path().join("Cargo.toml"),
         toml::to_string(&toml::Value::Table(
@@ -135,9 +139,6 @@ fn copy_crate(
         fs::copy(original.join(path), output.join(path))?;
     } else if original.join("build.rs").is_file() {
         fs::copy(original.join("build.rs"), output.join("build.rs"))?;
-    }
-    if original.join("README.md").is_file() {
-        fs::copy(original.join("README.md"), output.join("README.md"))?;
     }
     fs::write(output.join("Cargo.toml"), toml::to_string(&manifest)?)?;
     for dependency in local_dependencies {

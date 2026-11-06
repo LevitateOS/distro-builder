@@ -6,7 +6,6 @@
 const RECIPE_API = 2;
 let ctx = #{
     name: "recchroot",
-    version: "0.1.4",
     rust_target: if is_def_var("RUST_TARGET") { RUST_TARGET } else { "x86_64-unknown-linux-gnu" },
     source: "/inputs/source",
     supplied_program: "/inputs/program",
@@ -23,7 +22,7 @@ ctx.built_program = join_path(RUNTIME.paths.build, target_prefix + "recchroot");
 
 fn _verify(ctx, program) {
     let actual = trim(exec_output(program, ["--version"]));
-    if actual != "recchroot " + ctx.version {
+    if !actual.starts_with("recchroot ") {
         throw "Unexpected recchroot executable: " + actual;
     }
 }

@@ -162,7 +162,7 @@ fn install_tool_payload_workspace_binary(
     binary_name: Option<&str>,
     target: Option<&str>,
 ) -> Result<()> {
-    let built = build_workspace_binary_artifact(repo_root, package_name, binary_name, target)
+    let built = crate::recipe::tools::build_tool_program(repo_root, package_name, binary_name, target)
         .with_context(|| {
             format!(
                 "building workspace binary '{}' from package '{}'",
@@ -193,7 +193,7 @@ fn install_rootfs_workspace_binary(
     target: Option<&str>,
     destination: &Path,
 ) -> Result<()> {
-    let built = build_workspace_binary_artifact(repo_root, package_name, binary_name, target)
+    let built = crate::recipe::tools::build_tool_program(repo_root, package_name, binary_name, target)
         .with_context(|| {
             format!(
                 "building workspace binary '{}' from package '{}'",
@@ -209,15 +209,6 @@ fn install_rootfs_workspace_binary(
             destination.display()
         )
     })
-}
-
-fn build_workspace_binary_artifact(
-    repo_root: &Path,
-    package_name: &str,
-    binary_name: Option<&str>,
-    target: Option<&str>,
-) -> Result<PathBuf> {
-    crate::recipe::tools::build_tool_program(repo_root, package_name, binary_name, target)
 }
 
 fn copy_executable(source: &Path, destination: &Path) -> Result<()> {

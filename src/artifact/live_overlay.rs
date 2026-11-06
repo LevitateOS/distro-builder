@@ -4,7 +4,7 @@
 //! - OpenRC live overlay generation (AcornOS style)
 //! - Systemd live overlay generation (LevitateOS style)
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use std::fs;
 use std::os::unix::fs::symlink;
 use std::os::unix::fs::PermissionsExt;
@@ -32,6 +32,8 @@ pub struct LiveOverlayConfig<'a> {
     pub seed_overlay: Option<&'a Path>,
     /// The text of `/etc/issue`.
     pub issue: &'a str,
+    /// Consoles whose getty starts the install screen instead of a shell.
+    pub install_ux_consoles: &'a [String],
 }
 
 /// Configuration for creating a systemd live overlay.
@@ -41,6 +43,8 @@ pub struct SystemdLiveOverlayConfig<'a> {
     pub os_name: &'a str,
     /// The text of `/etc/issue`.
     pub issue: &'a str,
+    /// Consoles whose getty starts the install screen instead of a shell.
+    pub install_ux_consoles: &'a [String],
     /// Systemd unit names to mask by linking to `/dev/null`.
     pub masked_units: &'a [&'a str],
     /// Whether to write a serial-console scenario test marker profile script.
@@ -87,13 +91,44 @@ pub fn create_openrc_live_overlay(
     fs::create_dir_all(live_overlay.join("etc")).with_context(|| "Failed to create etc")?;
     write_serial_test_profile(&live_overlay)?;
 
-    // Serial autologin script
-    fs::create_dir_all(live_overlay.join("usr/local/bin"))?;
-    let autologin_script = crate::guest::render_boot(crate::guest::SERIAL_AUTOLOGIN_OPENRC)?;
-    write_executable(
-        &live_overlay.join("usr/local/bin/serial-autologin"),
-        &autologin_script,
-    )?;
+    // getty lines: the install screen on its consoles, else a plain getty on a VT
+    // and a root shell on the serial console.
+    let vts: &[&str] = match config.inittab {
+        InittabVariant::DesktopWithSerial => &["tty1", "tty2", "tty3", "tty4", "tty5", "tty6"],
+        InittabVariant::SerialOnly => &[],
+    };
+    let install_ux = |tty: &str| config.install_ux_consoles.iter().any(|c| c == tty);
+    if let Some(console) = config
+        .install_ux_consoles
+        .iter()
+        .find(|c| *c != "ttyS0" && !vts.contains(&c.as_str()))
+    {
+        bail!("install_ux console '{console}' has no getty in this inittab");
+    }
+    let launcher = format!("/{}", crate::install_ux::LAUNCHER);
+    let vt_gettys = vts
+        .iter()
+        .map(|tty| {
+            if install_ux(tty) {
+                format!("{tty}::respawn:/sbin/getty -n -l {launcher} 38400 {tty} linux\n")
+            } else {
+                format!("{tty}::respawn:/sbin/getty 38400 {tty}\n")
+            }
+        })
+        .collect::<String>();
+    let serial_login = if install_ux("ttyS0") {
+        launcher.clone()
+    } else {
+        fs::create_dir_all(live_overlay.join("usr/local/bin"))?;
+        let autologin_script = crate::guest::render_boot(crate::guest::SERIAL_AUTOLOGIN_OPENRC)?;
+        write_executable(
+            &live_overlay.join("usr/local/bin/serial-autologin"),
+            &autologin_script,
+        )?;
+        "/usr/local/bin/serial-autologin".to_string()
+    };
+    let serial_getty =
+        format!("ttyS0::respawn:/sbin/getty -L -n -l {serial_login} 115200 ttyS0 vt100");
 
     // /etc/issue
     fs::write(live_overlay.join("etc/issue"), config.issue)?;
@@ -121,16 +156,9 @@ pub fn create_openrc_live_overlay(
 ::sysinit:/sbin/openrc boot
 
 # Virtual terminals
-tty1::respawn:/sbin/getty 38400 tty1
-tty2::respawn:/sbin/getty 38400 tty2
-tty3::respawn:/sbin/getty 38400 tty3
-tty4::respawn:/sbin/getty 38400 tty4
-tty5::respawn:/sbin/getty 38400 tty5
-tty6::respawn:/sbin/getty 38400 tty6
-
-# Serial console with autologin for test harness
-# Uses wrapper script that spawns ash as login shell (sources /etc/profile.d/*)
-ttyS0::respawn:/sbin/getty -L -n -l /usr/local/bin/serial-autologin 115200 ttyS0 vt100
+{vt_gettys}
+# Serial console, logged in as root
+{serial_getty}
 
 # Continue remaining services after serial shell is available
 ::wait:/sbin/openrc default
@@ -149,9 +177,8 @@ ttyS0::respawn:/sbin/getty -L -n -l /usr/local/bin/serial-autologin 115200 ttyS0
 ::sysinit:/sbin/openrc sysinit
 ::sysinit:/sbin/openrc boot
 
-# Serial console PRIMARY with autologin (ttyS0) - appliance has no display
-# Uses wrapper script that spawns ash as login shell (sources /etc/profile.d/*)
-ttyS0::respawn:/sbin/getty -L -n -l /usr/local/bin/serial-autologin 115200 ttyS0 vt100
+# Serial console PRIMARY, logged in as root - appliance has no display
+{serial_getty}
 
 # Continue remaining services after serial shell is available
 ::wait:/sbin/openrc default
@@ -287,21 +314,42 @@ pub fn create_systemd_live_overlay(
         shell_ux_profile,
     )?;
 
-    let tty1_autologin =
-        "[Service]\nExecStart=\nExecStart=-/sbin/agetty --autologin root --noclear %I $TERM\n";
+    // Autologin as root. The install screen's consoles run its launcher in place of
+    // login. tty1's drop-in has the template drop-in's name, so it replaces it.
+    if let Some(console) = config
+        .install_ux_consoles
+        .iter()
+        .find(|c| !matches!(c.as_str(), "tty1" | "ttyS0"))
+    {
+        bail!("install_ux console '{console}' has no getty in the systemd live overlay");
+    }
+    let login_program = |tty: &str| {
+        if config.install_ux_consoles.iter().any(|c| c == tty) {
+            format!(" --login-program /{}", crate::install_ux::LAUNCHER)
+        } else {
+            String::new()
+        }
+    };
+    let tty1_autologin = format!(
+        "[Service]\nExecStart=\nExecStart=-/sbin/agetty --autologin root --noclear{} %I $TERM\n",
+        login_program("tty1")
+    );
     fs::write(
-        live_overlay.join("etc/systemd/system/getty@tty1.service.d/autologin.conf"),
+        live_overlay.join("etc/systemd/system/getty@tty1.service.d/zz-autologin.conf"),
         tty1_autologin,
     )?;
 
-    let serial_autologin_script =
-        crate::guest::render_boot(crate::guest::SERIAL_AUTOLOGIN_SYSTEMD)?;
-    write_executable(
-        &live_overlay.join("usr/local/bin/serial-autologin"),
-        &serial_autologin_script,
-    )?;
-
     let serial_autologin = "[Service]\nExecStart=\nExecStart=-/sbin/agetty --autologin root --keep-baud 115200,57600,38400,9600 %I vt100\n";
+    if !login_program("ttyS0").is_empty() {
+        fs::create_dir_all(live_overlay.join("etc/systemd/system/serial-getty@ttyS0.service.d"))?;
+        fs::write(
+            live_overlay.join("etc/systemd/system/serial-getty@ttyS0.service.d/zz-autologin.conf"),
+            format!(
+                "[Service]\nExecStart=\nExecStart=-/sbin/agetty --autologin root{} --keep-baud 115200,57600,38400,9600 %I vt100\n",
+                login_program("ttyS0")
+            ),
+        )?;
+    }
     fs::write(
         live_overlay.join("etc/systemd/system/serial-getty@.service.d/zz-autologin.conf"),
         serial_autologin,

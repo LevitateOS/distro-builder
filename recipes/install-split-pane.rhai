@@ -1,7 +1,7 @@
 // Build the installation tool from an explicit offline source closure, or use
 // an explicitly supplied executable. Host paths are selected by the caller:
-//   --input source=<standalone vendored levitate-install-docs-split tree>
-//   --input program=<levitate-install-docs-split executable>
+//   --input source=<standalone vendored install-split tree>
+//   --input program=<install-split executable>
 // The named program output is published by Recipe for the consumer to install.
 const RECIPE_API = 2;
 let ctx = #{
@@ -11,7 +11,7 @@ let ctx = #{
     source: "/inputs/source",
     supplied_program: "/inputs/program",
     built_program: "",
-    program: join_path(RUNTIME.paths.output, "bin/levitate-install-docs-split"),
+    program: join_path(RUNTIME.paths.output, "bin/install-split"),
 };
 
 if ctx.rust_target != "x86_64-unknown-linux-gnu" && ctx.rust_target != "x86_64-unknown-linux-musl" {
@@ -19,11 +19,11 @@ if ctx.rust_target != "x86_64-unknown-linux-gnu" && ctx.rust_target != "x86_64-u
 }
 let target_prefix = if ctx.rust_target == "x86_64-unknown-linux-gnu" { "target/release/" }
                     else { "target/" + ctx.rust_target + "/release/" };
-ctx.built_program = join_path(RUNTIME.paths.build, target_prefix + "levitate-install-docs-split");
+ctx.built_program = join_path(RUNTIME.paths.build, target_prefix + "install-split");
 
 fn _verify(ctx, program) {
     let help = exec_output(program, ["--help"]);
-    if !help.contains("levitate-install-docs-split --smoke") {
+    if !help.contains("install-split --smoke") {
         throw "Unexpected split-pane executable: missing its declared smoke entry";
     }
 }
@@ -32,7 +32,7 @@ fn is_acquired(ctx) {
     if is_file(join_path(ctx.source, "Cargo.toml")) || is_file(ctx.supplied_program) {
         return ready(ctx);
     }
-    needs_work(ctx, "levitate-install-docs-split source or executable input is missing")
+    needs_work(ctx, "install-split source or executable input is missing")
 }
 
 fn acquire(ctx) {
@@ -42,7 +42,7 @@ fn acquire(ctx) {
 
 fn is_built(ctx) {
     let program = if is_file(join_path(ctx.source, "Cargo.toml")) { ctx.built_program } else { ctx.supplied_program };
-    if !is_file(program) { return needs_work(ctx, "levitate-install-docs-split needs compilation"); }
+    if !is_file(program) { return needs_work(ctx, "install-split needs compilation"); }
     _verify(ctx, program);
     ready(ctx)
 }
@@ -54,7 +54,7 @@ fn build(ctx) {
         _verify(ctx, ctx.supplied_program);
         return ctx;
     }
-    let args = ["build", "--release", "--locked", "--offline", "--bin", "levitate-install-docs-split",
+    let args = ["build", "--release", "--locked", "--offline", "--bin", "install-split",
         "--manifest-path", join_path(ctx.source, "Cargo.toml"), "--target-dir", join_path(work, "target")];
     if ctx.rust_target == "x86_64-unknown-linux-gnu" {
         let compiler = exec_output("rustc", ["-vV"]);
@@ -76,7 +76,7 @@ fn build(ctx) {
 }
 
 fn is_installed(ctx) {
-    if !is_file(ctx.program) { return needs_work(ctx, "levitate-install-docs-split output is missing"); }
+    if !is_file(ctx.program) { return needs_work(ctx, "install-split output is missing"); }
     _verify(ctx, ctx.program);
     ctx.outputs.program = ctx.program;
     ready(ctx)

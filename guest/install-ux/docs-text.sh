@@ -1,27 +1,10 @@
 #!/bin/sh
-set -eu
-
-DOCS_FILE="@DOCS_TEXT@"
-case "${TERM:-}" in
-    ""|dumb|vt100|vt102|linux)
-        export TERM=xterm-256color
-        ;;
-esac
-export COLORTERM="${COLORTERM:-truecolor}"
-export FORCE_COLOR="${FORCE_COLOR:-3}"
-if [ -n "${NO_COLOR:-}" ]; then
-    unset NO_COLOR
-fi
-
-if [ -f "$DOCS_FILE" ]; then
-    if [ "${LEVITATE_DOCS_PLAIN:-0}" != "1" ] && command -v less >/dev/null 2>&1; then
-        less "$DOCS_FILE" || true
-        echo "Install guide closed. Run 'levitate-install-docs' to reopen it."
-    else
-        cat "$DOCS_FILE"
-    fi
+# install-docs: the install guide, wrapped to this terminal's width, in a pager.
+guide=@GUIDE@
+columns=$(stty size 2>/dev/null | cut -d' ' -f2)
+[ "${columns:-0}" -gt 0 ] 2>/dev/null || columns=80
+if command -v less >/dev/null 2>&1; then
+    fold -s -w "$columns" "$guide" | LESS= less
 else
-    echo "install docs payload missing at $DOCS_FILE"
+    fold -s -w "$columns" "$guide"
 fi
-
-exec "${SHELL:-@SHELL@}" -l

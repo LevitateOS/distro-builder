@@ -20,15 +20,12 @@ scripts! {
     LIVE_SHUTDOWN_CLEANUP = "live/live-shutdown-cleanup.sh";
     SERIAL_AUTOLOGIN_OPENRC = "live/serial-autologin.openrc.sh";
     SERIAL_AUTOLOGIN_ROOTFS = "live/serial-autologin.rootfs.sh";
-    SERIAL_AUTOLOGIN_SYSTEMD = "live/serial-autologin.systemd.sh";
     SHELL_COLOR_PROFILE = "live/shell-color.sh";
     SHELL_UX_PROFILE = "live/shell-ux.sh";
     VOLATILE_LOG_START = "live/volatile-log.start";
     DOCS_BUN = "install-ux/docs-bun.sh";
     DOCS_TEXT = "install-ux/docs-text.sh";
-    DOCS_TUI_ALIAS = "install-ux/docs-tui-alias.sh";
-    ENTRYPOINT_UX = "install-ux/entrypoint-ux.sh";
-    INSTALL_UX_PROFILE_HOOK = "install-ux/profile-hook.sh";
+    INSTALL_UX = "install-ux/install-ux.sh";
 }
 
 /// Fills every `@NAME@` in `template` from `values`. A placeholder with no value is an
@@ -59,19 +56,13 @@ pub(crate) fn render(template: &str, values: &[(&str, &str)]) -> Result<String> 
     Ok(out)
 }
 
-/// The boot protocol's placeholders: the install entrypoint, the serial readiness
-/// marker and the boot-injection import.
-pub(crate) fn boot_protocol() -> [(&'static str, String); 3] {
-    [
-        ("INSTALL_ENTRYPOINT", format!("/{}", crate::live_ux::INSTALL_ENTRYPOINT)),
-        ("SHELL_READY_MARKER", recqemu::serial::protocol::SHELL_READY_MARKER.to_string()),
-        ("BOOT_INJECTION_IMPORT", recinit::live::boot_injection_import_sh()),
-    ]
-}
-
-/// [`boot_protocol`] as `render` values.
+/// Renders a script whose only placeholder is the serial readiness marker.
 pub(crate) fn render_boot(template: &str) -> Result<String> {
-    let values = boot_protocol();
-    let refs: Vec<(&str, &str)> = values.iter().map(|(k, v)| (*k, v.as_str())).collect();
-    render(template, &refs)
+    render(
+        template,
+        &[(
+            "SHELL_READY_MARKER",
+            recqemu::serial::protocol::SHELL_READY_MARKER,
+        )],
+    )
 }

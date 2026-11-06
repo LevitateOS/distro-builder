@@ -7,7 +7,7 @@ edition = "2021"
 path = "src/lib.rs"
 
 [[bin]]
-name = "levitate-install-docs-split"
+name = "install-split"
 path = "src/main.rs"
 
 [dependencies]

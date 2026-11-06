@@ -1,14 +1,12 @@
 #!/bin/sh
-cat <<'EOF'
+cat <<'EOF2'
 LevitateOS Live Quick Help
 
 Common commands:
-  levitate-install-entrypoint --probe
-  live-net-setup.service (systemd unit)
+  install-docs    the install docs on their own
   recpart / recstrap / recfstab / recchroot
-  docs-tui --slug installation
+  live-net-setup.service (systemd unit)
 
-Split-pane controls:
-  Ctrl-g  toggle focused pane
-  Ctrl-q  quit split-pane UI
-EOF
+On the install screen, its bottom line lists the keys. Leaving the
+login shell (exit or Ctrl-D) brings the install screen back.
+EOF2

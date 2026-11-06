@@ -3,7 +3,6 @@ use std::{
     env,
     io::{self, Read, Write},
     panic,
-    path::Path,
     sync::{mpsc, Arc, Mutex},
     thread,
     time::{Duration, Instant},
@@ -37,132 +36,65 @@ const SMOKE_RIGHT_MARKER: &str = "__LEVITATE_SPLIT_RIGHT_OK__";
 
 fn main() -> Result<()> {
     let args = Args::parse()?;
-    let config = Config::load();
-
     if args.smoke {
-        return run_smoke(&config);
+        return run_smoke(&args);
     }
-
-    run_ui(&config)
+    run_ui(&args)
 }
 
-#[derive(Debug, Clone, Copy)]
+/// `install-split [--smoke] --left PROGRAM [ARGS...] --right PROGRAM [ARGS...]`
+#[derive(Debug, Clone)]
 struct Args {
     smoke: bool,
+    left: Vec<String>,
+    right: Vec<String>,
 }
 
 impl Args {
     fn parse() -> Result<Self> {
         let mut smoke = false;
-        for arg in env::args().skip(1) {
+        let mut left = Vec::new();
+        let mut right = Vec::new();
+        let mut args = env::args().skip(1);
+        while let Some(arg) = args.next() {
             match arg.as_str() {
                 "--smoke" => smoke = true,
                 "-h" | "--help" => {
                     print_help();
                     std::process::exit(0);
                 }
-                other => {
-                    bail!("unknown option '{}'. Use --help for usage.", other);
+                "--left" => {
+                    for word in args.by_ref() {
+                        if word == "--right" {
+                            right = args.by_ref().collect();
+                            break;
+                        }
+                        left.push(word);
+                    }
                 }
+                other => bail!("unknown option '{}'. Use --help for usage.", other),
             }
         }
-        Ok(Self { smoke })
+        if left.is_empty() || right.is_empty() {
+            bail!("give both panes a command: --left PROGRAM [ARGS...] --right PROGRAM [ARGS...]");
+        }
+        Ok(Self { smoke, left, right })
     }
 }
 
 fn print_help() {
     println!("Usage:");
-    println!("  levitate-install-docs-split");
-    println!("  levitate-install-docs-split --smoke");
+    println!("  install-split --left PROGRAM [ARGS...] --right PROGRAM [ARGS...]");
+    println!("  install-split --smoke --left PROGRAM [ARGS...] --right PROGRAM [ARGS...]");
+    println!();
+    println!("Runs the left command (the shell) beside the right one (the docs).");
     println!();
     println!("Options:");
     println!("  --smoke   Non-interactive split-pane smoke check for install UX tests.");
 }
 
-#[derive(Debug, Clone)]
-struct Config {
-    shell: String,
-    left_command: Option<String>,
-    right_command: Option<String>,
-}
-
-impl Config {
-    fn load() -> Self {
-        let shell = resolved_shell_path();
-        let left_command = resolve_left_command();
-        let right_command = resolve_right_command();
-        Self {
-            shell,
-            left_command,
-            right_command,
-        }
-    }
-}
-
-fn resolve_left_command() -> Option<String> {
-    if let Ok(raw) = env::var("LEVITATE_INSTALL_LEFT_CMD") {
-        let raw = raw.trim();
-        if !raw.is_empty() {
-            return Some(raw.to_string());
-        }
-    }
-    None
-}
-
-fn resolve_right_command() -> Option<String> {
-    if let Ok(raw) = env::var("LEVITATE_INSTALL_RIGHT_CMD") {
-        let raw = raw.trim();
-        if !raw.is_empty() {
-            if let Some(token) = first_token(raw) {
-                if command_exists(token) {
-                    return Some(raw.to_string());
-                }
-            }
-        }
-    }
-    command_exists("levitate-install-docs").then(|| "levitate-install-docs".to_string())
-}
-
-fn command_exists(cmd: &str) -> bool {
-    if cmd.contains('/') {
-        return Path::new(cmd).is_file();
-    }
-
-    let Some(path_var) = env::var_os("PATH") else {
-        return false;
-    };
-
-    env::split_paths(&path_var).any(|entry| entry.join(cmd).is_file())
-}
-
-fn first_token(command: &str) -> Option<&str> {
-    command.split_whitespace().next()
-}
-
-fn resolved_shell_path() -> String {
-    if let Some(shell) = env::var("SHELL")
-        .ok()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty() && command_exists(s))
-    {
-        return shell;
-    }
-
-    for candidate in ["/bin/bash", "/usr/bin/bash", "/bin/sh", "/usr/bin/sh"] {
-        if command_exists(candidate) {
-            return candidate.to_string();
-        }
-    }
-
-    "/bin/sh".to_string()
-}
-
-fn run_smoke(config: &Config) -> Result<()> {
-    let right_command = config.right_command.as_deref().ok_or_else(|| {
-        anyhow!("split-smoke: missing right-pane docs command (levitate-install-docs)")
-    })?;
-    let right_token = first_token(right_command)
-        .ok_or_else(|| anyhow!("split-smoke: invalid right command '{}'", right_command))?;
+fn run_smoke(args: &Args) -> Result<()> {
+    let right_program = &args.right[0];
 
     let (tx, rx) = mpsc::channel::<PtyEvent>();
     let pty_size = PtySize {
@@ -172,13 +104,17 @@ fn run_smoke(config: &Config) -> Result<()> {
         pixel_height: 0,
     };
 
-    let left_cmd = build_left_pane_command(config);
+    let left_cmd = pane_command(&args.left);
     let right_probe = format!(
-        "if command -v {cmd} >/dev/null 2>&1; then printf '{ok}\\n'; else printf '__LEVITATE_SPLIT_RIGHT_MISSING__\\n'; fi; sleep 0.2",
-        cmd = shell_quote(right_token),
-        ok = SMOKE_RIGHT_MARKER
+        "if command -v \"$1\" >/dev/null 2>&1; then printf '{SMOKE_RIGHT_MARKER}\\n'; else printf '__LEVITATE_SPLIT_RIGHT_MISSING__\\n'; fi; sleep 0.2"
     );
-    let right_cmd = build_shell_script_command(&right_probe);
+    let right_cmd = pane_command(&[
+        "/bin/sh".to_string(),
+        "-c".to_string(),
+        right_probe,
+        "_".to_string(),
+        right_program.clone(),
+    ]);
 
     let mut left = spawn_raw_pane(PaneId::Left, left_cmd, pty_size, tx.clone())?;
     let mut right = spawn_raw_pane(PaneId::Right, right_cmd, pty_size, tx)?;
@@ -222,7 +158,10 @@ fn run_smoke(config: &Config) -> Result<()> {
     let _ = right.child.wait();
 
     if left_seen && right_seen {
-        println!("split-smoke:ok left={} right={}", config.shell, right_token);
+        println!(
+            "split-smoke:ok left={} right={}",
+            args.left[0], right_program
+        );
         return Ok(());
     }
 
@@ -243,7 +182,7 @@ fn truncate_for_error(s: &str) -> String {
     format!("{}...(truncated)", &s[s.len() - MAX..])
 }
 
-fn run_ui(config: &Config) -> Result<()> {
+fn run_ui(args: &Args) -> Result<()> {
     let _restore = TerminalRestore;
     install_panic_hook();
 
@@ -264,19 +203,14 @@ fn run_ui(config: &Config) -> Result<()> {
 
     let left = spawn_raw_pane(
         PaneId::Left,
-        build_left_pane_command(config),
+        pane_command(&args.left),
         left_size,
         tx.clone(),
     )?;
-    let right = spawn_raw_pane(
-        PaneId::Right,
-        build_shell_script_command(&right_launch_script(config.right_command.as_deref())),
-        right_size,
-        tx,
-    )?;
+    let right = spawn_raw_pane(PaneId::Right, pane_command(&args.right), right_size, tx)?;
 
     let mut app = App::new(
-        config,
+        args,
         PaneState::new("Shell", left, left_size),
         PaneState::new("Docs", right, right_size),
     );
@@ -366,23 +300,10 @@ struct App {
 }
 
 impl App {
-    fn new(config: &Config, left: PaneState, right: PaneState) -> Self {
+    fn new(args: &Args, left: PaneState, right: PaneState) -> Self {
         let mut logs = VecDeque::new();
-        logs.push_back(format!("shell={}", config.shell));
-        logs.push_back(format!(
-            "left={}",
-            config
-                .left_command
-                .clone()
-                .unwrap_or_else(|| "<default-shell>".to_string())
-        ));
-        logs.push_back(format!(
-            "right={}",
-            config
-                .right_command
-                .clone()
-                .unwrap_or_else(|| "<missing>".to_string())
-        ));
+        logs.push_back(format!("left={}", args.left.join(" ")));
+        logs.push_back(format!("right={}", args.right.join(" ")));
         Self {
             focus: FocusPane::Left,
             left,
@@ -522,26 +443,9 @@ fn spawn_raw_pane(
     })
 }
 
-fn build_shell_command(shell: &str) -> CommandBuilder {
-    let mut cmd = CommandBuilder::new(shell);
-    // Always force an interactive shell for the left pane so users get a prompt
-    // even when PTY controlling-tty detection is inconsistent across environments.
-    cmd.arg("-i");
-    apply_common_env(&mut cmd);
-    cmd
-}
-
-fn build_left_pane_command(config: &Config) -> CommandBuilder {
-    if let Some(left) = config.left_command.as_deref() {
-        return build_shell_script_command(&format!("exec {}", left));
-    }
-    build_shell_command(&config.shell)
-}
-
-fn build_shell_script_command(script: &str) -> CommandBuilder {
-    let mut cmd = CommandBuilder::new("/bin/sh");
-    cmd.arg("-lc");
-    cmd.arg(script);
+fn pane_command(argv: &[String]) -> CommandBuilder {
+    let mut cmd = CommandBuilder::new(&argv[0]);
+    cmd.args(&argv[1..]);
     apply_common_env(&mut cmd);
     cmd
 }
@@ -564,13 +468,6 @@ fn apply_common_env(cmd: &mut CommandBuilder) {
     cmd.env("FORCE_COLOR", force_color);
     // Ensure NO_COLOR from host/session cannot silently downgrade docs rendering.
     cmd.env("NO_COLOR", "");
-}
-
-fn right_launch_script(right: Option<&str>) -> String {
-    match right {
-        Some(cmd) => format!("exec {}", cmd),
-        None => "printf '%s\\n' 'No install docs command found (levitate-install-docs).'; exec \"${SHELL:-/bin/sh}\" -l".to_string(),
-    }
 }
 
 fn draw(frame: &mut Frame, app: &App) {
@@ -783,10 +680,6 @@ fn key_event_to_bytes(key: KeyEvent) -> Option<Vec<u8>> {
     }
 
     Some(out)
-}
-
-fn shell_quote(token: &str) -> String {
-    format!("'{}'", token.replace('\'', "'\"'\"'"))
 }
 
 fn install_panic_hook() {

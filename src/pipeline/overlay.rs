@@ -27,6 +27,7 @@ pub(crate) fn create_live_overlay(
     overlay_label: &str,
     dir_name: &str,
     overlay: &BootOverlayPolicy,
+    install_ux_consoles: &[String],
 ) -> Result<PathBuf> {
     let overlay_issue_banner = overlay_issue_banner(os_name, overlay_label);
     let live_overlay_dir = match overlay {
@@ -35,6 +36,7 @@ pub(crate) fn create_live_overlay(
             &SystemdLiveOverlayConfig {
                 os_name,
                 issue: &overlay_issue_banner,
+                install_ux_consoles,
                 masked_units: &[],
                 write_serial_test_profile: true,
                 machine_id: Some(BOOT_MACHINE_ID),
@@ -52,6 +54,7 @@ pub(crate) fn create_live_overlay(
                 inittab: *inittab,
                 seed_overlay: seed_overlay.as_deref(),
                 issue: &overlay_issue_banner,
+                install_ux_consoles,
             },
         )
         .with_context(|| format!("creating openrc live overlay for {}", distro_id))?,
@@ -324,7 +327,7 @@ ttyS0::respawn:/sbin/getty -L -n -l /usr/local/bin/serial-autologin 115200 ttyS0
         format!(
             "\n{} Boot Live - \\l\n\n{}\n\n",
             os_name,
-            crate::live_ux::LIVE_LOGIN_HINT
+            crate::install_ux::LIVE_LOGIN_HINT
         ),
     )
     .with_context(|| format!("writing '{}'", issue_path.display()))?;
@@ -350,6 +353,6 @@ fn overlay_issue_banner(os_name: &str, overlay_label: &str) -> String {
         "\n{} {} Live - \\l\n\n{}\n\n",
         os_name,
         overlay_label,
-        crate::live_ux::LIVE_LOGIN_HINT
+        crate::install_ux::LIVE_LOGIN_HINT
     )
 }

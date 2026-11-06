@@ -193,11 +193,7 @@ pub fn build_tool_program(
         "recpart" => ("install-tools", "recpart", &["recpart"]),
         "recstrap" => ("install-tools", "recstrap", &["recstrap", "recchroot", "recfstab"]),
         "recab" => ("install-tools", "recab", &["recab"]),
-        "install-split-pane" => (
-            "install-split-pane",
-            "levitate-install-docs-split",
-            &["levitate-install-docs-split"],
-        ),
+        "install-split-pane" => ("install-split-pane", "install-split", &["install-split"]),
         _ => bail!("no managed live-tool recipe declared for {package}"),
     };
     let binary = binary.unwrap_or(default_binary);

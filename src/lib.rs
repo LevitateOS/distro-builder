@@ -46,7 +46,7 @@
 
 pub mod alpine;
 pub mod artifact;
-pub mod live_ux;
+pub mod install_ux;
 pub(crate) mod guest;
 pub mod artifact_store;
 pub mod build;

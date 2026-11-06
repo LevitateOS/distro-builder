@@ -10,7 +10,7 @@ use crate::pipeline::config::{
 use crate::pipeline::io::{
     create_empty_overlay_dir, create_unique_output_dir, extract_erofs_rootfs,
 };
-use crate::pipeline::live_tools::{add_required_tools, install_ux_payload};
+use crate::pipeline::live_tools::{add_required_tools, install_shell_color_profile};
 use distro_contract::{InstallUxContract, RuntimeActionContract};
 use crate::pipeline::overlay::{
     create_live_overlay, ensure_openrc_shell, ensure_required_service_wiring,
@@ -339,6 +339,7 @@ pub fn prepare_live_boot_product(
         &spec.live_overlay.issue_banner_label,
         &spec.live_overlay.dir_name,
         &spec.overlay,
+        &[],
     )?;
 
     ensure_required_service_wiring(&live_overlay_dir, &spec.overlay, &spec.required_services)
@@ -469,6 +470,7 @@ pub fn prepare_live_tools_product(
         &spec.live_overlay.issue_banner_label,
         &spec.live_overlay.dir_name,
         &spec.overlay,
+        &spec.install_ux.consoles,
     )?;
 
     add_required_tools(
@@ -479,8 +481,14 @@ pub fn prepare_live_tools_product(
         &spec.runtime_actions,
     )
     .with_context(|| format!("adding required live tools for '{}'", spec.distro_id))?;
-    install_ux_payload(&spec.repo_root, &rootfs_source_dir, &spec.distro_id, &spec.install_ux)
-        .with_context(|| format!("writing the install screen for '{}'", spec.distro_id))?;
+    install_shell_color_profile(&rootfs_source_dir)?;
+    crate::install_ux::write_payload(
+        &spec.repo_root,
+        &rootfs_source_dir,
+        &spec.os_name,
+        &spec.install_ux,
+    )
+    .with_context(|| format!("writing the install screen for '{}'", spec.distro_id))?;
 
     ensure_required_service_wiring(&live_overlay_dir, &spec.overlay, &spec.required_services)
         .with_context(|| {

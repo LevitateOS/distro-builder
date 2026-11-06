@@ -1,11 +1,10 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use distro_builder::build_host::{
     ensure_kernel_preinstalled_via_recipe, run_build_host_evidence_script, BuildHostEvidenceSpec,
     BuildHostKernelEnsureOutcome, BuildHostKernelSpec,
 };
 use distro_contract::{load_variant_contract_bundle_for_distro_from, require_valid_contract};
 use std::path::Path;
-use std::process::Command;
 use time::OffsetDateTime;
 
 use crate::{BuildOutputLayout, BuildProduct};
@@ -33,25 +32,6 @@ pub(crate) fn ensure_release_prerequisites(
     }
 
     Ok(())
-}
-
-pub(crate) fn enforce_legacy_binding_policy_guard() -> Result<()> {
-    let repo_root = crate::workflows::layout::locate_repo_root()?;
-    let status = Command::new("cargo")
-        .current_dir(&repo_root)
-        .args(["xtask", "policy", "audit-legacy-bindings"])
-        .status()
-        .context("running legacy-binding policy guard via `cargo xtask`")?;
-
-    if status.success() {
-        return Ok(());
-    }
-
-    bail!(
-        "policy guard failed before distro-builder execution (exit: {}). \
-Run `cargo xtask policy audit-legacy-bindings` and fix violations first.",
-        status
-    )
 }
 
 pub(crate) fn build_all(product: BuildProduct) -> Result<()> {

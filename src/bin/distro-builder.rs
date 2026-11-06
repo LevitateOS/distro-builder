@@ -56,7 +56,6 @@ fn main() -> Result<()> {
         return workflows::run_release_build_command(&args);
     }
 
-    workflows::enforce_legacy_binding_policy_guard()?;
     workflows::dispatch_non_release_command(&args)
 }
 

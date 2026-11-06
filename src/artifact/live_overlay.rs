@@ -89,34 +89,10 @@ pub fn create_openrc_live_overlay(
 
     // Serial autologin script
     fs::create_dir_all(live_overlay.join("usr/local/bin"))?;
-    let autologin_script = r#"#!/bin/sh
-# Autologin for serial console testing
-# Called by agetty -l as the login program
-# agetty has already set up stdin/stdout/stderr on the tty
-
-# Optional boot-injection environment (e.g. SSH_AUTHORIZED_KEY, LEVITATE_INSTALL_SERIAL_UX).
-# Parse as literal KEY=VALUE lines to avoid executing payload content.
-@BOOT_INJECTION_IMPORT@
-
-echo "[autologin] Starting login shell..."
-echo "@SHELL_READY_MARKER@"
-echo "[autologin] Starting login shell..." >/dev/console 2>/dev/null || true
-echo "@SHELL_READY_MARKER@" >/dev/console 2>/dev/null || true
-echo "@SHELL_READY_MARKER@" >/dev/kmsg 2>/dev/null || true
-
-if [ "${LEVITATE_INSTALL_SERIAL_UX:-0}" = "1" ] && [ -x @INSTALL_ENTRYPOINT@ ]; then
-    echo "[autologin] Launching install UX on serial console..."
-    export LEVITATE_INSTALL_UX_LAUNCHED=1
-    exec @INSTALL_ENTRYPOINT@
-fi
-
-# Run sh as login shell (sources /etc/profile and /etc/profile.d/*)
-# In Alpine, /bin/sh is busybox ash
-exec /bin/sh -l
-"#;
+    let autologin_script = crate::guest::render_boot(crate::guest::SERIAL_AUTOLOGIN_OPENRC)?;
     write_executable(
         &live_overlay.join("usr/local/bin/serial-autologin"),
-        &fill_guest_script(autologin_script),
+        &autologin_script,
     )?;
 
     // /etc/issue
@@ -215,44 +191,13 @@ ttyS0::respawn:/sbin/getty -L -n -l /usr/local/bin/serial-autologin 115200 ttyS0
     // local.d scripts
     fs::create_dir_all(live_overlay.join("etc/local.d"))?;
 
-    let volatile_log_script = r#"#!/bin/sh
-# Ensure volatile log storage for live session
-# This runs early in boot to catch any logs before syslog starts
-
-# Only mount if not already a tmpfs (idempotent)
-if ! mountpoint -q /var/log 2>/dev/null; then
-    # Preserve any existing logs created before mount
-    if [ -d /var/log ]; then
-        mkdir -p /tmp/log-backup
-        cp -a /var/log/* /tmp/log-backup/ 2>/dev/null || true
-    fi
-
-    mount -t tmpfs -o nosuid,nodev,noexec,size=64M,mode=0755 tmpfs /var/log
-
-    # Restore preserved logs
-    if [ -d /tmp/log-backup ]; then
-        cp -a /tmp/log-backup/* /var/log/ 2>/dev/null || true
-        rm -rf /tmp/log-backup
-    fi
-
-    # Ensure log directories exist
-    mkdir -p /var/log/chrony 2>/dev/null || true
-fi
-"#;
+    let volatile_log_script = crate::guest::VOLATILE_LOG_START;
     write_executable(
         &live_overlay.join("etc/local.d/00-volatile-log.start"),
         volatile_log_script,
     )?;
 
-    let efivars_script = r#"#!/bin/sh
-# Ensure efivarfs is mounted for UEFI support
-# Needed for efibootmgr, bootctl, and install tests
-
-if [ -d /sys/firmware/efi ]; then
-    mkdir -p /sys/firmware/efi/efivars 2>/dev/null
-    mount -t efivarfs efivarfs /sys/firmware/efi/efivars 2>/dev/null || true
-fi
-"#;
+    let efivars_script = crate::guest::EFIVARFS_START;
     write_executable(
         &live_overlay.join("etc/local.d/01-efivarfs.start"),
         efivars_script,
@@ -261,27 +206,7 @@ fi
     // Do-not-suspend configuration
     // Method 1: ACPI handler
     fs::create_dir_all(live_overlay.join("etc/acpi"))?;
-    let acpi_handler = format!(
-        r#"#!/bin/sh
-# {} Live: Disable suspend actions
-# Power button and lid close do nothing during live session
-
-case "$1" in
-    button/power)
-        # Log but don't suspend - user is probably installing
-        logger "{} Live: Power button pressed (suspend disabled)"
-        ;;
-    button/lid)
-        # Lid close does nothing - prevent accidental suspend
-        logger "{} Live: Lid event ignored (suspend disabled)"
-        ;;
-    *)
-        # Let other events through to default handler
-        ;;
-esac
-"#,
-        config.os_name, config.os_name, config.os_name
-    );
+    let acpi_handler = crate::guest::render(crate::guest::ACPI_HANDLER, &[("OS_NAME", config.os_name)])?;
     write_executable(&live_overlay.join("etc/acpi/handler.sh"), &acpi_handler)?;
 
     // Method 2: sysctl
@@ -357,46 +282,13 @@ pub fn create_systemd_live_overlay(
     fs::create_dir_all(live_overlay.join("usr/local/bin"))?;
     fs::create_dir_all(live_overlay.join("usr/local/sbin"))?;
 
-    let live_help_script = r#"#!/bin/sh
-cat <<'EOF'
-LevitateOS Live Quick Help
-
-Common commands:
-  levitate-install-entrypoint --probe
-  live-net-setup.service (systemd unit)
-  recpart / recstrap / recfstab / recchroot
-  docs-tui --slug installation
-
-Split-pane controls:
-  Ctrl-g  toggle focused pane
-  Ctrl-q  quit split-pane UI
-EOF
-"#;
+    let live_help_script = crate::guest::LIVE_HELP;
     write_executable(
         &live_overlay.join("usr/local/bin/live-help"),
         live_help_script,
     )?;
 
-    let shell_ux_profile = r#"#!/bin/sh
-case "$-" in
-    *i*) ;;
-    *) return 0 ;;
-esac
-
-export EDITOR="${EDITOR:-vi}"
-export VISUAL="${VISUAL:-$EDITOR}"
-export PAGER="${PAGER:-less}"
-export LESS="${LESS:--FRSX}"
-
-if [ -z "${PS1:-}" ]; then
-    export PS1='[live \u@\h \W]\$ '
-fi
-
-if [ "${LIVE_HELP_HINT_SHOWN:-0}" != "1" ]; then
-    export LIVE_HELP_HINT_SHOWN=1
-    echo "[live] run 'live-help' for common commands."
-fi
-"#;
+    let shell_ux_profile = crate::guest::SHELL_UX_PROFILE;
     write_executable(
         &live_overlay.join("etc/profile.d/20-live-shell-ux.sh"),
         shell_ux_profile,
@@ -409,47 +301,10 @@ fi
         tty1_autologin,
     )?;
 
-    let serial_autologin_script = r#"#!/bin/sh
-# Live override: use portable C locale (always available in minimal rootfs).
-export LANG=C
-unset LC_ALL LC_CTYPE LC_NUMERIC LC_TIME LC_COLLATE LC_MESSAGES \
-      LC_MONETARY LC_PAPER LC_NAME LC_ADDRESS LC_TELEPHONE LC_MEASUREMENT \
-      LC_IDENTIFICATION
-
-# Optional boot-injection environment (e.g. SSH_AUTHORIZED_KEY, LEVITATE_INSTALL_SERIAL_UX).
-# Parse as literal KEY=VALUE lines to avoid executing payload content.
-@BOOT_INJECTION_IMPORT@
-
-echo "@SHELL_READY_MARKER@"
-
-# Keep default serial shell readable, but allow explicit verbose override for debugging.
-if [ "${LEVITATE_INSTALL_SERIAL_VERBOSE:-0}" = "1" ]; then
-    if [ -w /proc/sys/kernel/printk ]; then
-        echo 7 >/proc/sys/kernel/printk 2>/dev/null || true
-    fi
-    if command -v dmesg >/dev/null 2>&1; then
-        dmesg -n 7 >/dev/null 2>&1 || true
-    fi
-else
-    if [ -w /proc/sys/kernel/printk ]; then
-        echo 1 >/proc/sys/kernel/printk 2>/dev/null || true
-    fi
-    if command -v dmesg >/dev/null 2>&1; then
-        dmesg -n 1 >/dev/null 2>&1 || true
-    fi
-fi
-
-if [ "${LEVITATE_INSTALL_SERIAL_UX:-0}" = "1" ] && [ -x @INSTALL_ENTRYPOINT@ ]; then
-    echo "[autologin] Launching install UX on serial console..."
-    export LEVITATE_INSTALL_UX_LAUNCHED=1
-    exec @INSTALL_ENTRYPOINT@
-fi
-
-exec /bin/bash -il
-"#;
+    let serial_autologin_script = crate::guest::render_boot(crate::guest::SERIAL_AUTOLOGIN_SYSTEMD)?;
     write_executable(
         &live_overlay.join("usr/local/bin/serial-autologin"),
-        &fill_guest_script(serial_autologin_script),
+        &serial_autologin_script,
     )?;
 
     let serial_autologin = "[Service]\nExecStart=\nExecStart=-/sbin/agetty --autologin root --keep-baud 115200,57600,38400,9600 %I vt100\n";
@@ -476,56 +331,7 @@ exec /bin/bash -il
     // Deterministic live NIC bring-up for slirp hostfwd SSH (QEMU usernet defaults).
     // Resolve the first non-loopback NIC dynamically to avoid brittle interface names
     // (e.g. ens3 vs ens4 depending on device ordering).
-    let live_net_setup_script = r#"#!/bin/sh
-set -eu
-
-IP_BIN="$(command -v ip 2>/dev/null || true)"
-if [ -z "$IP_BIN" ]; then
-    if [ -x /usr/sbin/ip ]; then
-        IP_BIN=/usr/sbin/ip
-    elif [ -x /usr/bin/ip ]; then
-        IP_BIN=/usr/bin/ip
-    else
-        exit 1
-    fi
-fi
-
-# Retry because virtio NIC names can race (e.g. eth0 -> ens5), and keep
-# applying until IPv4 + default route are stable.
-stable_ok=0
-i=0
-while [ "$i" -lt 45 ]; do
-    for dev in /sys/class/net/*; do
-        [ -e "$dev" ] || continue
-        name="$(basename "$dev")"
-        case "$name" in
-            lo|sit*|ip6tnl*|tun*|tap*|dummy*|bond*|veth*|docker*|virbr*|br*|wg*)
-                continue
-                ;;
-        esac
-        if "$IP_BIN" link set "$name" up 2>/dev/null; then
-            "$IP_BIN" addr replace 10.0.2.15/24 dev "$name" 2>/dev/null || true
-            "$IP_BIN" route replace default via 10.0.2.2 dev "$name" 2>/dev/null || true
-        fi
-    done
-
-    addr_if="$("$IP_BIN" -o -4 addr show 2>/dev/null | awk '$4 ~ /^10\\.0\\.2\\.15\\// {print $2; exit}')"
-    default_if="$("$IP_BIN" -o -4 route show default 2>/dev/null | awk '/^default via 10\\.0\\.2\\.2/ {for (i=1; i<=NF; i++) if ($i==\"dev\") {print $(i+1); exit}}')"
-    if [ -n "$addr_if" ] && [ "$addr_if" = "$default_if" ]; then
-        stable_ok=$((stable_ok + 1))
-        if [ "$stable_ok" -ge 3 ]; then
-            exit 0
-        fi
-    else
-        stable_ok=0
-    fi
-
-    i=$((i + 1))
-    sleep 1
-done
-
-exit 1
-"#;
+    let live_net_setup_script = crate::guest::LIVE_NET_SETUP;
     write_executable(
         &live_overlay.join("usr/local/sbin/live-net-setup"),
         live_net_setup_script,
@@ -561,33 +367,7 @@ WantedBy=multi-user.target
         )?;
     }
 
-    let shutdown_cleanup_script = r#"#!/bin/sh
-# Live ISO shutdown cleanup:
-# release loop-backed live mounts before systemd reaches umount.target.
-set +e
-
-for mp in /live-overlay /rootfs /run/live-media; do
-    if mountpoint -q "$mp"; then
-        umount "$mp" >/dev/null 2>&1 || umount -l "$mp" >/dev/null 2>&1
-    fi
-done
-
-if [ -d /run/live-media ]; then
-    rmdir /run/live-media 2>/dev/null || true
-fi
-
-for loopdev in /dev/loop1 /dev/loop0; do
-    if [ -b "$loopdev" ]; then
-        losetup -d "$loopdev" >/dev/null 2>&1 || true
-    fi
-done
-
-if mountpoint -q /media/cdrom; then
-    umount /media/cdrom >/dev/null 2>&1 || umount -l /media/cdrom >/dev/null 2>&1
-fi
-
-exit 0
-"#;
+    let shutdown_cleanup_script = crate::guest::LIVE_SHUTDOWN_CLEANUP;
     write_executable(
         &live_overlay.join("usr/local/sbin/live-shutdown-cleanup"),
         shutdown_cleanup_script,
@@ -696,22 +476,4 @@ fn write_serial_test_profile(live_overlay: &Path) -> Result<()> {
         recqemu::serial::protocol::guest_profile(),
     )?;
     Ok(())
-}
-
-/// Fill the boot-protocol pieces into a guest script: the serial readiness
-/// marker, the boot-injection import and the install entrypoint.
-pub(crate) fn fill_guest_script(script: &str) -> String {
-    script
-        .replace(
-            "@INSTALL_ENTRYPOINT@",
-            &format!("/{}", crate::live_ux::INSTALL_ENTRYPOINT),
-        )
-        .replace(
-            "@SHELL_READY_MARKER@",
-            recqemu::serial::protocol::SHELL_READY_MARKER,
-        )
-        .replace(
-            "@BOOT_INJECTION_IMPORT@",
-            &recinit::live::boot_injection_import_sh(),
-        )
 }

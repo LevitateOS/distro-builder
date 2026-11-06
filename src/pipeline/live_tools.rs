@@ -361,28 +361,14 @@ fn install_bun_docs_tui_payload(
     fs::set_permissions(&bun_dest, bun_perms)
         .with_context(|| format!("setting executable permissions on '{}'", bun_dest.display()))?;
 
-    let docs_cmd = "#!/bin/sh\n\
-set -eu\n\
-\n\
-APP=\"/usr/local/share/levitate/docs-tui/levitate-install-docs.js\"\n\
-if [ ! -r \"$APP\" ]; then\n\
-    echo \"install docs bundle missing at $APP\" >&2\n\
-    exit 1\n\
-fi\n\
-\n\
-case \"${TERM:-}\" in\n\
-    \"\"|dumb|vt100|vt102|linux)\n\
-        export TERM=xterm-256color\n\
-        ;;\n\
-esac\n\
-export COLORTERM=\"${COLORTERM:-truecolor}\"\n\
-export FORCE_COLOR=\"${FORCE_COLOR:-3}\"\n\
-if [ -n \"${NO_COLOR:-}\" ]; then\n\
-    unset NO_COLOR\n\
-fi\n\
-\n\
-exec /usr/local/bin/bun \"$APP\" \"$@\"\n";
-    write_executable(docs_cmd_path, docs_cmd).with_context(|| {
+    let docs_cmd = crate::guest::render(
+        crate::guest::DOCS_BUN,
+        &[
+            ("DOCS_BUNDLE", "/usr/local/share/levitate/docs-tui/levitate-install-docs.js"),
+            ("BUN", "/usr/local/bin/bun"),
+        ],
+    )?;
+    write_executable(docs_cmd_path, &docs_cmd).with_context(|| {
         format!(
             "installing install docs command launcher '{}'",
             docs_cmd_path.display()
@@ -442,37 +428,10 @@ fn install_mode_payload(
                         docs_text_path.display()
                     )
                 })?;
-                let docs_cmd = format!(
-                    "#!/bin/sh\n\
-set -eu\n\
-\n\
-DOCS_FILE=\"/{docs_text}\"\n\
-case \"${{TERM:-}}\" in\n\
-    \"\"|dumb|vt100|vt102|linux)\n\
-        export TERM=xterm-256color\n\
-        ;;\n\
-esac\n\
-export COLORTERM=\"${{COLORTERM:-truecolor}}\"\n\
-export FORCE_COLOR=\"${{FORCE_COLOR:-3}}\"\n\
-if [ -n \"${{NO_COLOR:-}}\" ]; then\n\
-    unset NO_COLOR\n\
-fi\n\
-\n\
-if [ -f \"$DOCS_FILE\" ]; then\n\
-    if [ \"${{LEVITATE_DOCS_PLAIN:-0}}\" != \"1\" ] && command -v less >/dev/null 2>&1; then\n\
-        less \"$DOCS_FILE\" || true\n\
-        echo \"Install guide closed. Run 'levitate-install-docs' to reopen it.\"\n\
-    else\n\
-        cat \"$DOCS_FILE\"\n\
-    fi\n\
-else\n\
-    echo \"install docs payload missing at $DOCS_FILE\"\n\
-fi\n\
-\n\
-exec \"${{SHELL:-{shell}}}\" -l\n",
-                    shell = interactive_shell,
-                    docs_text = INSTALL_DOCS_TEXT
-                );
+                let docs_cmd = crate::guest::render(
+                    crate::guest::DOCS_TEXT,
+                    &[("DOCS_TEXT", &format!("/{INSTALL_DOCS_TEXT}")), ("SHELL", interactive_shell)],
+                )?;
                 write_executable(&docs_cmd_path, &docs_cmd).with_context(|| {
                     format!(
                         "installing install docs command '{}'",
@@ -483,7 +442,10 @@ exec \"${{SHELL:-{shell}}}\" -l\n",
         }
 
         // Canonical docs-tui command alias for split-pane right-side launchers.
-        let docs_tui_cmd = format!("#!/bin/sh\nexec /{INSTALL_DOCS} \"$@\"\n");
+        let docs_tui_cmd = crate::guest::render(
+            crate::guest::DOCS_TUI_ALIAS,
+            &[("INSTALL_DOCS", &format!("/{INSTALL_DOCS}"))],
+        )?;
         write_executable(&docs_tui_cmd_path, &docs_tui_cmd).with_context(|| {
             format!(
                 "installing install docs-tui alias '{}'",
@@ -494,69 +456,20 @@ exec \"${{SHELL:-{shell}}}\" -l\n",
 
     let entrypoint_path = rootfs_source_dir.join(INSTALL_ENTRYPOINT);
     let entrypoint_script = match install_experience {
-        InstallExperience::Ux => format!(
-            "#!/bin/sh\n\
-set -eu\n\
-\n\
-choose_install_helper() {{\n\
-    if [ -x /usr/local/bin/{split} ]; then\n\
-        printf '%s\\n' \"/usr/local/bin/{split}\"\n\
-        return 0\n\
-    fi\n\
-    if command -v {split} >/dev/null 2>&1; then\n\
-        printf '%s\\n' \"{split}\"\n\
-        return 0\n\
-    fi\n\
-    if command -v levitate-install-docs >/dev/null 2>&1; then\n\
-        printf '%s\\n' \"levitate-install-docs\"\n\
-        return 0\n\
-    fi\n\
-    return 1\n\
-}}\n\
-\n\
-if [ \"${{1:-}}\" = \"--probe\" ]; then\n\
-    helper=\"$(choose_install_helper || true)\"\n\
-    if [ -n \"$helper\" ]; then\n\
-        printf '{probe}%s\\n' \"$helper\"\n\
-        exit 0\n\
-    fi\n\
-    printf '{probe}none\\n'\n\
-    exit 3\n\
-fi\n\
-\n\
-echo \"[{distro}] install experience: UX\"\n\
-echo \"Starting local interactive install helper if available...\"\n\
-\n\
-helper=\"$(choose_install_helper || true)\"\n\
-if [ -n \"$helper\" ]; then\n\
-    case \"$helper\" in\n\
-        */{split}|{split})\n\
-            if [ \"${{{smoke}:-0}}\" = \"1\" ]; then\n\
-                exec \"$helper\" --smoke\n\
-            fi\n\
-            ;;\n\
-    esac\n\
-    exec \"$helper\"\n\
-fi\n\
-\n\
-echo \"No local docs TUI binary found; dropping to shell.\"\n\
-exec \"${{SHELL:-{shell}}}\" -l\n",
-            shell = interactive_shell,
-            distro = distro_id,
-            split = SPLIT_HELPER,
-            probe = PROBE_PREFIX,
-            smoke = SMOKE_ENV
-        ),
-        InstallExperience::AutomatedSsh => format!(
-            "#!/bin/sh\n\
-set -eu\n\
-\n\
-echo \"[{distro}] install experience: automated SSH\"\n\
-echo \"This ISO profile is intended for SSH-driven automation (qcow2/.img pipelines).\"\n\
-exec \"${{SHELL:-{shell}}}\" -l\n",
-            shell = interactive_shell,
-            distro = distro_id
-        ),
+        InstallExperience::Ux => crate::guest::render(
+            crate::guest::ENTRYPOINT_UX,
+            &[
+                ("SHELL", interactive_shell),
+                ("DISTRO", distro_id),
+                ("SPLIT", SPLIT_HELPER),
+                ("PROBE", PROBE_PREFIX),
+                ("SMOKE", SMOKE_ENV),
+            ],
+        )?,
+        InstallExperience::AutomatedSsh => crate::guest::render(
+            crate::guest::ENTRYPOINT_AUTOMATED_SSH,
+            &[("SHELL", interactive_shell), ("DISTRO", distro_id)],
+        )?,
     };
     write_executable(&entrypoint_path, &entrypoint_script).with_context(|| {
         format!(
@@ -566,43 +479,7 @@ exec \"${{SHELL:-{shell}}}\" -l\n",
     })?;
     if install_experience == InstallExperience::Ux {
         let ux_profile_path = rootfs_source_dir.join(INSTALL_UX_PROFILE);
-        let ux_profile = "#!/bin/sh\n\
-case \"$-\" in\n\
-    *i*) ;;\n\
-    *) return 0 ;;\n\
-esac\n\
-\n\
-[ -n \"${TMUX:-}\" ] && return 0\n\
-[ \"${LEVITATE_INSTALL_UX_LAUNCHED:-0}\" = \"1\" ] && return 0\n\
-\n\
-@BOOT_INJECTION_IMPORT@\n\
-\n\
-TTY=\"$(tty 2>/dev/null || true)\"\n\
-if [ -z \"${LEVITATE_INSTALL_LEFT_CMD:-}\" ]; then\n\
-    if [ -x /bin/bash ]; then\n\
-        LEVITATE_INSTALL_LEFT_CMD=\"/bin/bash -il\"\n\
-    else\n\
-        LEVITATE_INSTALL_LEFT_CMD=\"/bin/sh -il\"\n\
-    fi\n\
-    export LEVITATE_INSTALL_LEFT_CMD\n\
-fi\n\
-if [ \"$TTY\" = \"/dev/tty1\" ]; then\n\
-    :\n\
-elif [ \"$TTY\" = \"/dev/ttyS0\" ] && [ \"${LEVITATE_INSTALL_SERIAL_UX:-0}\" = \"1\" ]; then\n\
-    if [ -z \"${LEVITATE_INSTALL_RIGHT_CMD:-}\" ]; then\n\
-        LEVITATE_INSTALL_RIGHT_CMD=\"docs-tui --slug installation\"\n\
-        export LEVITATE_INSTALL_RIGHT_CMD\n\
-    fi\n\
-    export LEVITATE_DOCS_PLAIN=1\n\
-    :\n\
-else\n\
-    return 0\n\
-fi\n\
-\n\
-echo \"[install-ux] Launching install UX on $TTY...\"\n\
-export LEVITATE_INSTALL_UX_LAUNCHED=1\n\
-exec @INSTALL_ENTRYPOINT@\n";
-        let ux_profile = crate::artifact::live_overlay::fill_guest_script(ux_profile);
+        let ux_profile = crate::guest::render_boot(crate::guest::INSTALL_UX_PROFILE_HOOK)?;
         write_text(&ux_profile_path, &ux_profile).with_context(|| {
             format!(
                 "installing install UX profile hook '{}'",
@@ -616,58 +493,7 @@ exec @INSTALL_ENTRYPOINT@\n";
 
 fn install_shell_color_profile(rootfs_source_dir: &Path) -> Result<()> {
     let profile_path = rootfs_source_dir.join("etc/profile.d/25-shell-color.sh");
-    let profile = "#!/bin/sh\n\
-case \"$-\" in\n\
-    *i*) ;;\n\
-    *) return 0 ;;\n\
-esac\n\
-\n\
-[ \"${NO_COLOR:-0}\" = \"1\" ] && return 0\n\
-\n\
-if [ -z \"${TERM:-}\" ] || [ \"${TERM:-}\" = \"dumb\" ] || [ \"${TERM:-}\" = \"vt100\" ] || [ \"${TERM:-}\" = \"vt102\" ] || [ \"${TERM:-}\" = \"linux\" ]; then\n\
-    TTY=\"$(tty 2>/dev/null || true)\"\n\
-    case \"$TTY\" in\n\
-        /dev/ttyS*|/dev/tty[0-9]*)\n\
-            export TERM=xterm-256color\n\
-            ;;\n\
-    esac\n\
-fi\n\
-\n\
-export CLICOLOR=\"${CLICOLOR:-1}\"\n\
-export COLORTERM=\"${COLORTERM:-truecolor}\"\n\
-export LESS=\"${LESS:--FRSX}\"\n\
-export PAGER=\"${PAGER:-less}\"\n\
-\n\
-if command -v dircolors >/dev/null 2>&1; then\n\
-    eval \"$(dircolors -b 2>/dev/null || true)\"\n\
-fi\n\
-\n\
-if command -v ls >/dev/null 2>&1; then\n\
-    alias ls='ls --color=auto'\n\
-    alias ll='ls -alF --color=auto'\n\
-    alias la='ls -A --color=auto'\n\
-fi\n\
-\n\
-if command -v grep >/dev/null 2>&1; then\n\
-    alias grep='grep --color=auto'\n\
-    alias egrep='grep -E --color=auto'\n\
-    alias fgrep='grep -F --color=auto'\n\
-fi\n\
-\n\
-if [ -n \"${BASH_VERSION:-}\" ]; then\n\
-    export HISTCONTROL=\"${HISTCONTROL:-ignoredups:erasedups}\"\n\
-    export HISTSIZE=\"${HISTSIZE:-10000}\"\n\
-    export HISTFILESIZE=\"${HISTFILESIZE:-20000}\"\n\
-    export HISTTIMEFORMAT=\"${HISTTIMEFORMAT:-%F %T }\"\n\
-    shopt -s histappend 2>/dev/null || true\n\
-    shopt -s checkwinsize 2>/dev/null || true\n\
-    if [ -r /usr/share/bash-completion/bash_completion ]; then\n\
-        . /usr/share/bash-completion/bash_completion\n\
-    elif [ -r /etc/bash_completion ]; then\n\
-        . /etc/bash_completion\n\
-    fi\n\
-    export PS1=\"\\[\\033[1;32m\\]\\u@\\h\\[\\033[0m\\]:\\[\\033[1;34m\\]\\w\\[\\033[0m\\]\\\\$ \"\n\
-fi\n";
+    let profile = crate::guest::SHELL_COLOR_PROFILE;
     write_text(&profile_path, profile)
         .with_context(|| format!("writing shell color profile '{}'", profile_path.display()))
 }

@@ -85,6 +85,7 @@ pub fn create_openrc_live_overlay(
 
     // Step 2: Code-generated overlay files
     fs::create_dir_all(live_overlay.join("etc")).with_context(|| "Failed to create etc")?;
+    write_serial_test_profile(&live_overlay)?;
 
     // Serial autologin script
     fs::create_dir_all(live_overlay.join("usr/local/bin"))?;
@@ -111,10 +112,10 @@ if [ -r /run/boot-injection/payload.env ]; then
 fi
 
 echo "[autologin] Starting login shell..."
-echo "___SHELL_READY___"
+echo "@SHELL_READY_MARKER@"
 echo "[autologin] Starting login shell..." >/dev/console 2>/dev/null || true
-echo "___SHELL_READY___" >/dev/console 2>/dev/null || true
-echo "___SHELL_READY___" >/dev/kmsg 2>/dev/null || true
+echo "@SHELL_READY_MARKER@" >/dev/console 2>/dev/null || true
+echo "@SHELL_READY_MARKER@" >/dev/kmsg 2>/dev/null || true
 
 if [ "${LEVITATE_INSTALL_SERIAL_UX:-0}" = "1" ] && [ -x /usr/local/bin/levitate-install-entrypoint ]; then
     echo "[autologin] Launching install UX on serial console..."
@@ -128,7 +129,7 @@ exec /bin/sh -l
 "#;
     write_executable(
         &live_overlay.join("usr/local/bin/serial-autologin"),
-        autologin_script,
+        &with_ready_marker(autologin_script),
     )?;
 
     // /etc/issue
@@ -445,7 +446,7 @@ if [ -r /run/boot-injection/payload.env ]; then
     done < /run/boot-injection/payload.env
 fi
 
-echo "___SHELL_READY___"
+echo "@SHELL_READY_MARKER@"
 
 # Keep default serial shell readable, but allow explicit verbose override for debugging.
 if [ "${LEVITATE_INSTALL_SERIAL_VERBOSE:-0}" = "1" ]; then
@@ -474,7 +475,7 @@ exec /bin/bash -il
 "#;
     write_executable(
         &live_overlay.join("usr/local/bin/serial-autologin"),
-        serial_autologin_script,
+        &with_ready_marker(serial_autologin_script),
     )?;
 
     let serial_autologin = "[Service]\nExecStart=\nExecStart=-/sbin/agetty --autologin root --keep-baud 115200,57600,38400,9600 %I vt100\n";
@@ -654,20 +655,7 @@ WantedBy=multi-user.target
     )?;
 
     if config.write_serial_test_profile {
-        let test_profile = r#"# Scenario harness markers (serial console only)
-case "$-" in
-    *i*) ;;
-    *) return 0 ;;
-esac
-
-if [ "$(tty 2>/dev/null)" = "/dev/ttyS0" ]; then
-    echo "___SHELL_READY___"
-fi
-"#;
-        fs::write(
-            live_overlay.join("etc/profile.d/00-live-test.sh"),
-            test_profile,
-        )?;
+        write_serial_test_profile(&live_overlay)?;
     }
 
     if config.enforce_utf8_locale_profile {
@@ -721,4 +709,24 @@ fn write_executable(path: &Path, content: &str) -> Result<()> {
     perms.set_mode(0o755);
     fs::set_permissions(path, perms)?;
     Ok(())
+}
+
+/// Install recqemu's serial test profile, which the install tests' serial
+/// console relies on (echo off, empty prompt, readiness marker).
+fn write_serial_test_profile(live_overlay: &Path) -> Result<()> {
+    let profile_d = live_overlay.join("etc/profile.d");
+    fs::create_dir_all(&profile_d)?;
+    fs::write(
+        profile_d.join("00-serial-test.sh"),
+        recqemu::serial::protocol::guest_profile(),
+    )?;
+    Ok(())
+}
+
+/// Fill the serial readiness marker into a guest script.
+fn with_ready_marker(script: &str) -> String {
+    script.replace(
+        "@SHELL_READY_MARKER@",
+        recqemu::serial::protocol::SHELL_READY_MARKER,
+    )
 }

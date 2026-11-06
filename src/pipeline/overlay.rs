@@ -278,7 +278,10 @@ pub(crate) fn ensure_openrc_shell(
     let autologin = usr_local_bin.join("serial-autologin");
     fs::write(
         &autologin,
-        "#!/bin/sh\necho \"___SHELL_READY___\"\necho \"___SHELL_READY___\" >/dev/console 2>/dev/null || true\necho \"___SHELL_READY___\" >/dev/kmsg 2>/dev/null || true\nexec /bin/sh -l\n",
+        format!(
+            "#!/bin/sh\necho \"{m}\"\necho \"{m}\" >/dev/console 2>/dev/null || true\necho \"{m}\" >/dev/kmsg 2>/dev/null || true\nexec /bin/sh -l\n",
+            m = recqemu::serial::protocol::SHELL_READY_MARKER
+        ),
     )
     .with_context(|| format!("writing '{}'", autologin.display()))?;
     let mut perms = fs::metadata(&autologin)

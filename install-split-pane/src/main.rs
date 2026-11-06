@@ -446,28 +446,9 @@ fn spawn_raw_pane(
 fn pane_command(argv: &[String]) -> CommandBuilder {
     let mut cmd = CommandBuilder::new(&argv[0]);
     cmd.args(&argv[1..]);
-    apply_common_env(&mut cmd);
+    // The panes' terminal is this program's vt100 emulator, an xterm with 256 colours.
+    cmd.env("TERM", "xterm-256color");
     cmd
-}
-
-fn apply_common_env(cmd: &mut CommandBuilder) {
-    let mut term = env::var("TERM").unwrap_or_else(|_| "xterm-256color".to_string());
-    let normalized = term.trim().to_ascii_lowercase();
-    if normalized.is_empty()
-        || normalized == "dumb"
-        || normalized == "vt100"
-        || normalized == "vt102"
-        || normalized == "linux"
-    {
-        term = "xterm-256color".to_string();
-    }
-    cmd.env("TERM", term);
-    let colorterm = env::var("COLORTERM").unwrap_or_else(|_| "truecolor".to_string());
-    cmd.env("COLORTERM", colorterm);
-    let force_color = env::var("FORCE_COLOR").unwrap_or_else(|_| "3".to_string());
-    cmd.env("FORCE_COLOR", force_color);
-    // Ensure NO_COLOR from host/session cannot silently downgrade docs rendering.
-    cmd.env("NO_COLOR", "");
 }
 
 fn draw(frame: &mut Frame, app: &App) {

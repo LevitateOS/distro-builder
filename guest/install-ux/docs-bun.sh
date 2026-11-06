@@ -7,15 +7,4 @@ if [ ! -r "$APP" ]; then
     exit 1
 fi
 
-case "${TERM:-}" in
-    ""|dumb|vt100|vt102|linux)
-        export TERM=xterm-256color
-        ;;
-esac
-export COLORTERM="${COLORTERM:-truecolor}"
-export FORCE_COLOR="${FORCE_COLOR:-3}"
-if [ -n "${NO_COLOR:-}" ]; then
-    unset NO_COLOR
-fi
-
 exec @BUN@ "$APP" "$@"

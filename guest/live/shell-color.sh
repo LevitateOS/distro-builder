@@ -4,19 +4,9 @@ case "$-" in
     *) return 0 ;;
 esac
 
-[ "${NO_COLOR:-0}" = "1" ] && return 0
-
-if [ -z "${TERM:-}" ] || [ "${TERM:-}" = "dumb" ] || [ "${TERM:-}" = "vt100" ] || [ "${TERM:-}" = "vt102" ] || [ "${TERM:-}" = "linux" ]; then
-    TTY="$(tty 2>/dev/null || true)"
-    case "$TTY" in
-        /dev/ttyS*|/dev/tty[0-9]*)
-            export TERM=xterm-256color
-            ;;
-    esac
-fi
+[ -n "${NO_COLOR:-}" ] && return 0
 
 export CLICOLOR="${CLICOLOR:-1}"
-export COLORTERM="${COLORTERM:-truecolor}"
 export LESS="${LESS:--FRSX}"
 export PAGER="${PAGER:-less}"
 

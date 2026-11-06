@@ -27,7 +27,6 @@ scripts! {
     DOCS_BUN = "install-ux/docs-bun.sh";
     DOCS_TEXT = "install-ux/docs-text.sh";
     DOCS_TUI_ALIAS = "install-ux/docs-tui-alias.sh";
-    ENTRYPOINT_AUTOMATED_SSH = "install-ux/entrypoint-automated-ssh.sh";
     ENTRYPOINT_UX = "install-ux/entrypoint-ux.sh";
     INSTALL_UX_PROFILE_HOOK = "install-ux/profile-hook.sh";
 }

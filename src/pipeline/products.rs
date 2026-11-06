@@ -10,7 +10,8 @@ use crate::pipeline::config::{
 use crate::pipeline::io::{
     create_empty_overlay_dir, create_unique_output_dir, extract_erofs_rootfs,
 };
-use crate::pipeline::live_tools::{add_required_tools, InstallExperience, LiveToolsRuntimeAction};
+use crate::pipeline::live_tools::{add_required_tools, install_ux_payload};
+use distro_contract::{InstallUxContract, RuntimeActionContract};
 use crate::pipeline::overlay::{
     create_live_overlay, ensure_openrc_shell, ensure_required_service_wiring,
     ensure_systemd_default_target, ensure_systemd_locale_completeness, ensure_systemd_sshd_dirs,
@@ -130,8 +131,8 @@ pub struct LiveToolsProductSpec {
     repo_root: PathBuf,
     pub distro_id: String,
     pub os_name: String,
-    install_experience: InstallExperience,
-    runtime_actions: Vec<LiveToolsRuntimeAction>,
+    runtime_actions: Vec<RuntimeActionContract>,
+    install_ux: InstallUxContract,
     pub rootfs_source_dir: PathBuf,
     parent_rootfs: ParentRootfsInput,
     resolved_parent_rootfs_image: Option<PathBuf>,
@@ -381,8 +382,8 @@ pub fn load_live_tools_product_spec(
         repo_root: repo_root.to_path_buf(),
         distro_id: distro_id.to_string(),
         os_name: loaded.os_name,
-        install_experience: loaded.install_experience,
         runtime_actions: loaded.runtime_actions,
+        install_ux: loaded.install_ux,
         rootfs_source_dir: layout.rootfs_source_dir,
         parent_rootfs: layout.parent_rootfs,
         resolved_parent_rootfs_image: None,
@@ -475,10 +476,11 @@ pub fn prepare_live_tools_product(
         &rootfs_source_dir,
         &live_overlay_dir,
         &spec.distro_id,
-        spec.install_experience,
         &spec.runtime_actions,
     )
     .with_context(|| format!("adding required live tools for '{}'", spec.distro_id))?;
+    install_ux_payload(&spec.repo_root, &rootfs_source_dir, &spec.distro_id, &spec.install_ux)
+        .with_context(|| format!("writing the install screen for '{}'", spec.distro_id))?;
 
     ensure_required_service_wiring(&live_overlay_dir, &spec.overlay, &spec.required_services)
         .with_context(|| {

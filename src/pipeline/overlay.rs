@@ -13,9 +13,7 @@ use crate::{
 const BOOT_MACHINE_ID: &str = "0123456789abcdef0123456789abcdef\n";
 #[derive(Debug, Clone)]
 pub enum BootOverlayPolicy {
-    Systemd {
-        issue_message: Option<String>,
-    },
+    Systemd,
     OpenRc {
         inittab: InittabVariant,
         seed_overlay: Option<PathBuf>,
@@ -32,13 +30,11 @@ pub(crate) fn create_live_overlay(
 ) -> Result<PathBuf> {
     let overlay_issue_banner = overlay_issue_banner(os_name, overlay_label);
     let live_overlay_dir = match overlay {
-        BootOverlayPolicy::Systemd { issue_message } => create_systemd_live_overlay(
+        BootOverlayPolicy::Systemd => create_systemd_live_overlay(
             output_dir,
             &SystemdLiveOverlayConfig {
                 os_name,
-                issue_message: issue_message
-                    .as_deref()
-                    .or(Some(overlay_issue_banner.as_str())),
+                issue: &overlay_issue_banner,
                 masked_units: &[],
                 write_serial_test_profile: true,
                 machine_id: Some(BOOT_MACHINE_ID),
@@ -55,7 +51,7 @@ pub(crate) fn create_live_overlay(
                 os_name,
                 inittab: *inittab,
                 seed_overlay: seed_overlay.as_deref(),
-                issue_message: Some(overlay_issue_banner.as_str()),
+                issue: &overlay_issue_banner,
             },
         )
         .with_context(|| format!("creating openrc live overlay for {}", distro_id))?,

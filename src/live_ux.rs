@@ -1,13 +1,11 @@
 //! The live install-UX surface the live-tools ISO provides and the install
 //! tests check. Paths are relative to the rootfs.
 
-/// Holds the install experience name (`InstallExperience::as_str`).
-pub const INSTALL_EXPERIENCE_MARKER: &str = "usr/lib/levitate/install-experience";
 /// The install entrypoint; `--probe` prints `PROBE_PREFIX<helper>`.
 pub const INSTALL_ENTRYPOINT: &str = "usr/local/bin/levitate-install-entrypoint";
-/// Login profile hook that starts the install UX (UX experience only).
+/// Login profile hook that starts the install UX.
 pub const INSTALL_UX_PROFILE: &str = "etc/profile.d/30-install-ux.sh";
-/// The install docs command (UX experience only); the split helper runs it
+/// The install docs command; the split helper runs it
 /// in its right pane.
 pub const INSTALL_DOCS: &str = "usr/local/bin/levitate-install-docs";
 /// The plain-text install docs `INSTALL_DOCS` shows.

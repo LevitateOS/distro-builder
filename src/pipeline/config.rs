@@ -1,11 +1,10 @@
 use anyhow::{bail, Result};
 use distro_contract::{
-    ConformanceContract, InstallExperience, OpenRcInittab, OverlayContract, OverlayKind,
+    ConformanceContract, InstallUxContract, OpenRcInittab, OverlayContract, OverlayKind,
     PayloadProducerContract, RuntimeActionContract,
 };
 use std::path::Path;
 
-use crate::pipeline::live_tools::LiveToolsRuntimeAction;
 use crate::pipeline::overlay::BootOverlayPolicy;
 use crate::pipeline::paths::resolve_repo_path;
 use crate::pipeline::plan::RootfsProducer;
@@ -25,8 +24,8 @@ pub(crate) struct BootLoadedConfig {
 #[derive(Debug, Clone)]
 pub(crate) struct LiveToolsLoadedConfig {
     pub(crate) os_name: String,
-    pub(crate) install_experience: InstallExperience,
-    pub(crate) runtime_actions: Vec<LiveToolsRuntimeAction>,
+    pub(crate) runtime_actions: Vec<RuntimeActionContract>,
+    pub(crate) install_ux: InstallUxContract,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -107,13 +106,10 @@ pub(crate) fn load_live_tools_config_from_contract(
     contract: &ConformanceContract,
 ) -> Result<LiveToolsLoadedConfig> {
     let os_name = contract.identity.os_name.clone();
-    let install_experience = contract.scenarios.live_tools.install_experience;
-    let runtime_actions = load_live_tools_runtime_actions(contract, install_experience)?;
-
     Ok(LiveToolsLoadedConfig {
         os_name,
-        install_experience,
-        runtime_actions,
+        runtime_actions: contract.product_config.live_tools_actions.clone(),
+        install_ux: contract.product_config.install_ux.clone(),
     })
 }
 
@@ -148,142 +144,6 @@ fn load_boot_payload_producers(
         .iter()
         .map(rootfs_producer_from_contract)
         .collect()
-}
-
-fn load_live_tools_runtime_actions(
-    contract: &ConformanceContract,
-    install_experience: InstallExperience,
-) -> Result<Vec<LiveToolsRuntimeAction>> {
-    let live_tools = &contract.product_config.live_tools;
-    let mut actions = live_tools.common_actions.clone();
-    match install_experience {
-        InstallExperience::Ux => actions.extend(live_tools.ux_actions.clone()),
-        InstallExperience::AutomatedSsh => {
-            actions.extend(live_tools.automated_ssh_actions.clone());
-        }
-    }
-
-    if actions.is_empty() {
-        bail!(
-            "missing canonical live-tools runtime actions for '{}': populate contract.product_config.live_tools for install experience '{}'",
-            contract.products.live_tools.logical_name,
-            install_experience.as_str()
-        );
-    }
-
-    actions
-        .iter()
-        .map(live_tools_runtime_action_from_contract)
-        .collect()
-}
-
-fn live_tools_runtime_action_from_contract(
-    action: &RuntimeActionContract,
-) -> Result<LiveToolsRuntimeAction> {
-    fn normalize_string(raw: &str, field: &str) -> Result<String> {
-        let value = raw.trim();
-        if value.is_empty() {
-            bail!("Ring 2 runtime action field '{}' must not be empty", field);
-        }
-        Ok(value.to_string())
-    }
-
-    fn normalize_relative_path(raw: &str, field: &str) -> Result<String> {
-        let value = normalize_string(raw, field)?;
-        let path = std::path::Path::new(&value);
-        if path.is_absolute() {
-            bail!(
-                "Ring 2 runtime action field '{}' must be relative, got '{}'",
-                field,
-                path.display()
-            );
-        }
-        if path
-            .components()
-            .any(|component| matches!(component, std::path::Component::ParentDir))
-        {
-            bail!(
-                "Ring 2 runtime action field '{}' must not traverse parents, got '{}'",
-                field,
-                path.display()
-            );
-        }
-        Ok(value)
-    }
-
-    Ok(match action {
-        RuntimeActionContract::ToolPayloadWorkspaceBinary {
-            package,
-            binary,
-            target,
-        } => LiveToolsRuntimeAction::ToolPayloadWorkspaceBinary {
-            package: normalize_string(package, "package")?,
-            binary: binary
-                .as_deref()
-                .map(|value| normalize_string(value, "binary"))
-                .transpose()?,
-            target: target
-                .as_deref()
-                .map(|value| normalize_string(value, "target"))
-                .transpose()?,
-        },
-        RuntimeActionContract::RootfsWorkspaceBinary {
-            package,
-            binary,
-            target,
-            destination,
-        } => LiveToolsRuntimeAction::RootfsWorkspaceBinary {
-            package: normalize_string(package, "package")?,
-            binary: binary
-                .as_deref()
-                .map(|value| normalize_string(value, "binary"))
-                .transpose()?,
-            target: target
-                .as_deref()
-                .map(|value| normalize_string(value, "target"))
-                .transpose()?,
-            destination: std::path::PathBuf::from(normalize_relative_path(
-                destination,
-                "destination",
-            )?),
-        },
-        RuntimeActionContract::ApkPackages { packages } => {
-            let packages = packages
-                .iter()
-                .map(|package| normalize_string(package, "packages"))
-                .collect::<Result<Vec<_>>>()?;
-            if packages.is_empty() {
-                bail!("Ring 2 runtime action 'apk_packages' must declare at least one package");
-            }
-            LiveToolsRuntimeAction::ApkPackages { packages }
-        }
-        RuntimeActionContract::InstallModePayload {
-            interactive_shell,
-            ux_docs_frontend,
-        } => {
-            let interactive_shell = normalize_string(interactive_shell, "interactive_shell")?;
-            let shell_path = std::path::Path::new(&interactive_shell);
-            if !shell_path.is_absolute() {
-                bail!(
-                    "Ring 2 runtime action field 'interactive_shell' must be absolute, got '{}'",
-                    shell_path.display()
-                );
-            }
-            if shell_path
-                .components()
-                .any(|component| matches!(component, std::path::Component::ParentDir))
-            {
-                bail!(
-                    "Ring 2 runtime action field 'interactive_shell' must not traverse parents, got '{}'",
-                    shell_path.display()
-                );
-            }
-            LiveToolsRuntimeAction::InstallModePayload {
-                interactive_shell,
-                ux_docs_frontend: ux_docs_frontend.clone(),
-            }
-        }
-    })
 }
 
 fn rootfs_producer_from_contract(producer: &PayloadProducerContract) -> Result<RootfsProducer> {
@@ -363,9 +223,7 @@ fn overlay_policy_from_contract(
     overlay: &OverlayContract,
 ) -> Result<BootOverlayPolicy> {
     match overlay.kind {
-        OverlayKind::Systemd => Ok(BootOverlayPolicy::Systemd {
-            issue_message: overlay.issue_message.clone(),
-        }),
+        OverlayKind::Systemd => Ok(BootOverlayPolicy::Systemd),
         OverlayKind::OpenRc => {
             let inittab = match overlay.openrc_inittab {
                 Some(OpenRcInittab::DesktopWithSerial) => InittabVariant::DesktopWithSerial,

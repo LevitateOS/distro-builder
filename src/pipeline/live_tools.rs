@@ -5,33 +5,11 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-pub(crate) use distro_contract::{InstallDocsFrontend, InstallExperience};
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum LiveToolsRuntimeAction {
-    ToolPayloadWorkspaceBinary {
-        package: String,
-        binary: Option<String>,
-        target: Option<String>,
-    },
-    RootfsWorkspaceBinary {
-        package: String,
-        binary: Option<String>,
-        target: Option<String>,
-        destination: PathBuf,
-    },
-    ApkPackages {
-        packages: Vec<String>,
-    },
-    InstallModePayload {
-        interactive_shell: String,
-        ux_docs_frontend: InstallDocsFrontend,
-    },
-}
+use distro_contract::{InstallDocs, InstallUxContract, RuntimeActionContract};
 
 use crate::live_ux::{
-    INSTALL_DOCS, INSTALL_DOCS_TEXT, INSTALL_ENTRYPOINT, INSTALL_EXPERIENCE_MARKER,
-    INSTALL_UX_PROFILE, PROBE_PREFIX, SMOKE_ENV, SPLIT_HELPER,
+    INSTALL_DOCS, INSTALL_DOCS_TEXT, INSTALL_ENTRYPOINT, INSTALL_UX_PROFILE, PROBE_PREFIX,
+    SMOKE_ENV, SPLIT_HELPER,
 };
 
 pub(crate) fn add_required_tools(
@@ -39,15 +17,14 @@ pub(crate) fn add_required_tools(
     rootfs_source_dir: &Path,
     tool_payload_dir: &Path,
     distro_id: &str,
-    install_experience: InstallExperience,
-    runtime_actions: &[LiveToolsRuntimeAction],
+    runtime_actions: &[RuntimeActionContract],
 ) -> Result<()> {
     let tool_payload_dest_dirs =
         tool_payload_destination_dirs(rootfs_source_dir, tool_payload_dir)?;
 
     for action in runtime_actions {
         match action {
-            LiveToolsRuntimeAction::ToolPayloadWorkspaceBinary {
+            RuntimeActionContract::ToolPayloadWorkspaceBinary {
                 package,
                 binary,
                 target,
@@ -65,7 +42,7 @@ pub(crate) fn add_required_tools(
                     distro_id
                 )
             })?,
-            LiveToolsRuntimeAction::RootfsWorkspaceBinary {
+            RuntimeActionContract::RootfsWorkspaceBinary {
                 package,
                 binary,
                 target,
@@ -76,17 +53,17 @@ pub(crate) fn add_required_tools(
                 package,
                 binary.as_deref(),
                 target.as_deref(),
-                destination,
+                Path::new(destination),
             )
             .with_context(|| {
                 format!(
                     "installing rootfs workspace binary '{}' into '{}' for '{}'",
                     binary.as_deref().unwrap_or(package),
-                    destination.display(),
+                    destination,
                     distro_id
                 )
             })?,
-            LiveToolsRuntimeAction::ApkPackages { packages } => {
+            RuntimeActionContract::ApkPackages { packages } => {
                 ensure_apk_packages(rootfs_source_dir, packages).with_context(|| {
                     format!(
                         "installing live-tools apk packages for '{}': {}",
@@ -95,18 +72,6 @@ pub(crate) fn add_required_tools(
                     )
                 })?
             }
-            LiveToolsRuntimeAction::InstallModePayload {
-                interactive_shell,
-                ux_docs_frontend,
-            } => install_mode_payload(
-                repo_root,
-                rootfs_source_dir,
-                distro_id,
-                install_experience,
-                interactive_shell,
-                ux_docs_frontend,
-            )
-            .with_context(|| format!("writing install experience payload for '{}'", distro_id))?,
         }
     }
 
@@ -140,14 +105,15 @@ fn install_tool_payload_workspace_binary(
     binary_name: Option<&str>,
     target: Option<&str>,
 ) -> Result<()> {
-    let built = crate::recipe::tools::build_tool_program(repo_root, package_name, binary_name, target)
-        .with_context(|| {
-            format!(
-                "building workspace binary '{}' from package '{}'",
-                binary_name.unwrap_or(package_name),
-                package_name
-            )
-        })?;
+    let built =
+        crate::recipe::tools::build_tool_program(repo_root, package_name, binary_name, target)
+            .with_context(|| {
+                format!(
+                    "building workspace binary '{}' from package '{}'",
+                    binary_name.unwrap_or(package_name),
+                    package_name
+                )
+            })?;
     let output_name = binary_name.unwrap_or(package_name);
 
     for destination_dir in destination_dirs {
@@ -171,14 +137,15 @@ fn install_rootfs_workspace_binary(
     target: Option<&str>,
     destination: &Path,
 ) -> Result<()> {
-    let built = crate::recipe::tools::build_tool_program(repo_root, package_name, binary_name, target)
-        .with_context(|| {
-            format!(
-                "building workspace binary '{}' from package '{}'",
-                binary_name.unwrap_or(package_name),
-                package_name
-            )
-        })?;
+    let built =
+        crate::recipe::tools::build_tool_program(repo_root, package_name, binary_name, target)
+            .with_context(|| {
+                format!(
+                    "building workspace binary '{}' from package '{}'",
+                    binary_name.unwrap_or(package_name),
+                    package_name
+                )
+            })?;
     let destination = rootfs_source_dir.join(destination);
     copy_executable(&built, &destination).with_context(|| {
         format!(
@@ -274,9 +241,10 @@ fn find_executable_in_path(name: &str) -> Option<PathBuf> {
 fn install_bun_docs_tui_payload(
     repo_root: &Path,
     rootfs_source_dir: &Path,
+    app: &str,
     docs_cmd_path: &Path,
 ) -> Result<()> {
-    let docs_app = distro_contract::tui_apps::find(repo_root, "install-docs")?;
+    let docs_app = distro_contract::tui_apps::find(repo_root, app)?;
 
     let bun_bin = find_executable_in_path("bun").ok_or_else(|| {
         anyhow::anyhow!(
@@ -364,7 +332,10 @@ fn install_bun_docs_tui_payload(
     let docs_cmd = crate::guest::render(
         crate::guest::DOCS_BUN,
         &[
-            ("DOCS_BUNDLE", "/usr/local/share/levitate/docs-tui/levitate-install-docs.js"),
+            (
+                "DOCS_BUNDLE",
+                "/usr/local/share/levitate/docs-tui/levitate-install-docs.js",
+            ),
             ("BUN", "/usr/local/bin/bun"),
         ],
     )?;
@@ -378,21 +349,15 @@ fn install_bun_docs_tui_payload(
     Ok(())
 }
 
-fn install_mode_payload(
+/// Writes the install screen the variant declares (`[install_ux]`): the docs, the
+/// entrypoint and the login hook that starts it.
+pub(crate) fn install_ux_payload(
     repo_root: &Path,
     rootfs_source_dir: &Path,
     distro_id: &str,
-    install_experience: InstallExperience,
-    interactive_shell: &str,
-    ux_docs_frontend: &InstallDocsFrontend,
+    install_ux: &InstallUxContract,
 ) -> Result<()> {
-    let marker_path = rootfs_source_dir.join(INSTALL_EXPERIENCE_MARKER);
-    write_text(&marker_path, &format!("{}\n", install_experience.as_str())).with_context(|| {
-        format!(
-            "writing install experience marker '{}'",
-            marker_path.display()
-        )
-    })?;
+    let interactive_shell = install_ux.shell.as_str();
     install_shell_color_profile(rootfs_source_dir).with_context(|| {
         format!(
             "installing shell color profile defaults under '{}'",
@@ -400,93 +365,85 @@ fn install_mode_payload(
         )
     })?;
 
-    if install_experience == InstallExperience::Ux {
-        let docs_cmd_path = rootfs_source_dir.join(INSTALL_DOCS);
-        let docs_tui_cmd_path = rootfs_source_dir.join("usr/local/bin/docs-tui");
-        match ux_docs_frontend {
-            InstallDocsFrontend::BunBundle => {
-                install_bun_docs_tui_payload(repo_root, rootfs_source_dir, &docs_cmd_path)
-                    .with_context(|| {
-                        format!(
-                            "installing bun-based install docs payload for '{}'",
-                            distro_id
-                        )
-                    })?
-            }
-            InstallDocsFrontend::PlainText { guide } => {
-                let guide_source = repo_root.join(guide);
-                let docs_text_path = rootfs_source_dir.join(INSTALL_DOCS_TEXT);
-                let guide_text = fs::read_to_string(&guide_source).with_context(|| {
+    let docs_cmd_path = rootfs_source_dir.join(INSTALL_DOCS);
+    let docs_tui_cmd_path = rootfs_source_dir.join("usr/local/bin/docs-tui");
+    match &install_ux.docs {
+        InstallDocs::TuiApp(app) => {
+            install_bun_docs_tui_payload(repo_root, rootfs_source_dir, app, &docs_cmd_path)
+                .with_context(|| {
                     format!(
-                        "reading the variant install guide '{}' (ux_docs_guide)",
-                        guide_source.display()
+                        "installing bun-based install docs payload for '{}'",
+                        distro_id
                     )
-                })?;
-                write_text(&docs_text_path, &guide_text).with_context(|| {
-                    format!(
-                        "writing install guide payload '{}'",
-                        docs_text_path.display()
-                    )
-                })?;
-                let docs_cmd = crate::guest::render(
-                    crate::guest::DOCS_TEXT,
-                    &[("DOCS_TEXT", &format!("/{INSTALL_DOCS_TEXT}")), ("SHELL", interactive_shell)],
-                )?;
-                write_executable(&docs_cmd_path, &docs_cmd).with_context(|| {
-                    format!(
-                        "installing install docs command '{}'",
-                        docs_cmd_path.display()
-                    )
-                })?;
-            }
+                })?
         }
-
-        // Canonical docs-tui command alias for split-pane right-side launchers.
-        let docs_tui_cmd = crate::guest::render(
-            crate::guest::DOCS_TUI_ALIAS,
-            &[("INSTALL_DOCS", &format!("/{INSTALL_DOCS}"))],
-        )?;
-        write_executable(&docs_tui_cmd_path, &docs_tui_cmd).with_context(|| {
-            format!(
-                "installing install docs-tui alias '{}'",
-                docs_tui_cmd_path.display()
-            )
-        })?;
+        InstallDocs::Text(guide) => {
+            let docs_text_path = rootfs_source_dir.join(INSTALL_DOCS_TEXT);
+            let guide_text = fs::read_to_string(guide).with_context(|| {
+                format!(
+                    "reading the variant install guide '{}' (install_ux.docs.text)",
+                    guide.display()
+                )
+            })?;
+            write_text(&docs_text_path, &guide_text).with_context(|| {
+                format!(
+                    "writing install guide payload '{}'",
+                    docs_text_path.display()
+                )
+            })?;
+            let docs_cmd = crate::guest::render(
+                crate::guest::DOCS_TEXT,
+                &[
+                    ("DOCS_TEXT", &format!("/{INSTALL_DOCS_TEXT}")),
+                    ("SHELL", interactive_shell),
+                ],
+            )?;
+            write_executable(&docs_cmd_path, &docs_cmd).with_context(|| {
+                format!(
+                    "installing install docs command '{}'",
+                    docs_cmd_path.display()
+                )
+            })?;
+        }
     }
 
+    // Canonical docs-tui command alias for split-pane right-side launchers.
+    let docs_tui_cmd = crate::guest::render(
+        crate::guest::DOCS_TUI_ALIAS,
+        &[("INSTALL_DOCS", &format!("/{INSTALL_DOCS}"))],
+    )?;
+    write_executable(&docs_tui_cmd_path, &docs_tui_cmd).with_context(|| {
+        format!(
+            "installing install docs-tui alias '{}'",
+            docs_tui_cmd_path.display()
+        )
+    })?;
+
     let entrypoint_path = rootfs_source_dir.join(INSTALL_ENTRYPOINT);
-    let entrypoint_script = match install_experience {
-        InstallExperience::Ux => crate::guest::render(
-            crate::guest::ENTRYPOINT_UX,
-            &[
-                ("SHELL", interactive_shell),
-                ("DISTRO", distro_id),
-                ("SPLIT", SPLIT_HELPER),
-                ("PROBE", PROBE_PREFIX),
-                ("SMOKE", SMOKE_ENV),
-            ],
-        )?,
-        InstallExperience::AutomatedSsh => crate::guest::render(
-            crate::guest::ENTRYPOINT_AUTOMATED_SSH,
-            &[("SHELL", interactive_shell), ("DISTRO", distro_id)],
-        )?,
-    };
+    let entrypoint_script = crate::guest::render(
+        crate::guest::ENTRYPOINT_UX,
+        &[
+            ("SHELL", interactive_shell),
+            ("DISTRO", distro_id),
+            ("SPLIT", SPLIT_HELPER),
+            ("PROBE", PROBE_PREFIX),
+            ("SMOKE", SMOKE_ENV),
+        ],
+    )?;
     write_executable(&entrypoint_path, &entrypoint_script).with_context(|| {
         format!(
             "installing install entrypoint script '{}'",
             entrypoint_path.display()
         )
     })?;
-    if install_experience == InstallExperience::Ux {
-        let ux_profile_path = rootfs_source_dir.join(INSTALL_UX_PROFILE);
-        let ux_profile = crate::guest::render_boot(crate::guest::INSTALL_UX_PROFILE_HOOK)?;
-        write_text(&ux_profile_path, &ux_profile).with_context(|| {
-            format!(
-                "installing install UX profile hook '{}'",
-                ux_profile_path.display()
-            )
-        })?;
-    }
+    let ux_profile_path = rootfs_source_dir.join(INSTALL_UX_PROFILE);
+    let ux_profile = crate::guest::render_boot(crate::guest::INSTALL_UX_PROFILE_HOOK)?;
+    write_text(&ux_profile_path, &ux_profile).with_context(|| {
+        format!(
+            "installing install UX profile hook '{}'",
+            ux_profile_path.display()
+        )
+    })?;
 
     Ok(())
 }

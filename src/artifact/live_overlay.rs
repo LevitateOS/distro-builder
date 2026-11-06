@@ -30,8 +30,8 @@ pub struct LiveOverlayConfig<'a> {
     pub inittab: InittabVariant,
     /// Optional path to a variant-local live overlay seed directory to copy first.
     pub seed_overlay: Option<&'a Path>,
-    /// Optional override for `/etc/issue`.
-    pub issue_message: Option<&'a str>,
+    /// The text of `/etc/issue`.
+    pub issue: &'a str,
 }
 
 /// Configuration for creating a systemd live overlay.
@@ -39,8 +39,8 @@ pub struct LiveOverlayConfig<'a> {
 pub struct SystemdLiveOverlayConfig<'a> {
     /// OS display name (e.g., "LevitateOS").
     pub os_name: &'a str,
-    /// Optional override for `/etc/issue`.
-    pub issue_message: Option<&'a str>,
+    /// The text of `/etc/issue`.
+    pub issue: &'a str,
     /// Systemd unit names to mask by linking to `/dev/null`.
     pub masked_units: &'a [&'a str],
     /// Whether to write a serial-console scenario test marker profile script.
@@ -96,15 +96,7 @@ pub fn create_openrc_live_overlay(
     )?;
 
     // /etc/issue
-    let default_issue = format!(
-        "\n{} Live - \\l\n\n{}\n\n",
-        config.os_name,
-        crate::live_ux::LIVE_LOGIN_HINT
-    );
-    fs::write(
-        live_overlay.join("etc/issue"),
-        config.issue_message.unwrap_or(&default_issue),
-    )?;
+    fs::write(live_overlay.join("etc/issue"), config.issue)?;
     fs::write(
         live_overlay.join(recinit::live::PAYLOAD_ROLE_FILE),
         format!("{}\n", recinit::live::ROLE_OVERLAY),
@@ -206,7 +198,8 @@ ttyS0::respawn:/sbin/getty -L -n -l /usr/local/bin/serial-autologin 115200 ttyS0
     // Do-not-suspend configuration
     // Method 1: ACPI handler
     fs::create_dir_all(live_overlay.join("etc/acpi"))?;
-    let acpi_handler = crate::guest::render(crate::guest::ACPI_HANDLER, &[("OS_NAME", config.os_name)])?;
+    let acpi_handler =
+        crate::guest::render(crate::guest::ACPI_HANDLER, &[("OS_NAME", config.os_name)])?;
     write_executable(&live_overlay.join("etc/acpi/handler.sh"), &acpi_handler)?;
 
     // Method 2: sysctl
@@ -301,7 +294,8 @@ pub fn create_systemd_live_overlay(
         tty1_autologin,
     )?;
 
-    let serial_autologin_script = crate::guest::render_boot(crate::guest::SERIAL_AUTOLOGIN_SYSTEMD)?;
+    let serial_autologin_script =
+        crate::guest::render_boot(crate::guest::SERIAL_AUTOLOGIN_SYSTEMD)?;
     write_executable(
         &live_overlay.join("usr/local/bin/serial-autologin"),
         &serial_autologin_script,
@@ -399,15 +393,7 @@ WantedBy=multi-user.target
             .join("etc/systemd/system/multi-user.target.wants/live-shutdown-cleanup.service"),
     )?;
 
-    let default_issue = format!(
-        "\n{} Live - \\l\n\n{}\n\n",
-        config.os_name,
-        crate::live_ux::LIVE_LOGIN_HINT
-    );
-    fs::write(
-        live_overlay.join("etc/issue"),
-        config.issue_message.unwrap_or(&default_issue),
-    )?;
+    fs::write(live_overlay.join("etc/issue"), config.issue)?;
 
     if config.write_serial_test_profile {
         write_serial_test_profile(&live_overlay)?;

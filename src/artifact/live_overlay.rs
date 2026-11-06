@@ -377,7 +377,7 @@ Common commands:
   levitate-install-entrypoint --probe
   install.sh
   live-net-setup.service (systemd unit)
-  recstrap / recfstab / recchroot
+  recpart / recstrap / recfstab / recchroot
   docs-tui --slug installation
 
 Split-pane controls:

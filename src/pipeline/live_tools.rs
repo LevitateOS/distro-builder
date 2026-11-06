@@ -461,7 +461,7 @@ fn install_mode_payload(
              Distro: {distro}\n\
              \n\
              This shell is intended for interactive install preparation.\n\
-             Available baseline commands include: recstrap, recfstab, recchroot, sfdisk, mkfs.ext4, ip, ping, curl.\n\
+             Available baseline commands include: recpart, recstrap, recfstab, recchroot, sfdisk, mkfs.ext4, ip, ping, curl.\n\
              \n\
              If this host is used for automation, switch to the profile that sets install_experience=automated_ssh.\n",
             distro = distro_id

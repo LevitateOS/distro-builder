@@ -51,10 +51,7 @@ pub fn linux_for_distro(repo_root: &Path, distro_id: &str) -> Result<LinuxPaths>
         .parent()
         .context("kconfig has no parent")?
         .join("kconfig.d");
-    let current = monorepo_dir
-        .join(".artifacts/kernel")
-        .join(distro_id)
-        .join("current");
+    let current = crate::run_history::kernel_output_dir(monorepo_dir, distro_id);
     let mut inputs: Vec<(&str, &Path)> = vec![("kconfig", &kconfig_path)];
     if fragments.is_dir() {
         inputs.push(("kconfig_fragments", &fragments));

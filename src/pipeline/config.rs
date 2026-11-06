@@ -1,12 +1,11 @@
 use anyhow::{bail, Result};
 use distro_contract::{
-    ConformanceContract, InstallDocsFrontend as ContractInstallDocsFrontend,
-    OpenRcInittab, OverlayContract, OverlayKind,
+    ConformanceContract, InstallExperience, OpenRcInittab, OverlayContract, OverlayKind,
     PayloadProducerContract, RuntimeActionContract,
 };
 use std::path::Path;
 
-use crate::pipeline::live_tools::{InstallDocsFrontend, InstallExperience, LiveToolsRuntimeAction};
+use crate::pipeline::live_tools::LiveToolsRuntimeAction;
 use crate::pipeline::overlay::BootOverlayPolicy;
 use crate::pipeline::paths::resolve_repo_path;
 use crate::pipeline::plan::RootfsProducer;
@@ -108,7 +107,7 @@ pub(crate) fn load_live_tools_config_from_contract(
     contract: &ConformanceContract,
 ) -> Result<LiveToolsLoadedConfig> {
     let os_name = contract.identity.os_name.clone();
-    let install_experience = install_experience_from_contract(contract);
+    let install_experience = contract.scenarios.live_tools.install_experience;
     let runtime_actions = load_live_tools_runtime_actions(contract, install_experience)?;
 
     Ok(LiveToolsLoadedConfig {
@@ -281,10 +280,7 @@ fn live_tools_runtime_action_from_contract(
             }
             LiveToolsRuntimeAction::InstallModePayload {
                 interactive_shell,
-                ux_docs_frontend: match ux_docs_frontend {
-                    ContractInstallDocsFrontend::PlainText => InstallDocsFrontend::PlainText,
-                    ContractInstallDocsFrontend::BunBundle => InstallDocsFrontend::BunBundle,
-                },
+                ux_docs_frontend: *ux_docs_frontend,
             }
         }
     })
@@ -353,9 +349,6 @@ fn rootfs_producer_from_contract(producer: &PayloadProducerContract) -> Result<R
             mode: *mode,
         },
     })
-}
-fn install_experience_from_contract(contract: &ConformanceContract) -> InstallExperience {
-    contract.scenarios.live_tools.install_experience
 }
 
 fn load_ring2_overlay_policy(

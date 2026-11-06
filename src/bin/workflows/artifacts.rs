@@ -221,7 +221,7 @@ fn prepare_product_inputs(
     match product.canonical {
         crate::PRODUCT_BASE_ROOTFS => {
             let output_root =
-                crate::artifact_paths::distro_output_root_for(&bundle.repo_root, distro_id);
+                distro_builder::run_history::distro_output_dir(&bundle.repo_root, distro_id);
             let spec = load_base_rootfs_product_spec(
                 distro_id,
                 &bundle.contract.identity.os_name,

@@ -13,6 +13,8 @@ const RUN_MANIFEST_FILENAME: &str = "run-manifest.json";
 pub const STATUS_SUCCESS: &str = "success";
 /// `status` of a failed run.
 pub const STATUS_FAILED: &str = "failed";
+/// `status` of a run still in progress.
+pub const STATUS_BUILDING: &str = "building";
 /// `target_kind` of a release product build.
 pub const TARGET_KIND_RELEASE_PRODUCT: &str = "release-product";
 

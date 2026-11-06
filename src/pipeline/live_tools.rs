@@ -1,19 +1,11 @@
 use anyhow::{bail, Context, Result};
-use serde::Deserialize;
 use std::env;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-pub(crate) use distro_contract::InstallExperience;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum InstallDocsFrontend {
-    PlainText,
-    BunBundle,
-}
+pub(crate) use distro_contract::{InstallDocsFrontend, InstallExperience};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum LiveToolsRuntimeAction {
@@ -638,11 +630,16 @@ fi\n\
 \n\
 echo \"[install-ux] Launching install UX on $TTY...\"\n\
 export LEVITATE_INSTALL_UX_LAUNCHED=1\n\
-exec /usr/local/bin/levitate-install-entrypoint\n";
-        let ux_profile = ux_profile.replace(
-            "@BOOT_INJECTION_IMPORT@",
-            &distro_spec::shared::live_boot::boot_injection_import_sh(),
-        );
+exec @INSTALL_ENTRYPOINT@\n";
+        let ux_profile = ux_profile
+            .replace(
+                "@BOOT_INJECTION_IMPORT@",
+                &distro_spec::shared::live_boot::boot_injection_import_sh(),
+            )
+            .replace(
+                "@INSTALL_ENTRYPOINT@",
+                &format!("/{}", CANONICAL_INSTALL_ENTRYPOINT),
+            );
         write_text(&ux_profile_path, &ux_profile).with_context(|| {
             format!(
                 "installing install UX profile hook '{}'",

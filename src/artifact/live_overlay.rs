@@ -104,10 +104,10 @@ echo "[autologin] Starting login shell..." >/dev/console 2>/dev/null || true
 echo "@SHELL_READY_MARKER@" >/dev/console 2>/dev/null || true
 echo "@SHELL_READY_MARKER@" >/dev/kmsg 2>/dev/null || true
 
-if [ "${LEVITATE_INSTALL_SERIAL_UX:-0}" = "1" ] && [ -x /usr/local/bin/levitate-install-entrypoint ]; then
+if [ "${LEVITATE_INSTALL_SERIAL_UX:-0}" = "1" ] && [ -x @INSTALL_ENTRYPOINT@ ]; then
     echo "[autologin] Launching install UX on serial console..."
     export LEVITATE_INSTALL_UX_LAUNCHED=1
-    exec /usr/local/bin/levitate-install-entrypoint
+    exec @INSTALL_ENTRYPOINT@
 fi
 
 # Run sh as login shell (sources /etc/profile and /etc/profile.d/*)
@@ -440,10 +440,10 @@ else
     fi
 fi
 
-if [ "${LEVITATE_INSTALL_SERIAL_UX:-0}" = "1" ] && [ -x /usr/local/bin/levitate-install-entrypoint ]; then
+if [ "${LEVITATE_INSTALL_SERIAL_UX:-0}" = "1" ] && [ -x @INSTALL_ENTRYPOINT@ ]; then
     echo "[autologin] Launching install UX on serial console..."
     export LEVITATE_INSTALL_UX_LAUNCHED=1
-    exec /usr/local/bin/levitate-install-entrypoint
+    exec @INSTALL_ENTRYPOINT@
 fi
 
 exec /bin/bash -il
@@ -700,9 +700,13 @@ fn write_serial_test_profile(live_overlay: &Path) -> Result<()> {
 }
 
 /// Fill the boot-protocol pieces into a guest script: the serial readiness
-/// marker and the boot-injection import.
+/// marker, the boot-injection import and the install entrypoint.
 fn with_ready_marker(script: &str) -> String {
     script
+        .replace(
+            "@INSTALL_ENTRYPOINT@",
+            &format!("/{}", crate::live_ux::INSTALL_ENTRYPOINT),
+        )
         .replace(
             "@SHELL_READY_MARKER@",
             recqemu::serial::protocol::SHELL_READY_MARKER,

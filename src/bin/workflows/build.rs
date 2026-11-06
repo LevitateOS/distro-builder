@@ -77,7 +77,7 @@ pub(crate) fn build_one(distro_id: &str, product: BuildProduct) -> Result<()> {
         .with_context(|| format!("validating variant contract for '{distro_id}'"))?;
 
     let kernel_output_dir =
-        crate::artifact_paths::kernel_output_dir_for(&bundle.repo_root, distro_id);
+        distro_builder::run_history::kernel_output_dir(&bundle.repo_root, distro_id);
     std::fs::create_dir_all(&kernel_output_dir).with_context(|| {
         format!(
             "creating kernel output directory '{}'",
@@ -100,7 +100,7 @@ pub(crate) fn build_one(distro_id: &str, product: BuildProduct) -> Result<()> {
     let iso_path = output_dir.join(iso_filename_for_product(&base_iso_filename, product));
 
     if let Some(run_id) = build_layout.run_id.as_deref() {
-        let metadata_path = crate::run_history::run_manifest_path(&output_dir);
+        let metadata_path = distro_builder::run_history::run_manifest_path(&output_dir);
         crate::run_manifest::write_run_metadata(
             &metadata_path,
             &crate::BuildRunMetadata {
@@ -108,7 +108,7 @@ pub(crate) fn build_one(distro_id: &str, product: BuildProduct) -> Result<()> {
                 distro_id: distro_id.to_string(),
                 target_kind: distro_builder::run_history::TARGET_KIND_RELEASE_PRODUCT.to_string(),
                 target_name: product.canonical.to_string(),
-                status: "building".to_string(),
+                status: distro_builder::run_history::STATUS_BUILDING.to_string(),
                 created_at_utc: created_at_utc.clone(),
                 finished_at_utc: None,
                 root_dir: build_layout.root_dir.display().to_string(),
@@ -171,7 +171,7 @@ pub(crate) fn build_one(distro_id: &str, product: BuildProduct) -> Result<()> {
     })();
 
     if let Some(run_id) = build_layout.run_id.as_deref() {
-        let metadata_path = crate::run_history::run_manifest_path(&output_dir);
+        let metadata_path = distro_builder::run_history::run_manifest_path(&output_dir);
         let finished_at_utc = Some(now_utc_compact()?);
         let status = if build_result.is_ok() {
             distro_builder::run_history::STATUS_SUCCESS.to_string()
@@ -204,7 +204,7 @@ pub(crate) fn build_one(distro_id: &str, product: BuildProduct) -> Result<()> {
         }
 
         if build_result.is_ok() {
-            crate::run_history::prune_old_runs(
+            distro_builder::run_history::prune_old_runs(
                 &build_layout.root_dir,
                 crate::RELEASE_RUN_RETENTION_COUNT,
             )?;
@@ -236,7 +236,7 @@ pub(crate) fn product_release_output_layout_for(
     distro_id: &str,
     product: BuildProduct,
 ) -> Result<BuildOutputLayout> {
-    let root_dir = crate::artifact_paths::release_product_dir_for(
+    let root_dir = distro_builder::run_history::release_product_dir(
         repo_root,
         distro_id,
         product.release_dir_name,
@@ -247,7 +247,7 @@ pub(crate) fn product_release_output_layout_for(
             root_dir.display()
         )
     })?;
-    let (run_id, run_root) = crate::run_history::allocate_run_dir(&root_dir)?;
+    let (run_id, run_root) = distro_builder::run_history::allocate_run_dir(&root_dir)?;
 
     Ok(BuildOutputLayout {
         root_dir,

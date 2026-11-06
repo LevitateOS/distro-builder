@@ -10,7 +10,6 @@
 //! 4. Monorepo submodule (`../tools/recipe`, built from source if needed)
 //! 5. System PATH (`which recipe`)
 
-pub mod alpine;
 pub mod alpine_rootfs_source;
 pub mod linux;
 mod outputs;
@@ -19,24 +18,12 @@ pub mod tools;
 
 pub use crate::pipeline::paths::recipe_work_dir;
 
-use crate::process::ensure_exists;
 use anyhow::{bail, Context, Result};
-use distro_spec::shared::LEVITATE_CARGO_TOOLS;
 use std::env;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 #[cfg(unix)]
 use std::{io, os::unix::process::CommandExt};
-
-/// Extract the distro directory name from a base_dir path.
-///
-/// e.g., `/home/user/LevitateOS/AcornOS` → `"AcornOS"`
-fn distro_name(base_dir: &Path) -> &str {
-    base_dir
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("unknown")
-}
 
 /// How the recipe binary was built from source.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -427,64 +414,6 @@ pub fn run_recipe(
     recipes_path: Option<&Path>,
 ) -> Result<()> {
     run_recipe_json_with_defines(recipe_bin, recipe_path, build_dir, &[], recipes_path)?;
-    Ok(())
-}
-
-/// Run the tool recipes to install recstrap, recfstab, recchroot to staging.
-///
-/// # Arguments
-/// * `base_dir` - distro crate root (e.g., `/path/to/AcornOS`)
-pub fn install_tools(base_dir: &Path) -> Result<()> {
-    let repo = base_dir.parent().unwrap_or(base_dir);
-    let staging =
-        crate::artifact_store::central_output_dir_for_distro(base_dir).join("staging/usr/bin");
-    std::fs::create_dir_all(&staging)?;
-    for tool in LEVITATE_CARGO_TOOLS {
-        let program = tools::build_tool_program(repo, tool, None, None)?;
-        std::fs::copy(&program, staging.join(tool))
-            .with_context(|| format!("installing published {tool} program"))?;
-    }
-    Ok(())
-}
-
-/// Run the packages.rhai recipe to extract and install Alpine packages into rootfs.
-///
-/// # Arguments
-/// * `base_dir` - distro crate root
-pub fn packages(base_dir: &Path) -> Result<()> {
-    let distro_name = distro_name(base_dir);
-    let monorepo_dir = base_dir
-        .parent()
-        .map(|p| p.to_path_buf())
-        .unwrap_or_else(|| base_dir.to_path_buf());
-
-    let downloads_dir = base_dir.join("downloads");
-    let recipe_path = base_dir.join("deps/packages.rhai");
-
-    ensure_exists(&recipe_path, "Packages recipe").map_err(|_| {
-        anyhow::anyhow!(
-            "Packages recipe not found at: {}\n\
-             Expected packages.rhai in {}/deps/",
-            recipe_path.display(),
-            distro_name
-        )
-    })?;
-
-    // Verify alpine.rhai has been run first
-    let rootfs = downloads_dir.join("rootfs");
-
-    if !rootfs.join("usr").exists() {
-        bail!(
-            "rootfs not found at: {}\n\
-             Run alpine.rhai first (via alpine() function).",
-            rootfs.display()
-        );
-    }
-
-    // Find and run recipe
-    let recipe_bin = find_recipe(&monorepo_dir)?;
-    recipe_bin.run(&recipe_path, &downloads_dir)?;
-
     Ok(())
 }
 

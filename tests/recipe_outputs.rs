@@ -59,6 +59,7 @@ fn install(ctx) {{
             defines: BTreeMap::new(),
             inputs: BTreeMap::new(),
             network_hosts: Vec::new(),
+            memory_mib: None,
         },
     );
     assert_eq!(
@@ -165,6 +166,7 @@ fn managed_recfstab_input_install_reuse_and_removal() {
             &[("program", program.as_path())],
             &[],
             None,
+            None,
         )
         .unwrap()
     };
@@ -190,6 +192,7 @@ fn managed_recfstab_input_install_reuse_and_removal() {
             &[],
             &[("program", program.as_path())],
             &[],
+            None,
             None,
         )
         .is_err(),
@@ -241,6 +244,7 @@ fn managed_custom_rootfs_preserves_inputs_and_published_generations() {
             &[],
             &[("rootfs", source.as_path())],
             &[],
+            None,
             None,
         )
     };

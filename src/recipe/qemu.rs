@@ -13,6 +13,7 @@ pub fn prepare_qemu_tools(repo: &Path) -> Result<PathBuf> {
         &[],
         &[],
         &["dl.rockylinux.org:443".into()],
+        None,
         recipe.parent(),
     )?;
     let tools = super::outputs::directory(&result, "tools")?;

@@ -1,6 +1,6 @@
 //! Path definitions for Alpine-based build artifacts.
 //!
-//! The actual download and extraction logic is in `deps/alpine.rhai`.
+//! Canonical source production is in `recipes/alpine-live-source-rootfs.rhai`.
 //! This module only defines WHERE things go, not HOW to get them.
 
 use std::path::{Path, PathBuf};

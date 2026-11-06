@@ -248,6 +248,7 @@ pub fn run_recipe_phase_json_with_defines(
         recipes_path,
         &[],
         &[],
+        None,
         false,
     )
 }
@@ -263,6 +264,7 @@ pub fn run_recipe_phase_json_with_inputs(
     defines: &[(&str, &str)],
     inputs: &[(&str, &Path)],
     network_hosts: &[String],
+    memory_mib: Option<u64>,
     recipes_path: Option<&Path>,
 ) -> Result<serde_json::Value> {
     run_recipe_phase_json_impl(
@@ -274,6 +276,7 @@ pub fn run_recipe_phase_json_with_inputs(
         recipes_path,
         inputs,
         network_hosts,
+        memory_mib,
         false,
     )
 }
@@ -287,6 +290,7 @@ fn run_recipe_phase_json_impl(
     recipes_path: Option<&Path>,
     inputs: &[(&str, &Path)],
     network_hosts: &[String],
+    memory_mib: Option<u64>,
     force_acquire: bool,
 ) -> Result<serde_json::Value> {
     eprintln!("  Running recipe: {}", recipe_path.display());
@@ -314,6 +318,9 @@ fn run_recipe_phase_json_impl(
     cmd.arg("--state-dir").arg(build_dir.join("recipe-state"));
     if force_acquire {
         cmd.args(["--force-acquire", "--force-install"]);
+    }
+    if let Some(memory_mib) = memory_mib {
+        cmd.arg("--memory-mib").arg(memory_mib.to_string());
     }
     for host in network_hosts {
         cmd.arg("--network-host").arg(host);

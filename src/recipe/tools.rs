@@ -218,6 +218,7 @@ pub fn build_tool_program(
         &[("RUST_TARGET", target)],
         &[("source", source.path())],
         &[],
+        None,
         recipe.parent(),
     )?;
     super::outputs::file(&ctx, "program")

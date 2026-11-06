@@ -64,6 +64,7 @@ pub fn check_kernel_installed_with_recipe(
         &defines,
         &inputs,
         &[],
+        None,
         Some(&recipes_path),
     )
     .context("build kernel isinstalled check failed")?;

@@ -4,6 +4,7 @@
 const RECIPE_API = 2;
 let ctx = #{
     name: "qemu-tools",
+    version: "10.0.0",
     description: "QEMU and OVMF for boot scenarios",
     tools: RUNTIME.paths.output,
     rpms: [
@@ -42,6 +43,16 @@ fn is_installed(ctx) {
     for path in ["usr/bin/qemu-img", "usr/libexec/qemu-kvm",
                  "usr/share/edk2/ovmf/OVMF_CODE.fd", "usr/share/edk2/ovmf/OVMF_VARS.fd"] {
         if !is_file(join_path(ctx.tools, path)) { return needs_work(ctx, path + " is missing"); }
+    }
+    let libraries = join_path(ctx.tools, "usr/lib64") + ":/usr/lib:/usr/lib64";
+    let options = #{env: #{LD_LIBRARY_PATH: libraries}};
+    let expected = "version " + ctx.version;
+    for program in ["usr/bin/qemu-img", "usr/libexec/qemu-kvm"] {
+        let executable = join_path(ctx.tools, program);
+        let version = exec_output(executable, ["--version"], options);
+        if !version.contains(expected) {
+            throw "Unexpected QEMU executable version: " + version;
+        }
     }
     ctx.outputs.tools = ctx.tools;
     ready(ctx)

@@ -1,16 +1,22 @@
-// Build the installation tool from an explicit offline source closure, or use
-// an explicitly supplied executable. Host paths are selected by the caller:
+// Build one of the install tools (recstrap, recchroot, recfstab; all from the
+// recstrap crate) from an explicit offline source closure, or use an explicitly
+// supplied executable. Host paths are selected by the caller:
 //   --input source=<standalone vendored recstrap tree>
-//   --input program=<recstrap executable>
-// The named program output is published by Recipe for the consumer to install.
+//   --input program=<tool executable>
+// BIN selects the tool (default recstrap). The named program output is
+// published by Recipe for the consumer to install.
 const RECIPE_API = 2;
+let bin = if is_def_var("BIN") { BIN } else { "recstrap" };
+if bin != "recstrap" && bin != "recchroot" && bin != "recfstab" {
+    throw "Unknown install tool: " + bin;
+}
 let ctx = #{
-    name: "recstrap",
+    name: bin,
     rust_target: if is_def_var("RUST_TARGET") { RUST_TARGET } else { "x86_64-unknown-linux-gnu" },
     source: "/inputs/source",
     supplied_program: "/inputs/program",
     built_program: "",
-    program: join_path(RUNTIME.paths.output, "bin/recstrap"),
+    program: join_path(RUNTIME.paths.output, "bin/" + bin),
 };
 
 if ctx.rust_target != "x86_64-unknown-linux-gnu" && ctx.rust_target != "x86_64-unknown-linux-musl" {
@@ -18,12 +24,12 @@ if ctx.rust_target != "x86_64-unknown-linux-gnu" && ctx.rust_target != "x86_64-u
 }
 let target_prefix = if ctx.rust_target == "x86_64-unknown-linux-gnu" { "target/release/" }
                     else { "target/" + ctx.rust_target + "/release/" };
-ctx.built_program = join_path(RUNTIME.paths.build, target_prefix + "recstrap");
+ctx.built_program = join_path(RUNTIME.paths.build, target_prefix + bin);
 
 fn _verify(ctx, program) {
     let actual = trim(exec_output(program, ["--version"]));
-    if !actual.starts_with("recstrap ") {
-        throw "Unexpected recstrap executable: " + actual;
+    if !actual.starts_with(ctx.name + " ") {
+        throw "Unexpected " + ctx.name + " executable: " + actual;
     }
 }
 
@@ -31,7 +37,7 @@ fn is_acquired(ctx) {
     if is_file(join_path(ctx.source, "Cargo.toml")) || is_file(ctx.supplied_program) {
         return ready(ctx);
     }
-    needs_work(ctx, "recstrap source or executable input is missing")
+    needs_work(ctx, ctx.name + " source or executable input is missing")
 }
 
 fn acquire(ctx) {
@@ -41,7 +47,7 @@ fn acquire(ctx) {
 
 fn is_built(ctx) {
     let program = if is_file(join_path(ctx.source, "Cargo.toml")) { ctx.built_program } else { ctx.supplied_program };
-    if !is_file(program) { return needs_work(ctx, "recstrap needs compilation"); }
+    if !is_file(program) { return needs_work(ctx, ctx.name + " needs compilation"); }
     _verify(ctx, program);
     ready(ctx)
 }
@@ -53,7 +59,7 @@ fn build(ctx) {
         _verify(ctx, ctx.supplied_program);
         return ctx;
     }
-    let args = ["build", "--release", "--locked", "--offline", "--bin", "recstrap",
+    let args = ["build", "--release", "--locked", "--offline", "--bin", ctx.name,
         "--manifest-path", join_path(ctx.source, "Cargo.toml"), "--target-dir", join_path(work, "target")];
     if ctx.rust_target == "x86_64-unknown-linux-gnu" {
         let compiler = exec_output("rustc", ["-vV"]);
@@ -75,7 +81,7 @@ fn build(ctx) {
 }
 
 fn is_installed(ctx) {
-    if !is_file(ctx.program) { return needs_work(ctx, "recstrap output is missing"); }
+    if !is_file(ctx.program) { return needs_work(ctx, ctx.name + " output is missing"); }
     _verify(ctx, ctx.program);
     ctx.outputs.program = ctx.program;
     ready(ctx)

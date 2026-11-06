@@ -10,7 +10,7 @@ use std::process::Command;
 /// dependency must remain an exact member of the original lock.
 pub fn prepare_tool_source(repo: &Path, package: &str) -> Result<tempfile::TempDir> {
     let relative = match package {
-        "recstrap" | "recfstab" | "recchroot" => PathBuf::from("tools").join(package),
+        "recstrap" => PathBuf::from("tools/recstrap"),
         "install-split-pane" => PathBuf::from("distro-builder/install-split-pane"),
         _ => bail!("no live-tool source producer declared for {package}"),
     };
@@ -187,13 +187,14 @@ pub fn build_tool_program(
     binary: Option<&str>,
     target: Option<&str>,
 ) -> Result<PathBuf> {
-    let expected_binary = match package {
-        "recstrap" | "recfstab" | "recchroot" => package,
-        "install-split-pane" => "levitate-install-docs-split",
+    let (default_binary, binaries): (&str, &[&str]) = match package {
+        "recstrap" => ("recstrap", &["recstrap", "recchroot", "recfstab"]),
+        "install-split-pane" => ("levitate-install-docs-split", &["levitate-install-docs-split"]),
         _ => bail!("no managed live-tool recipe declared for {package}"),
     };
-    if binary.unwrap_or(expected_binary) != expected_binary {
-        bail!("unexpected binary selection for {package}");
+    let binary = binary.unwrap_or(default_binary);
+    if !binaries.contains(&binary) {
+        bail!("package {package} does not build binary {binary}");
     }
     let target = target.unwrap_or("x86_64-unknown-linux-gnu");
     if !matches!(
@@ -209,14 +210,14 @@ pub fn build_tool_program(
     let recipe_bin = super::find_recipe(repo)?;
     let work = repo
         .join(".artifacts/work/recipe-tools")
-        .join(package)
+        .join(binary)
         .join(target);
     let ctx = super::run_recipe_phase_json_with_inputs(
         &recipe_bin.path,
         "install",
         &recipe,
         &work,
-        &[("RUST_TARGET", target)],
+        &[("RUST_TARGET", target), ("BIN", binary)],
         &[("source", source.path())],
         &[],
         None,

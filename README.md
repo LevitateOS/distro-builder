@@ -56,7 +56,7 @@ impl Installable for MyComponent {
 
 ## Build model
 
-Canonical builds load ring-owned manifests from `distro-variants/<distro>/`: sources (Ring 3), filesystem products (Ring 2), artifact transforms (Ring 1), and releases (Ring 0). Build-host and scenario declarations are separate owners.
+Canonical builds load ring-owned manifests from `distro/variants/<distro>/`: sources (Ring 3), filesystem products (Ring 2), artifact transforms (Ring 1), and releases (Ring 0). Build-host and scenario declarations are separate owners.
 
 Build explicitly with `cargo xtask build live-tools levitate`. Run an independent scenario with `cargo xtask test live-tools levitate`; scenario commands consume existing artifacts. The workspace `architecture.md` describes product outputs, scenarios, and validation.
 

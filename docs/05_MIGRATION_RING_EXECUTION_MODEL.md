@@ -178,22 +178,22 @@ be implemented against the actual codepaths.
 
 ### A. Ownership is already ring-native on the canonical path
 
-- `distro-contract/src/variant.rs`
+- `distro/contract/src/variant.rs`
   - canonical owner family is now `identity/identity.toml`,
     `build-host/build-host.toml`, `ring3/sources.toml`,
     `ring2/products.toml`, `ring1/transforms.toml`, `ring0/release.toml`,
     and `scenarios/scenarios.toml`
-- `distro-builder/src/pipeline/source.rs`
+- `distro/builder/src/pipeline/source.rs`
   - Ring 3 rootfs-source policy is loaded from the canonical contract
-- `distro-builder/src/pipeline/config.rs`
+- `distro/builder/src/pipeline/config.rs`
   - Ring 2 overlay, boot-payload, and live-tools runtime policy are loaded from
     the canonical contract
-- `distro-builder/src/bin/workflows/parse.rs`
+- `distro/builder/src/bin/workflows/parse.rs`
   - canonical CLI parsing accepts product names and rejects stage aliases as
     products
-- `distro-builder/src/bin/workflows/release_hook.rs`
+- `distro/builder/src/bin/workflows/release_hook.rs`
   - release hooks consume Ring 1 and Ring 0 identities, not stage manifests
-- `distro-variants/_shared/build-release.sh`
+- `distro/variants/_shared/build-release.sh`
   - shared release path prepares product inputs through
     `distro-builder product prepare ...`
 
@@ -203,17 +203,17 @@ This means the ownership migration is not the main blocker anymore.
 
 The core Track 05 execution debt has been reduced substantially.
 
-- `distro-builder/src/pipeline/planner.rs`
+- `distro/builder/src/pipeline/planner.rs`
   - now owns canonical product-chain closure
   - now owns release-prerequisite realization planning
   - now owns resolved parent-rootfs planning for derived product preparation
-- `distro-builder/src/bin/workflows/build.rs`
+- `distro/builder/src/bin/workflows/build.rs`
   - release prerequisite materialization now consumes planner-produced
     prerequisite state instead of performing workflow-local missing-parent scans
-- `distro-builder/src/bin/workflows/artifacts.rs`
+- `distro/builder/src/bin/workflows/artifacts.rs`
   - product preparation now consumes planner-resolved parent rootfs inputs
     instead of resolving parent release artifacts ad hoc per derived product
-- `distro-builder/src/pipeline/products.rs`
+- `distro/builder/src/pipeline/products.rs`
   - derived product preparers still require explicit parent rootfs injection,
     which is now the correct lower-level contract rather than a workflow bug
 
@@ -226,7 +226,7 @@ The highest-value remaining work for Track 05 is now outside the canonical
 planner itself.
 
 1. Stage-attributed reporting still dominates validation surfaces
-   - `distro-contract/src/error.rs`, `validate.rs`, and `runtime.rs` still use
+   - `distro/contract/src/error.rs`, `validate.rs`, and `runtime.rs` still use
      `CheckpointId`
 2. Scenario/test consumption remains intentionally build-free
    - this is correct by policy, but it means the canonical product/release
@@ -277,11 +277,11 @@ without breaking the canonical scenario/release entrypoints.
 
 ### E. Validation/reporting still uses stage attribution as the main vocabulary
 
-- `distro-contract/src/error.rs`
+- `distro/contract/src/error.rs`
   - violation attribution is still `CheckpointId`
-- `distro-contract/src/validate.rs`
+- `distro/contract/src/validate.rs`
   - many canonical validation surfaces still report under `Build` / `Boot`
-- `distro-contract/src/runtime.rs`
+- `distro/contract/src/runtime.rs`
   - canonical runtime validation exists, but the compatibility entrypoint
     still exposes stage-attributed checkpoint IDs in violation reports
 
@@ -294,8 +294,8 @@ The earlier builder-side scenario-script mismatch has been removed.
 
 - `testing/install-tests/test-scripts/` remains the canonical owner for the
   shared scenario evidence scripts
-- `distro-builder/src/pipeline/scripts.rs` now installs the canonical script
-  names declared by `distro-variants/*/scenarios/scenarios.toml`
+- `distro/builder/src/pipeline/scripts.rs` now installs the canonical script
+  names declared by `distro/variants/*/scenarios/scenarios.toml`
 
 This is no longer an open blocker on the canonical builder path.
 
@@ -345,14 +345,14 @@ Goal:
 
 Recommended file ownership:
 
-- `distro-builder/src/pipeline/mod.rs`
+- `distro/builder/src/pipeline/mod.rs`
   - add a dedicated planner module
-- `distro-builder/src/pipeline/plan.rs`
+- `distro/builder/src/pipeline/plan.rs`
   - rename or narrow this module because it currently owns producer-plan logic,
     not orchestration planning
   - recommended rename target: `producers.rs`
 - new file:
-  - `distro-builder/src/pipeline/planner.rs`
+  - `distro/builder/src/pipeline/planner.rs`
 
 Planner responsibilities:
 
@@ -394,9 +394,9 @@ Current status:
 
 Recommended file ownership:
 
-- `distro-builder/src/pipeline/products.rs`
-- `distro-builder/src/pipeline/io.rs`
-- `distro-builder/src/bin/workflows/artifacts.rs`
+- `distro/builder/src/pipeline/products.rs`
+- `distro/builder/src/pipeline/io.rs`
+- `distro/builder/src/bin/workflows/artifacts.rs`
 
 Required changes:
 
@@ -435,10 +435,10 @@ Goal:
 
 Recommended file ownership:
 
-- `distro-builder/src/bin/workflows/build.rs`
-- `distro-builder/src/bin/workflows/commands.rs`
-- `distro-builder/src/bin/workflows/release_hook.rs`
-- `distro-builder/src/bin/distro-builder.rs`
+- `distro/builder/src/bin/workflows/build.rs`
+- `distro/builder/src/bin/workflows/commands.rs`
+- `distro/builder/src/bin/workflows/release_hook.rs`
+- `distro/builder/src/bin/distro-builder.rs`
 
 Required changes:
 
@@ -475,7 +475,7 @@ Recommended file ownership:
 - `testing/install-tests/src/scenarios/mod.rs`
 - `xtask/src/tasks/testing/scenarios.rs`
 - optional shared helper:
-  - `distro-builder/src/bin/workflows/artifact_resolve.rs`
+  - `distro/builder/src/bin/workflows/artifact_resolve.rs`
   - or a testing-local resolver if cross-crate reuse is not worth it yet
 
 Required changes:
@@ -505,7 +505,7 @@ Recommended file ownership:
 - `justfile`
 - `xtask/README.md`
 - `testing/install-tests/src/bin/install-tests.rs`
-- `distro-builder/docs/03_MIGRATION_STAGELESS.md`
+- `distro/builder/docs/03_MIGRATION_STAGELESS.md`
 
 Required changes:
 
@@ -535,9 +535,9 @@ Goal:
 
 Recommended file ownership:
 
-- `distro-contract/src/error.rs`
-- `distro-contract/src/validate.rs`
-- `distro-contract/src/runtime.rs`
+- `distro/contract/src/error.rs`
+- `distro/contract/src/validate.rs`
+- `distro/contract/src/runtime.rs`
 
 Recommended approach:
 
@@ -572,8 +572,8 @@ Current status:
 
 Recommended file ownership:
 
-- `distro-builder/src/pipeline/scripts.rs`
-- `distro-builder/src/pipeline/products.rs`
+- `distro/builder/src/pipeline/scripts.rs`
+- `distro/builder/src/pipeline/products.rs`
 - `testing/install-tests/test-scripts/README.md`
 
 Required changes:

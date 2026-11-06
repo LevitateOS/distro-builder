@@ -487,7 +487,7 @@ Acceptance:
 - no canonical command/help/doc surface uses stage-era naming
 
 Current reality:
-- stage-era manifest families are already gone from `distro-variants/*` in active source
+- stage-era manifest families are already gone from `distro/variants/*` in active source
 - canonical `ConformanceContract` no longer stores `stages`, and the explicit stage-shaped compatibility facade has now been removed from `distro-contract`
 - stage-shaped contract types and stage-named runtime wrappers are no longer part of the canonical contract surface
 - canonical validation/runtime diagnostics now use `build.*`, `transforms.*`, and `scenarios.live_boot.*` field names instead of `stage_*` field strings

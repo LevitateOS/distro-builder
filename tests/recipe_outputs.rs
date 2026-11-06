@@ -50,7 +50,7 @@ fn install(ctx) {{
     // Nor may the subprocess consumer reuse the old fixed JSON-result filename.
     let stale = work.join(".recipe-output.json");
     std::fs::write(&stale, b"{\"rootfs_path\":\"/not-an-output\"}").unwrap();
-    let repo = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR")).ancestors().nth(2).unwrap();
     let result = materialize_rootfs_from_recipe(
         repo,
         &work,
@@ -123,7 +123,7 @@ fn real_cli_success_without_a_fresh_json_result_cannot_reuse_stale_context() {
     let stale = work.join(".recipe-output.json");
     let old_result = b"{\"outputs\":{\"rootfs\":\"/old-result\"}}";
     std::fs::write(&stale, old_result).unwrap();
-    let repo = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR")).ancestors().nth(2).unwrap();
     let binary = distro_builder::recipe::find_recipe(repo).unwrap();
     // `info` is a real successful CLI operation that produces human metadata,
     // not a lifecycle JSON result. No recipe code is evaluated by this command.
@@ -153,8 +153,8 @@ fn managed_recfstab_input_install_reuse_and_removal() {
         ));
     let original = std::fs::read(&program).unwrap();
     let dir = tempfile::tempdir().unwrap();
-    let repo = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-    let recipe = repo.join("distro-builder/recipes/install-tools.rhai");
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR")).ancestors().nth(2).unwrap();
+    let recipe = repo.join("distro/builder/recipes/install-tools.rhai");
     let binary = find_recipe(repo).unwrap();
     let invoke = |phase| {
         run_recipe_phase_json_with_inputs(
@@ -231,8 +231,8 @@ fn managed_custom_rootfs_preserves_inputs_and_published_generations() {
     symlink("tool", source.join("usr/bin/tool-link")).unwrap();
     std::fs::create_dir_all(source.join("etc")).unwrap();
     symlink("/proc/mounts", source.join("etc/mtab")).unwrap();
-    let repo = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-    let recipe = repo.join("distro-builder/recipes/custom-source-rootfs.rhai");
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR")).ancestors().nth(2).unwrap();
+    let recipe = repo.join("distro/builder/recipes/custom-source-rootfs.rhai");
     let work = root.join("managed work");
     let binary = find_recipe(repo).unwrap();
     let invoke = |phase| {

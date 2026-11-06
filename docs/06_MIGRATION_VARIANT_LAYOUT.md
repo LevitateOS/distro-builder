@@ -4,7 +4,7 @@ Status: in_progress
 
 ## Purpose
 
-Make the on-disk `distro-variants/<distro>` filesystem layout match the
+Make the on-disk `distro/variants/<distro>` filesystem layout match the
 ring/owner model that Tracks 04 and 05 define semantically.
 
 This track exists because the repo currently has a mismatch:
@@ -112,12 +112,12 @@ Date: 2026-03-27
 ### What just landed
 
 1. Compatibility loader removal
-   - `distro-contract/src/variant.rs` now rejects:
+   - `distro/contract/src/variant.rs` now rejects:
      - flat-root manifests
      - legacy owner-dir ring filenames such as `ring3-sources.toml`
      - flat-root build-host support files and flat `ring0` hook layouts
 2. Legacy key removal
-   - `distro-contract/src/variant.rs` no longer accepts `profile_overlay`
+   - `distro/contract/src/variant.rs` no longer accepts `profile_overlay`
 3. Fixture/doc cleanup
    - `distro-builder` fixtures now generate canonical owner-directory layouts by default
 
@@ -132,7 +132,7 @@ Date: 2026-03-27
 Every active distro variant should follow this model:
 
 ```text
-distro-variants/
+distro/variants/
   _shared/
     ring0/
       hooks/
@@ -322,7 +322,7 @@ multiple crates.
 
 The main path-sensitive owner is:
 
-- `distro-contract/src/variant.rs`
+- `distro/contract/src/variant.rs`
 
 It currently hardcodes flat layout assumptions such as:
 
@@ -353,7 +353,7 @@ No other crate should open-code those paths after this migration.
 
 ### 2. `distro-builder` distro discovery must stop probing flat files
 
-`distro-builder/src/bin/workflows/parse.rs` currently discovers distros by
+`distro/builder/src/bin/workflows/parse.rs` currently discovers distros by
 checking for `identity.toml` directly under the variant root.
 
 After migration it should discover variants via the canonical path helper and
@@ -371,7 +371,7 @@ Current product metadata uses root-level script names:
 
 Current lookup in:
 
-- `distro-builder/src/bin/workflows/release_hook.rs`
+- `distro/builder/src/bin/workflows/release_hook.rs`
 
 assumes:
 
@@ -389,8 +389,8 @@ The final path must not be root-level.
 
 The following path-sensitive code must stop assuming root-level `kconfig`:
 
-- `distro-builder/src/pipeline/kernel.rs`
-- `distro-contract/src/runtime.rs`
+- `distro/builder/src/pipeline/kernel.rs`
+- `distro/contract/src/runtime.rs`
 - `xtask/src/tasks/kernels/common.rs`
 - `testing/install-tests/src/preflight.rs`
 
@@ -405,7 +405,7 @@ The same applies to:
 
 This also implies updating:
 
-- `distro-contract/src/build_host_legacy.rs`
+- `distro/contract/src/build_host_legacy.rs`
 
 so the current constants:
 
@@ -418,11 +418,11 @@ no longer point at root-level paths.
 
 Current variant-specific overlay declarations include:
 
-- `distro-variants/acorn/profile/live-overlay`
+- `distro/variants/acorn/profile/live-overlay`
 
 Those declarations should move to:
 
-- `distro-variants/acorn/ring2/overlays/live`
+- `distro/variants/acorn/ring2/overlays/live`
 
 Code and tests that must follow:
 
@@ -433,7 +433,7 @@ Code and tests that must follow:
 
 `testing/install-tests/src/distro/mod.rs` still reads:
 
-- `distro-variants/<distro>/scenarios.toml`
+- `distro/variants/<distro>/scenarios.toml`
 
 directly.
 
@@ -456,7 +456,7 @@ this migration first.
 
 Why:
 
-- `distro-contract/src/variant.rs` already performs:
+- `distro/contract/src/variant.rs` already performs:
   - repo-root discovery
   - variant directory discovery
   - ring-manifest loading
@@ -484,7 +484,7 @@ important consumer assumptions that must be migrated next.
 
 #### 1. Variant discovery is still flat-layout probing
 
-`distro-builder/src/bin/workflows/parse.rs` discovers distros by checking for
+`distro/builder/src/bin/workflows/parse.rs` discovers distros by checking for
 `identity.toml` directly under variant root.
 
 That makes builder discovery a flat-layout owner even though the contract loader
@@ -492,11 +492,11 @@ already exists.
 
 #### 2. Release hook lookup is still root-level and product-local
 
-`distro-builder/src/bin/distro-builder.rs` and
-`distro-builder/src/bin/workflows/parse.rs` still treat release hook identity as
+`distro/builder/src/bin/distro-builder.rs` and
+`distro/builder/src/bin/workflows/parse.rs` still treat release hook identity as
 root-level filenames stored on `BuildProduct`.
 
-`distro-builder/src/bin/workflows/release_hook.rs` then resolves:
+`distro/builder/src/bin/workflows/release_hook.rs` then resolves:
 
 - `bundle.variant_dir.join(release_hook_script)`
 
@@ -514,7 +514,7 @@ The high-risk consumer path here has already been migrated:
 
 #### 4. Some direct ring-file reads are now test-only and should stay secondary
 
-`distro-builder/src/pipeline/source.rs` still reads
+`distro/builder/src/pipeline/source.rs` still reads
 `variant_dir.join("ring3/sources.toml")`, but that path is gated behind
 `#[cfg(test)]`.
 
@@ -538,7 +538,7 @@ dependencies should improve automatically.
 
 `testing/install-tests/src/distro/mod.rs` still reparses:
 
-- `distro-variants/<distro>/scenarios.toml`
+- `distro/variants/<distro>/scenarios.toml`
 
 directly for install experience.
 
@@ -560,7 +560,7 @@ consumer migration are already stable.
 
 `xtask/src/tasks/kernels/common.rs` currently open-codes:
 
-- `root.join("distro-variants").join(distro_id).join("kconfig")`
+- `root.join("distro/variants").join(distro_id).join("kconfig")`
 
 But `xtask/Cargo.toml` does not currently depend on `distro-contract`.
 
@@ -577,14 +577,14 @@ The lowest-risk order is:
 
 The current source has a hard lock on old build-host paths:
 
-- `distro-contract/src/build_host_legacy.rs`
+- `distro/contract/src/build_host_legacy.rs`
 
 with constants:
 
 - `REQUIRED_VARIANT_KCONFIG = "kconfig"`
 - `REQUIRED_VARIANT_RECIPE_DECL = "recipes/kernel.rhai"`
 
-And `distro-contract/src/variant.rs` validates against those exact root-level
+And `distro/contract/src/variant.rs` validates against those exact root-level
 locations today.
 
 This means:
@@ -706,7 +706,7 @@ Goal:
 Required work:
 
 - add `distro-contract` as a direct dependency in `xtask/Cargo.toml`
-- replace `distro-variants/<distro>/kconfig` path joining in
+- replace `distro/variants/<distro>/kconfig` path joining in
   `xtask/src/tasks/kernels/common.rs`
 - consume the same canonical resolver as the rest of the repo
 
@@ -753,7 +753,7 @@ Goal:
 Required work:
 
 - update build-host declarations as needed
-- update `distro-contract/src/build_host_legacy.rs`
+- update `distro/contract/src/build_host_legacy.rs`
 - update validator/runtime expectations
 - update temp/test fixtures that still write the old root-level files
 
@@ -880,7 +880,7 @@ Goal:
 
 Scope:
 
-- `distro-contract/src/variant.rs`
+- `distro/contract/src/variant.rs`
 - any new shared resolver module if split out
 - tests for old layout, new layout, and duplicate-path conflict failures
 

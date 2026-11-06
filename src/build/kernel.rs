@@ -93,7 +93,7 @@ pub fn download_kernel_tarball(source: &KernelSource, download_dir: &Path) -> Re
              Expected: {}\n\
              Actual:   {}\n\n\
              The corrupted tarball has been removed. Re-run to download again.\n\
-             If this persists, update the hash in distro-spec/src/shared/kernel.rs",
+             If this persists, update the hash in distro/spec/src/shared/kernel.rs",
             source.version,
             source.sha256,
             actual_hash

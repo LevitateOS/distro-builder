@@ -53,8 +53,8 @@ fn _prebuilt_spec_or_throw(selected_target) {
     }
 
     throw "No prebuilt kernel mapping for target '" + target + "'. " +
-        "Remediation: publish a prebuilt runtime tarball and add its repo/tag/asset/sha in distro-builder/recipes/linux-prebuilt.rhai, " +
-        "or keep using distro-builder/recipes/linux.rhai for source builds.";
+        "Remediation: publish a prebuilt runtime tarball and add its repo/tag/asset/sha in distro/builder/recipes/linux-prebuilt.rhai, " +
+        "or keep using distro/builder/recipes/linux.rhai for source builds.";
 }
 
 fn _resolve_asset_url(spec) {

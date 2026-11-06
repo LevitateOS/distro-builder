@@ -9,8 +9,8 @@ fn source_fixture() -> tempfile::TempDir {
         .prefix("preseed contract ")
         .tempdir()
         .unwrap();
-    let repo = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-    for directory in ["distro-variants/acorn", "distro-builder/recipes"] {
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR")).ancestors().nth(2).unwrap();
+    for directory in ["distro/variants/acorn", "distro/builder/recipes"] {
         let source = repo.join(directory);
         let destination = fixture.path().join(directory);
         for entry in walkdir::WalkDir::new(&source) {
@@ -23,7 +23,7 @@ fn source_fixture() -> tempfile::TempDir {
             }
         }
     }
-    let recipes = fixture.path().join("distro-builder/recipes");
+    let recipes = fixture.path().join("distro/builder/recipes");
     std::fs::copy(
         recipes.join("alpine-live-source-rootfs.rhai"),
         recipes.join("renamed-materializer.rhai"),
@@ -38,11 +38,11 @@ fn source_fixture() -> tempfile::TempDir {
 }
 
 fn manifest(root: &Path) -> PathBuf {
-    root.join("distro-variants/acorn/ring3/sources.toml")
+    root.join("distro/variants/acorn/ring3/sources.toml")
 }
 
 fn run_preseed(root: &Path) -> Output {
-    let repo = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR")).ancestors().nth(2).unwrap();
     let recipe_bin = std::env::var_os("RECIPE_BIN")
         .map(PathBuf::from)
         .unwrap_or_else(|| repo.join("target/debug/recipe"));

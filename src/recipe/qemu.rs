@@ -3,7 +3,7 @@ use anyhow::{bail, Result};
 use std::path::{Path, PathBuf};
 
 pub fn prepare_qemu_tools(repo: &Path) -> Result<PathBuf> {
-    let recipe = repo.join("distro-builder/recipes/qemu-tools.rhai");
+    let recipe = repo.join("distro/builder/recipes/qemu-tools.rhai");
     let binary = super::find_recipe(repo)?;
     let result = super::run_recipe_phase_json_with_inputs(
         &binary.path,

@@ -172,7 +172,7 @@ fn product_installed_boot() -> crate::BuildProduct {
 }
 
 pub(crate) fn discover_distro_ids(repo_root: &Path) -> Result<Vec<String>> {
-    let variants_dir = repo_root.join("distro-variants");
+    let variants_dir = repo_root.join("distro/variants");
     let entries = fs::read_dir(&variants_dir)
         .with_context(|| format!("reading variants directory '{}'", variants_dir.display()))?;
 

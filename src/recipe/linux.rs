@@ -35,7 +35,7 @@ pub fn linux_for_distro(repo_root: &Path, distro_id: &str) -> Result<LinuxPaths>
     let work_dir = recipe_work_dir(monorepo_dir, distro_id)?;
     // Single SSOT kernel recipe for all distros (parity). Distro-specific overrides
     // (e.g. <distro>/deps/linux.rhai) are intentionally ignored.
-    let shared_recipe = monorepo_dir.join("distro-builder/recipes/linux.rhai");
+    let shared_recipe = monorepo_dir.join("distro/builder/recipes/linux.rhai");
     if !shared_recipe.exists() {
         anyhow::bail!(
             "Linux recipe not found at expected shared path:\n  - {}",
@@ -62,7 +62,7 @@ pub fn linux_for_distro(repo_root: &Path, distro_id: &str) -> Result<LinuxPaths>
     let defines = [("KERNEL_TARGET", distro_id)];
 
     // Find and run recipe, parse JSON output
-    let recipes_dir = monorepo_dir.join("distro-builder/recipes");
+    let recipes_dir = monorepo_dir.join("distro/builder/recipes");
     let recipe_bin = find_recipe(&monorepo_dir)?;
     let ctx = run_recipe_phase_json_with_inputs(
         &recipe_bin.path,

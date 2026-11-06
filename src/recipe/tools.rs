@@ -11,7 +11,7 @@ use std::process::Command;
 pub fn prepare_tool_source(repo: &Path, package: &str) -> Result<tempfile::TempDir> {
     let relative = match package {
         "recstrap" => PathBuf::from("tools/recstrap"),
-        "install-split-pane" => PathBuf::from("distro-builder/install-split-pane"),
+        "install-split-pane" => PathBuf::from("distro/builder/install-split-pane"),
         _ => bail!("no live-tool source producer declared for {package}"),
     };
     let repo = repo.canonicalize()?;
@@ -210,7 +210,7 @@ pub fn build_tool_program(
     }
     let source = prepare_tool_source(repo, package)?;
     let recipe = repo
-        .join("distro-builder/recipes")
+        .join("distro/builder/recipes")
         .join(format!("{recipe_name}.rhai"));
     let recipe_bin = super::find_recipe(repo)?;
     let work = repo

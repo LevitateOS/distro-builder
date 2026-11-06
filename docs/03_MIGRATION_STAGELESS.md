@@ -203,23 +203,23 @@ Examples of the current coupling:
 
 The current stage model is still deeply real in active code:
 
-- `distro-contract/src/schema.rs`
+- `distro/contract/src/schema.rs`
   - still defines `StageContract` as the aggregate contract owner
-- `distro-contract/src/variant.rs`
+- `distro/contract/src/variant.rs`
   - still loads `00Build.toml` as the authoritative variant entrypoint and synthesizes later stage placeholders
-- `distro-contract/src/validate.rs`
+- `distro/contract/src/validate.rs`
   - still validates the world as Stage 00-first, with deferred stage buckets
-- `distro-builder/src/bin/workflows/parse.rs`
+- `distro/builder/src/bin/workflows/parse.rs`
   - still parses `iso build <distro> <stage>`
-- `distro-builder/src/bin/workflows/build.rs`
+- `distro/builder/src/bin/workflows/build.rs`
   - still builds by stage identity and stage roots
-- `distro-builder/src/bin/workflows/artifacts.rs`
+- `distro/builder/src/bin/workflows/artifacts.rs`
   - still prepares artifacts through `prepare-s00-build-inputs`, `prepare-s01-boot-inputs`, `prepare-s02-live-tools-inputs`
-- `distro-builder/src/stages/s00_build.rs`
-- `distro-builder/src/stages/s01_boot_inputs.rs`
-- `distro-builder/src/stages/s02_live_tools_inputs.rs`
+- `distro/builder/src/stages/s00_build.rs`
+- `distro/builder/src/stages/s01_boot_inputs.rs`
+- `distro/builder/src/stages/s02_live_tools_inputs.rs`
   - still encode composition as stage modules
-- `distro-builder/src/pipeline/plan.rs`
+- `distro/builder/src/pipeline/plan.rs`
   - already behaves somewhat like a producer system, but still emits stage-owned metadata
 - `testing/install-tests/src/stages/mod.rs`
   - still runs and resolves artifacts through stage-numbered ownership
@@ -237,38 +237,38 @@ The main blockers are not cosmetic. They are ownership bugs.
 
 ### 1. Stage is the canonical contract owner
 
-- `distro-contract/src/schema.rs`
+- `distro/contract/src/schema.rs`
   - still defines `StageContract` as the real aggregate owner
   - still encodes artifact ownership through stage buckets
-- `distro-contract/src/variant.rs`
+- `distro/contract/src/variant.rs`
   - still treats `00Build.toml` as the authoritative variant entrypoint
   - still synthesizes later-stage declarations with fake values such as `"ignored-in-stage_00-phase"`
-- `distro-contract/src/validate.rs`
+- `distro/contract/src/validate.rs`
   - still validates the world as Stage 00-first with deferred stage buckets
 
 ### 2. Artifact identity is still stage-tagged
 
-- `distro-builder/src/bin/workflows/build.rs`
+- `distro/builder/src/bin/workflows/build.rs`
   - still writes ISO outputs into stage-owned run roots
-- `distro-builder/src/bin/workflows/artifacts.rs`
+- `distro/builder/src/bin/workflows/artifacts.rs`
   - compatibility-scoped stage-tagged artifact names still exist in some older paths and fixtures
-- `distro-builder/src/pipeline/io.rs`
+- `distro/builder/src/pipeline/io.rs`
   - still names overlays and rootfs-source pointers using stage tags
 - `testing/install-tests/src/preflight.rs`
   - canonical preflight now resolves explicit artifact paths and release-product scope first
   - stage-tagged names remain only as compatibility discovery, not as rewritten contract truth
-- `distro-contract/src/runtime.rs`
+- `distro/contract/src/runtime.rs`
   - canonical runtime validation now consumes explicit artifact paths
   - the old stage-named runtime wrappers have been removed from the canonical surface
 
 ### 3. Builder execution is stage-first instead of product-first
 
-- `distro-builder/src/bin/workflows/parse.rs`
+- `distro/builder/src/bin/workflows/parse.rs`
   - still parses `iso build <distro> <stage>` as the primary model
-- `distro-builder/src/bin/distro-builder.rs`
+- `distro/builder/src/bin/distro-builder.rs`
   - still teaches stage-numbered build surfaces as default usage
-- `distro-builder/src/stages/s01_boot_inputs.rs`
-- `distro-builder/src/stages/s02_live_tools_inputs.rs`
+- `distro/builder/src/stages/s01_boot_inputs.rs`
+- `distro/builder/src/stages/s02_live_tools_inputs.rs`
   - still encode composition as stage modules instead of product preparers
 
 ### 4. Test execution owns build-graph assumptions
@@ -285,7 +285,7 @@ This track does not require throwing away everything.
 
 ### 1. The producer model is already the correct bridge
 
-- `distro-builder/src/pipeline/plan.rs`
+- `distro/builder/src/pipeline/plan.rs`
   - `ProducerPlan`
   - `RootfsProducer`
   - additive rootfs composition
@@ -294,36 +294,36 @@ This is already much closer to product ownership than the surrounding stage name
 
 ### 2. The transform layers already exist
 
-- `distro-builder/src/bin/workflows/artifacts.rs`
+- `distro/builder/src/bin/workflows/artifacts.rs`
   - rootfs/overlay EROFS transforms
-- `distro-variants/_shared/00Build-build.sh`
+- `distro/variants/_shared/00Build-build.sh`
   - live initramfs + ISO assembly
-- `distro-builder/src/artifact/disk/mod.rs`
+- `distro/builder/src/artifact/disk/mod.rs`
   - disk-image builder
 
 These should be retargeted behind product/transform identities, not replaced.
 
 ### 3. The artifact families are already real
 
-- `distro-spec/src/shared/rootfs.rs`
-- `distro-spec/src/shared/overlayfs.rs`
-- `distro-spec/src/shared/iso.rs`
-- `distro-spec/src/shared/uki.rs`
+- `distro/spec/src/shared/rootfs.rs`
+- `distro/spec/src/shared/overlayfs.rs`
+- `distro/spec/src/shared/iso.rs`
+- `distro/spec/src/shared/uki.rs`
 
 The repo already knows what kinds of artifacts exist. The ownership model around them is what is wrong.
 
 ## Canonical Owners
 
-- `distro-contract/src/schema.rs`
-- `distro-contract/src/variant.rs`
-- `distro-contract/src/validate.rs`
-- `distro-contract/src/runtime.rs`
-- `distro-builder/src/pipeline/plan.rs`
-- `distro-builder/src/bin/workflows/parse.rs`
-- `distro-builder/src/bin/workflows/build.rs`
-- `distro-builder/src/bin/workflows/artifacts.rs`
-- `distro-builder/src/bin/distro-builder.rs`
-- `distro-builder/src/stages/*`
+- `distro/contract/src/schema.rs`
+- `distro/contract/src/variant.rs`
+- `distro/contract/src/validate.rs`
+- `distro/contract/src/runtime.rs`
+- `distro/builder/src/pipeline/plan.rs`
+- `distro/builder/src/bin/workflows/parse.rs`
+- `distro/builder/src/bin/workflows/build.rs`
+- `distro/builder/src/bin/workflows/artifacts.rs`
+- `distro/builder/src/bin/distro-builder.rs`
+- `distro/builder/src/stages/*`
 - `testing/install-tests/src/stages/mod.rs`
 - `testing/install-tests/src/preflight.rs`
 - `testing/install-tests/src/distro/*.rs`
@@ -405,7 +405,7 @@ The target architecture is:
 
 ### Variant Layer
 
-`distro-contract/src/variant.rs` should load product-oriented variant ownership first and derive any stage compatibility second.
+`distro/contract/src/variant.rs` should load product-oriented variant ownership first and derive any stage compatibility second.
 
 The code should stop doing this:
 
@@ -453,7 +453,7 @@ The current `s00-build`, `s01-boot`, `s02-live-tools` paths may remain during mi
 
 ### Phase 1. Add a shadow product contract
 
-- [ ] Add product/transform/scenario/release contract types in `distro-contract/src/schema.rs`.
+- [ ] Add product/transform/scenario/release contract types in `distro/contract/src/schema.rs`.
 - [ ] Keep `StageContract` temporarily for compatibility.
 - [ ] Do **not** change CLI or output layout yet.
 
@@ -463,7 +463,7 @@ Acceptance:
 
 ### Phase 2. Invert `variant.rs`
 
-- [ ] Make `distro-contract/src/variant.rs` load the new product-oriented model first.
+- [ ] Make `distro/contract/src/variant.rs` load the new product-oriented model first.
 - [ ] Derive the old stage-shaped view from that new model, not the other way around.
 - [ ] Remove fake `"ignored-in-stage_00-phase"` ownership from the canonical path.
 
@@ -480,7 +480,7 @@ Acceptance:
   - `deferred_to_02livetools`
   - `deferred_to_03install_plus`
 - [ ] Model explicit artifact ownership and product/transform dependencies instead.
-- [ ] Update `distro-contract/src/validate.rs` accordingly.
+- [ ] Update `distro/contract/src/validate.rs` accordingly.
 
 Acceptance:
 
@@ -489,14 +489,14 @@ Acceptance:
 
 ### Phase 4. Retarget the producer pipeline
 
-- [ ] Keep `ProducerPlan` and `RootfsProducer` in `distro-builder/src/pipeline/plan.rs`.
+- [ ] Keep `ProducerPlan` and `RootfsProducer` in `distro/builder/src/pipeline/plan.rs`.
 - [ ] Introduce canonical product preparers for:
   - base rootfs
   - live overlay
   - live boot payload
   - installed boot payload
   - kernel staging
-- [ ] Reduce `distro-builder/src/stages/s01_boot_inputs.rs` and `distro-builder/src/stages/s02_live_tools_inputs.rs` to compatibility wrappers.
+- [ ] Reduce `distro/builder/src/stages/s01_boot_inputs.rs` and `distro/builder/src/stages/s02_live_tools_inputs.rs` to compatibility wrappers.
 
 Acceptance:
 
@@ -506,9 +506,9 @@ Acceptance:
 ### Phase 5. Split builder routing into products, transforms, and releases
 
 - [x] Add product-first and transform-first routing in:
-  - `distro-builder/src/bin/workflows/parse.rs`
-  - `distro-builder/src/bin/workflows/build.rs`
-  - `distro-builder/src/bin/workflows/artifacts.rs`
+  - `distro/builder/src/bin/workflows/parse.rs`
+  - `distro/builder/src/bin/workflows/build.rs`
+  - `distro/builder/src/bin/workflows/artifacts.rs`
 - [x] Keep `00Build/01Boot/02LiveTools` only as compatibility aliases during migration.
 - [x] Stop teaching stage-numbered builds as the default path in `distro-builder`.
 
@@ -541,7 +541,7 @@ Acceptance:
 
 - [x] Remove stage-tag rewriting from:
   - `testing/install-tests/src/preflight.rs`
-  - `distro-contract/src/runtime.rs`
+  - `distro/contract/src/runtime.rs`
 - [x] Replace `stage_artifact_tag`-based validation with explicit artifact identities and scenario manifests.
 
 Implemented:
@@ -551,7 +551,7 @@ Implemented:
   - prefers canonical product-native names
   - falls back to compatibility names only as path discovery
   - uses release run-manifest metadata to decide whether live-boot scenario validation applies
-- `distro-contract/src/runtime.rs`
+- `distro/contract/src/runtime.rs`
   - adds explicit-path validators for Stage 00/runtime and live-boot/runtime
   - keeps stage-tagged Stage 01 validation only as a compatibility wrapper over the explicit-path validator
 
@@ -617,24 +617,24 @@ Acceptance:
 
 - [x] Isolate `distro-builder` compatibility stage metadata out of the canonical product owner.
   - owner files:
-    - `distro-builder/src/bin/distro-builder.rs`
-    - `distro-builder/src/bin/workflows/parse.rs`
+    - `distro/builder/src/bin/distro-builder.rs`
+    - `distro/builder/src/bin/workflows/parse.rs`
   - remove `BuildStage` and `compatibility_stage` from the canonical model
   - keep stage aliases only in an explicit compatibility parser/adapter module
 
 - [x] Make release execution fully product-native instead of stage-native under the hood.
   - owner file:
-    - `distro-builder/src/bin/workflows/build.rs`
-    - `distro-builder/src/bin/workflows/compat_release.rs`
+    - `distro/builder/src/bin/workflows/build.rs`
+    - `distro/builder/src/bin/workflows/compat_release.rs`
   - stop driving release builds through `BUILD_STAGE_*`, `STAGE_*`, and `native_build_script`
   - stop deriving release ISO names from `s00_build` / `s00-build`
   - keep any stage shell hook invocation only behind an explicit compatibility boundary
 
 - [x] Rename generic run/layout helpers so canonical code no longer uses `stage_*` names for product/scenario/release runs.
   - owner files:
-    - `distro-builder/src/bin/stage_paths.rs`
-    - `distro-builder/src/bin/stage_runs.rs`
-    - `distro-builder/src/bin/stage_run_manifest.rs`
+    - `distro/builder/src/bin/stage_paths.rs`
+    - `distro/builder/src/bin/stage_runs.rs`
+    - `distro/builder/src/bin/stage_run_manifest.rs`
   - introduce neutral names for:
     - release/product/scenario output roots
     - run allocation and pruning
@@ -643,7 +643,7 @@ Acceptance:
 
 - [x] Move stage-only artifact commands out of the canonical artifact workflow owner.
   - owner file:
-    - `distro-builder/src/bin/workflows/artifacts.rs`
+    - `distro/builder/src/bin/workflows/artifacts.rs`
   - canonical owner should expose only:
     - `product prepare ...`
     - `transform build ...`
@@ -689,8 +689,8 @@ Acceptance:
 
 - [x] Clean stage-shaped runtime/live payload names and markers where they are no longer intentionally user-facing compatibility.
   - owner files:
-    - `distro-builder/src/pipeline/live_tools.rs`
-    - `distro-builder/src/artifact/live_overlay.rs`
+    - `distro/builder/src/pipeline/live_tools.rs`
+    - `distro/builder/src/artifact/live_overlay.rs`
     - `testing/install-tests/src/distro/mod.rs`
     - `testing/install-tests/src/stages/mod.rs`
     - `xtask/src/tasks/testing/scenarios.rs`
@@ -704,13 +704,13 @@ Acceptance:
 
 - [x] Remove stage-shaped metadata from canonical filesystem products.
   - owner file:
-    - `distro-builder/src/pipeline/plan.rs`
+    - `distro/builder/src/pipeline/plan.rs`
   - replace `usr/lib/stage-manifest.json` with product-native metadata
   - stop branding canonical base product identity as `PRETTY_NAME="... (Stage 00Build)"`
 
 - [x] Tighten output layout around canonical ownership.
   - owner files:
-    - `distro-builder/src/bin/stage_paths.rs`
+    - `distro/builder/src/bin/stage_paths.rs`
     - `testing/install-tests/src/stages/mod.rs`
     - `testing/install-tests/src/preflight.rs`
   - canonical layout should converge on:
@@ -722,7 +722,7 @@ Acceptance:
 
 - [x] Update help text, docs, and wrappers last.
   - owner files:
-    - `distro-builder/src/bin/distro-builder.rs`
+    - `distro/builder/src/bin/distro-builder.rs`
     - `testing/install-tests/src/bin/stages.rs`
     - `xtask/src/cli/types.rs`
     - `justfile`
@@ -755,7 +755,7 @@ problem, not as the active migration plan.
 
 #### Historical Audit Note: Purge `stage` from the filetree and source vocabulary
 
-Baseline measured on `2026-03-14` across active workspace roots (`distro-builder`, `distro-contract`, `distro-spec`, `testing`, `xtask`, `distro-variants`) excluding `.git`, `target`, `node_modules`, and `.artifacts`:
+Baseline measured on `2026-03-14` across active workspace roots (`distro-builder`, `distro-contract`, `distro-spec`, `testing`, `xtask`, `distro/variants`) excluding `.git`, `target`, `node_modules`, and `.artifacts`:
 
 - literal `stage` substring occurrences in file contents: `2698`
 - files containing at least one literal `stage` substring: `128`
@@ -814,7 +814,7 @@ Design:
     - `distro-spec`
     - `testing`
     - `xtask`
-    - `distro-variants`
+    - `distro/variants`
   - Ring B: full tracked repo cleanup
     - root docs
     - `architecture.md`
@@ -882,13 +882,13 @@ Recommended batch order:
    - `00Build-build.sh`, `01Boot-build.sh`, `02LiveTools-build.sh`
    - `00Build-build-capability.sh`
    - replace with role-based manifest/script names before deeper module cleanup
-2. `distro-builder/src/bin/stage_*` and `distro-builder/src/stage_runs.rs`
+2. `distro/builder/src/bin/stage_*` and `distro/builder/src/stage_runs.rs`
    - rename to neutral run/manifest/path names
-3. `distro-builder/src/stages/` and `testing/install-tests/src/stages/`
+3. `distro/builder/src/stages/` and `testing/install-tests/src/stages/`
    - rename directories/modules to `compat` / `scenarios` / `inputs`
 4. `testing/install-tests/src/bin/stages.rs`, `xtask`, and `justfile` wrapper names
    - remove both literal-`stage` names and numeric stage aliases from the default UX
-5. `distro-builder/recipes/*stage01*` and `distro-builder/src/recipe/*stage01*`
+5. `distro/builder/recipes/*stage01*` and `distro/builder/src/recipe/*stage01*`
    - replace Stage 01 naming with source-role naming
 6. `testing/install-tests/test-scripts/stage-*.sh`
    - rename scripts and their callers
@@ -899,23 +899,23 @@ Recommended batch order:
 
 - [ ] Remove `stage` from active file and directory names first.
   - owner paths:
-    - `distro-variants/*/00Build.toml`
-    - `distro-variants/*/01Boot.toml`
-    - `distro-variants/*/02LiveTools.toml`
-    - `distro-variants/*/00Build-build.sh`
-    - `distro-variants/*/01Boot-build.sh`
-    - `distro-variants/*/02LiveTools-build.sh`
-    - `distro-variants/*/00Build-build-capability.sh`
-    - `distro-builder/src/bin/stage_paths.rs`
-    - `distro-builder/src/bin/stage_run_manifest.rs`
-    - `distro-builder/src/bin/stage_runs.rs`
-    - `distro-builder/src/stage_runs.rs`
-    - `distro-builder/src/stages/`
-    - `distro-builder/install-split-pane/`
+    - `distro/variants/*/00Build.toml`
+    - `distro/variants/*/01Boot.toml`
+    - `distro/variants/*/02LiveTools.toml`
+    - `distro/variants/*/00Build-build.sh`
+    - `distro/variants/*/01Boot-build.sh`
+    - `distro/variants/*/02LiveTools-build.sh`
+    - `distro/variants/*/00Build-build-capability.sh`
+    - `distro/builder/src/bin/stage_paths.rs`
+    - `distro/builder/src/bin/stage_run_manifest.rs`
+    - `distro/builder/src/bin/stage_runs.rs`
+    - `distro/builder/src/stage_runs.rs`
+    - `distro/builder/src/stages/`
+    - `distro/builder/install-split-pane/`
     - `testing/install-tests/src/bin/stages.rs`
     - `testing/install-tests/src/stages/`
     - `testing/install-tests/test-scripts/stage-*.sh`
-    - `distro-builder/docs/03_MIGRATION_STAGELESS.md`
+    - `distro/builder/docs/03_MIGRATION_STAGELESS.md`
   - required model:
     - replace numbered stage path owners with role-based names such as:
       - `build.toml`
@@ -936,13 +936,13 @@ Recommended batch order:
 
 - [ ] Remove `stage` from recipe and source-owner filenames.
   - owner paths:
-    - `distro-builder/recipes/stage01-dvd-deps.rhai`
-    - `distro-builder/recipes/fedora-stage01-rootfs.rhai`
-    - `distro-builder/recipes/alpine-stage01-rootfs.rhai`
-    - `distro-builder/recipes/custom-stage01-rootfs.rhai`
-    - `distro-builder/recipes/alpine-preseed-stage01-assets.rhai`
-    - `distro-builder/src/recipe/stage01_source.rs`
-    - `distro-builder/src/recipe/alpine_stage01.rs`
+    - `distro/builder/recipes/stage01-dvd-deps.rhai`
+    - `distro/builder/recipes/fedora-stage01-rootfs.rhai`
+    - `distro/builder/recipes/alpine-stage01-rootfs.rhai`
+    - `distro/builder/recipes/custom-stage01-rootfs.rhai`
+    - `distro/builder/recipes/alpine-preseed-stage01-assets.rhai`
+    - `distro/builder/src/recipe/stage01_source.rs`
+    - `distro/builder/src/recipe/alpine_stage01.rs`
   - required model:
     - replace Stage 01 naming with source-role naming, for example:
       - `dvd-source-deps`
@@ -953,11 +953,11 @@ Recommended batch order:
 
 - [ ] Remove `stage` from code identifiers, functions, and diagnostics in active owners.
   - owner files:
-    - `distro-contract/src/runtime.rs`
-    - `distro-contract/src/validate.rs`
-    - `distro-contract/src/variant.rs`
-    - `distro-spec/src/conformance.rs`
-    - `distro-builder/src/bin/workflows/*.rs`
+    - `distro/contract/src/runtime.rs`
+    - `distro/contract/src/validate.rs`
+    - `distro/contract/src/variant.rs`
+    - `distro/spec/src/conformance.rs`
+    - `distro/builder/src/bin/workflows/*.rs`
     - `testing/install-tests/src/preflight.rs`
     - `testing/install-tests/src/scenarios/*.rs` after filetree rename
     - `xtask/src/tasks/testing/scenarios.rs`
@@ -978,7 +978,7 @@ Recommended batch order:
 - [ ] Remove `stage` from operator surfaces and wrapper names.
   - owner files:
     - `justfile`
-    - `distro-builder/src/bin/distro-builder.rs`
+    - `distro/builder/src/bin/distro-builder.rs`
     - `xtask/src/cli/types.rs`
     - `testing/install-tests/src/bin/scenarios.rs` after rename
     - migration docs and READMEs
@@ -995,7 +995,7 @@ Recommended batch order:
 
 - [ ] Remove `stage` from docs and migration filenames.
   - owner paths:
-    - `distro-builder/docs/03_MIGRATION_STAGELESS.md`
+    - `distro/builder/docs/03_MIGRATION_STAGELESS.md`
     - `architecture.md`
     - team/docs notes under `.teams/` that still carry active references
   - required model:
@@ -1012,7 +1012,7 @@ Recommended batch order:
         - `distro-spec`
         - `testing`
         - `xtask`
-        - `distro-variants`
+        - `distro/variants`
     - Ring B:
       - zero file or directory paths containing `stage` anywhere in the tracked repo
       - zero literal `stage` substrings anywhere in tracked repo contents
@@ -1032,14 +1032,14 @@ Acceptance:
 
 ## What Must Die
 
-- fake later-stage placeholders in `distro-contract/src/variant.rs`
-- deferred stage ownership buckets in `distro-contract/src/schema.rs`
+- fake later-stage placeholders in `distro/contract/src/variant.rs`
+- deferred stage ownership buckets in `distro/contract/src/schema.rs`
 - stage-tag artifact rewriting in `testing/install-tests/src/preflight.rs`
-- stage-owned runtime validation in `distro-contract/src/runtime.rs`
+- stage-owned runtime validation in `distro/contract/src/runtime.rs`
 
 ## What Must Survive
 
-- additive producer composition in `distro-builder/src/pipeline/plan.rs`
+- additive producer composition in `distro/builder/src/pipeline/plan.rs`
 - explicit transform layers for EROFS, initramfs, UKI, ISO, and disk images
 - recipe ownership of source/package knowledge
 - the current A/B runtime/update model
@@ -1049,8 +1049,8 @@ Acceptance:
 
 The first implementation PR for this track should do only this:
 
-- add product-oriented contract types in `distro-contract/src/schema.rs`
-- make `distro-contract/src/variant.rs` load product ownership canonically
+- add product-oriented contract types in `distro/contract/src/schema.rs`
+- make `distro/contract/src/variant.rs` load product ownership canonically
 - derive the old stage model as compatibility output
 - leave builder CLI/test UX untouched for that first cut
 
@@ -1073,4 +1073,4 @@ Start in `distro-contract`, not in CLI aliases and not in doc renames.
 
 The first concrete action should be:
 
-- define filesystem-product contract types in `distro-contract/src/schema.rs`, then make `distro-contract/src/variant.rs` load real product ownership instead of synthesizing later stage placeholders from a Stage 00-first manifest.
+- define filesystem-product contract types in `distro/contract/src/schema.rs`, then make `distro/contract/src/variant.rs` load real product ownership instead of synthesizing later stage placeholders from a Stage 00-first manifest.

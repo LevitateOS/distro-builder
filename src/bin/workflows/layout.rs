@@ -6,7 +6,7 @@ pub(crate) fn locate_repo_root() -> Result<PathBuf> {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     for ancestor in manifest_dir.ancestors() {
         let candidate = Path::new(ancestor);
-        if candidate.join("xtask").is_dir() && candidate.join("distro-variants").is_dir() {
+        if candidate.join("xtask").is_dir() && candidate.join("distro/variants").is_dir() {
             return Ok(candidate.to_path_buf());
         }
     }

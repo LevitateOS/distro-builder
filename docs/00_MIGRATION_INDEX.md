@@ -26,7 +26,7 @@ This directory tracks the current high-level distro-builder migration work as nu
 
 6. [06_MIGRATION_VARIANT_LAYOUT.md](06_MIGRATION_VARIANT_LAYOUT.md)
    Status: in_progress
-   Scope: make the per-OS `distro-variants/<distro>` filesystem tree reflect the ring/owner model by moving flat root files into sibling owner directories without turning rings into nested physical containers.
+   Scope: make the per-OS `distro/variants/<distro>` filesystem tree reflect the ring/owner model by moving flat root files into sibling owner directories without turning rings into nested physical containers.
 
 ## Recommended Order
 

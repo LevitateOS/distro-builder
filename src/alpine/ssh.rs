@@ -83,7 +83,7 @@ fn configure_sshd(ssh_dir: &std::path::Path, sshd_settings: &[(&str, &str)]) -> 
     // Read existing configuration
     let mut config = fs::read_to_string(&sshd_config_path).unwrap_or_else(|_| String::new());
 
-    // Ensure all settings from distro-spec are present and uncommented
+    // Ensure every requested setting is present and uncommented
     for (setting, value) in sshd_settings {
         // Check if the setting is active (uncommented) with the correct value.
         // We need to check line-by-line to avoid matching commented-out lines

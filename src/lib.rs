@@ -17,17 +17,6 @@
 //!     ├── Defines: BuildContext trait, DistroConfig trait
 //!     └── Provides: Filesystem utilities, EROFS/ISO wrappers
 //!
-//! leviso ─────────────────────┐
-//!     │                       │
-//!     ├── Uses: distro-builder│
-//!     ├── Implements: LevitateOS-specific components
-//!     └── Uses: distro-spec::levitate
-//!
-//! AcornOS ────────────────────┤
-//!     │                       │
-//!     ├── Uses: distro-builder│
-//!     ├── Implements: AcornOS-specific components
-//!     └── Uses: distro-spec::acorn
 //! ```
 //!
 //! # Example

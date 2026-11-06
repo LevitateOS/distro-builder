@@ -25,7 +25,7 @@
 //!     1048576,
 //! )?;
 //!
-//! // Or use distro-spec defaults
+//! // Or use the default settings
 //! use distro_builder::build_erofs_default;
 //! build_erofs_default(Path::new("staging/"), Path::new("output/filesystem.erofs"))?;
 //! ```
@@ -204,12 +204,12 @@ fn ensure_owner_readable_files(source_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Build an EROFS image using distro-spec default settings.
-///
-/// Uses constants from `distro_spec::shared::rootfs`:
-/// - Compression: zstd
-/// - Level: 6
-/// - Chunk size: 1MB
+/// EROFS settings for the rootfs and live overlay images.
+pub(crate) const EROFS_COMPRESSION: &str = "zstd";
+pub(crate) const EROFS_COMPRESSION_LEVEL: u8 = 6;
+pub(crate) const EROFS_CHUNK_SIZE: u32 = 1 << 20;
+
+/// Build an EROFS image with the default settings above.
 ///
 /// # Example
 ///
@@ -223,10 +223,6 @@ fn ensure_owner_readable_files(source_dir: &Path) -> Result<()> {
 /// )?;
 /// ```
 pub fn build_erofs_default(source_dir: &Path, output: &Path) -> Result<()> {
-    use distro_spec::shared::rootfs::{
-        EROFS_CHUNK_SIZE, EROFS_COMPRESSION, EROFS_COMPRESSION_LEVEL,
-    };
-
     create_erofs(
         source_dir,
         output,

@@ -62,9 +62,9 @@ Build explicitly with `cargo xtask build live-tools levitate`. Run an independen
 
 ## Related Crates
 
-- [distro-spec](https://github.com/LevitateOS/distro-spec) - Distribution specifications (constants, paths, services)
-- [leviso](https://github.com/LevitateOS/leviso) - LevitateOS ISO builder
-- [AcornOS](https://github.com/LevitateOS/AcornOS) - AcornOS ISO builder
+- [distro-contract](../contract) - Variant contracts (the per-distro declarations)
+- [recinit](../../tools/recinit) - Live initramfs and the live-boot protocol
+- [reciso](../../tools/reciso) - ISO assembly
 
 ## Migration Notes
 

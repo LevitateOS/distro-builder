@@ -7,5 +7,4 @@
 
 pub mod context;
 pub mod filesystem;
-pub mod kernel;
 pub mod licenses;

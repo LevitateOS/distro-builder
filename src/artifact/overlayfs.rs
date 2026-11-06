@@ -25,17 +25,15 @@ pub fn create_overlayfs_erofs(
     )
 }
 
-/// Build a live overlay payload image using shared overlayfs defaults.
+/// Build a live overlay payload image with the rootfs image's EROFS settings.
 pub fn build_overlayfs_default(source_dir: &Path, output: &Path) -> Result<()> {
-    use distro_spec::shared::overlayfs::{
-        OVERLAYFS_CHUNK_SIZE, OVERLAYFS_COMPRESSION, OVERLAYFS_COMPRESSION_LEVEL,
-    };
+    use super::rootfs::{EROFS_CHUNK_SIZE, EROFS_COMPRESSION, EROFS_COMPRESSION_LEVEL};
 
     create_overlayfs_erofs(
         source_dir,
         output,
-        OVERLAYFS_COMPRESSION,
-        OVERLAYFS_COMPRESSION_LEVEL,
-        OVERLAYFS_CHUNK_SIZE,
+        EROFS_COMPRESSION,
+        EROFS_COMPRESSION_LEVEL,
+        EROFS_CHUNK_SIZE,
     )
 }

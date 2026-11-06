@@ -130,8 +130,8 @@ exec /bin/sh -l
         config.issue_message.unwrap_or(&default_issue),
     )?;
     fs::write(
-        live_overlay.join(distro_spec::shared::live_boot::PAYLOAD_ROLE_FILE),
-        format!("{}\n", distro_spec::shared::live_boot::ROLE_OVERLAY),
+        live_overlay.join(recinit::live::PAYLOAD_ROLE_FILE),
+        format!("{}\n", recinit::live::ROLE_OVERLAY),
     )?;
 
     // Empty root password for live session
@@ -666,8 +666,8 @@ unset LC_ALL LC_CTYPE LC_NUMERIC LC_TIME LC_COLLATE LC_MESSAGES \
     perms.set_mode(0o600);
     fs::set_permissions(live_overlay.join("etc/shadow"), perms)?;
     fs::write(
-        live_overlay.join(distro_spec::shared::live_boot::PAYLOAD_ROLE_FILE),
-        format!("{}\n", distro_spec::shared::live_boot::ROLE_OVERLAY),
+        live_overlay.join(recinit::live::PAYLOAD_ROLE_FILE),
+        format!("{}\n", recinit::live::ROLE_OVERLAY),
     )?;
 
     println!(
@@ -712,6 +712,6 @@ pub(crate) fn fill_guest_script(script: &str) -> String {
         )
         .replace(
             "@BOOT_INJECTION_IMPORT@",
-            &distro_spec::shared::live_boot::boot_injection_import_sh(),
+            &recinit::live::boot_injection_import_sh(),
         )
 }

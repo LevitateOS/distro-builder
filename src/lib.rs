@@ -67,7 +67,6 @@ pub mod executor;
 pub(crate) mod pipeline;
 pub mod preflight;
 pub mod process;
-pub mod qemu;
 pub mod recipe;
 pub mod run_history;
 pub mod timing;

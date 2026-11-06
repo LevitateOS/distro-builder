@@ -18,18 +18,17 @@ use crossterm::{
         disable_raw_mode, enable_raw_mode, size, EnterAlternateScreen, LeaveAlternateScreen,
     },
 };
+use install_split_pane::{pane_terminal_size, screen_layout};
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use ratatui::{
     backend::CrosstermBackend,
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
     widgets::{Block, Borders, Paragraph},
     Frame, Terminal,
 };
 
-const LEFT_PANE_PERCENT: u16 = 50;
-const RIGHT_PANE_PERCENT: u16 = 50;
 const PTY_SCROLLBACK: usize = 10_000;
 const POLL_INTERVAL: Duration = Duration::from_millis(16);
 const SMOKE_TIMEOUT: Duration = Duration::from_secs(8);
@@ -257,7 +256,7 @@ fn run_ui(config: &Config) -> Result<()> {
     terminal.clear().context("clear terminal")?;
 
     let (cols, rows) = size().context("read terminal size")?;
-    let pane_rects = pane_layout(Rect::new(0, 0, cols, rows));
+    let pane_rects = screen_layout(Rect::new(0, 0, cols, rows)).panes;
     let left_size = pty_size_for_area(pane_rects[0]);
     let right_size = pty_size_for_area(pane_rects[1]);
 
@@ -321,7 +320,7 @@ fn event_loop(
                     app.write_to_focused(data.as_bytes())?;
                 }
                 Event::Resize(cols, rows) => {
-                    let pane_rects = pane_layout(Rect::new(0, 0, cols, rows));
+                    let pane_rects = screen_layout(Rect::new(0, 0, cols, rows)).panes;
                     app.resize(pane_rects[0], pane_rects[1])?;
                 }
                 _ => {}
@@ -575,12 +574,8 @@ fn right_launch_script(right: Option<&str>) -> String {
 }
 
 fn draw(frame: &mut Frame, app: &App) {
-    let root = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Min(1), Constraint::Length(1)])
-        .split(frame.area());
-
-    let panes = pane_layout(root[0]);
+    let layout = screen_layout(frame.area());
+    let panes = layout.panes;
     render_pane(frame, panes[0], &app.left, app.focus == FocusPane::Left);
     render_pane(frame, panes[1], &app.right, app.focus == FocusPane::Right);
 
@@ -589,7 +584,7 @@ fn draw(frame: &mut Frame, app: &App) {
         app.focus.label()
     );
     let footer = Paragraph::new(hint).style(Style::default().fg(Color::DarkGray));
-    frame.render_widget(footer, root[1]);
+    frame.render_widget(footer, layout.footer);
 }
 
 fn render_pane(frame: &mut Frame, area: Rect, pane: &PaneState, focused: bool) {
@@ -701,20 +696,8 @@ fn ratatui_color(color: vt100::Color) -> Option<Color> {
     }
 }
 
-fn pane_layout(area: Rect) -> Vec<Rect> {
-    Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage(LEFT_PANE_PERCENT),
-            Constraint::Percentage(RIGHT_PANE_PERCENT),
-        ])
-        .split(area)
-        .to_vec()
-}
-
 fn pty_size_for_area(area: Rect) -> PtySize {
-    let cols = area.width.saturating_sub(2).max(1);
-    let rows = area.height.saturating_sub(2).max(1);
+    let (cols, rows) = pane_terminal_size(area);
     PtySize {
         rows,
         cols,

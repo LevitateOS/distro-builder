@@ -8,10 +8,6 @@ This directory tracks the current high-level distro-builder migration work as nu
    Status: completed
    Scope: replace the current Rocky Stage 01 DVD/rootfs source path with Fedora Server DVD sourcing for the LevitateOS family.
 
-2. [02_MIGRATION_BOOTC.md](02_MIGRATION_BOOTC.md)
-   Status: cancelled
-   Scope: cancelled; the repo is keeping the current A/B runtime/update model instead of migrating to `bootc`.
-
 3. [03_MIGRATION_STAGELESS.md](03_MIGRATION_STAGELESS.md)
    Status: ready
    Scope: active filesystem-first migration away from stage-numbered composition toward explicit products, artifact transforms, and release-engineering outputs, followed by a final Phase 9 purge of both literal `stage` naming and numbered stage-artifact families like `00Build`, `01Boot`, and `02LiveTools`.

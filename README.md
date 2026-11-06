@@ -70,7 +70,6 @@ Build explicitly with `cargo xtask build live-tools levitate`. Run an independen
 
 - [docs/00_MIGRATION_INDEX.md](docs/00_MIGRATION_INDEX.md) - migration index for numbered distro-builder migration tracks
 - [docs/01_MIGRATION_FEDORA_SWAP.md](docs/01_MIGRATION_FEDORA_SWAP.md) - active Fedora Server DVD swap plan for the LevitateOS Stage 01 source path
-- [docs/02_MIGRATION_BOOTC.md](docs/02_MIGRATION_BOOTC.md) - cancelled track; the repo is keeping the current A/B model instead of migrating to `bootc`
 - [docs/03_MIGRATION_STAGELESS.md](docs/03_MIGRATION_STAGELESS.md) - historical plan for the completed transition to product-oriented ownership
 
 ## License

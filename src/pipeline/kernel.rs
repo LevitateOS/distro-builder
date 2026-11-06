@@ -90,7 +90,7 @@ pub fn ensure_kernel_preinstalled_with_recipe(
         Err(e) => bail!(
             "build-host kernel is not preinstalled for '{}': {}\n\
              Kernel rebuilds are forbidden during release ISO builds.\n\
-             Remediation: run 'cargo xtask kernels build {}' (or '--rebuild' if provenance is stale), then retry the ISO build.",
+             Remediation: run 'cargo xtask build kernel {}' (add '--rebuild' if provenance is stale, or use '--prebuilt'), then retry the ISO build.",
             distro_id,
             e,
             distro_id

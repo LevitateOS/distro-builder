@@ -24,8 +24,9 @@
 use anyhow::{bail, Result};
 use std::fs;
 use std::os::unix::fs::symlink;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+
+use crate::artifact::filesystem::write_file;
 
 /// Which consoles an OpenRC inittab runs getty on.
 #[derive(Debug, Clone, Copy)]
@@ -64,7 +65,7 @@ pub fn create_live_overlay(output_dir: &Path, config: &LiveOverlayConfig) -> Res
 
     fs::write(live_overlay.join("etc/issue"), config.issue)?;
     // lastchg is a recent day: 0 would demand a new password at the first login.
-    write_with_mode(
+    write_file(
         &live_overlay.join("etc/shadow"),
         "root::20000:0:99999:7:::\n\
          bin:!:0:0:99999:7:::\n\
@@ -76,7 +77,7 @@ pub fn create_live_overlay(output_dir: &Path, config: &LiveOverlayConfig) -> Res
         live_overlay.join(recinit::live::PAYLOAD_ROLE_FILE),
         format!("{}\n", recinit::live::ROLE_OVERLAY),
     )?;
-    write_with_mode(
+    write_file(
         &live_overlay.join("etc/profile.d/20-live-shell.sh"),
         crate::guest::SHELL_UX_PROFILE,
         0o755,
@@ -85,7 +86,7 @@ pub fn create_live_overlay(output_dir: &Path, config: &LiveOverlayConfig) -> Res
         live_overlay.join("etc/profile.d/99-serial-test.sh"),
         recqemu::serial::protocol::guest_profile(),
     )?;
-    write_with_mode(
+    write_file(
         &live_overlay.join("usr/local/bin/live-help"),
         &crate::guest::render(crate::guest::LIVE_HELP, &[("OS_NAME", config.os_name)])?,
         0o755,
@@ -158,7 +159,7 @@ fn write_openrc(
         "tmpfs   /var/log    tmpfs   nosuid,nodev,noexec,size=64M,mode=0755   0 0\n",
     )?;
     fs::create_dir_all(live_overlay.join("etc/local.d"))?;
-    write_with_mode(
+    write_file(
         &live_overlay.join("etc/local.d/01-efivarfs.start"),
         crate::guest::EFIVARFS_START,
         0o755,
@@ -166,7 +167,7 @@ fn write_openrc(
 
     // No suspend during an install: ACPI events, sysctl and elogind.
     fs::create_dir_all(live_overlay.join("etc/acpi"))?;
-    write_with_mode(
+    write_file(
         &live_overlay.join("etc/acpi/handler.sh"),
         &crate::guest::render(crate::guest::ACPI_HANDLER, &[("OS_NAME", config.os_name)])?,
         0o755,
@@ -263,7 +264,7 @@ fn write_systemd(live_overlay: &Path, config: &LiveOverlayConfig) -> Result<()> 
 
     // NIC bring-up for QEMU user networking (SSH via hostfwd): the first
     // non-loopback interface, whatever it is called.
-    write_with_mode(
+    write_file(
         &live_overlay.join("usr/local/sbin/live-net-setup"),
         crate::guest::LIVE_NET_SETUP,
         0o755,
@@ -293,7 +294,7 @@ fn write_systemd(live_overlay: &Path, config: &LiveOverlayConfig) -> Result<()> 
         system.join("multi-user.target.wants/live-net-setup.service"),
     )?;
 
-    write_with_mode(
+    write_file(
         &live_overlay.join("usr/local/sbin/live-shutdown-cleanup"),
         crate::guest::LIVE_SHUTDOWN_CLEANUP,
         0o755,
@@ -328,11 +329,5 @@ fn write_systemd(live_overlay: &Path, config: &LiveOverlayConfig) -> Result<()> 
     )?;
     // Empty: systemd makes up a machine ID at each boot.
     fs::write(live_overlay.join("etc/machine-id"), "")?;
-    Ok(())
-}
-
-fn write_with_mode(path: &Path, content: &str, mode: u32) -> Result<()> {
-    fs::write(path, content)?;
-    fs::set_permissions(path, fs::Permissions::from_mode(mode))?;
     Ok(())
 }

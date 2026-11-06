@@ -16,7 +16,7 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-use crate::pipeline::live_tools::{copy_executable, write_executable, write_text};
+use crate::artifact::filesystem::{copy_executable, write_file};
 
 /// What getty starts on an install-screen console; `--probe` prints
 /// `PROBE_PREFIX<split pane path>`.
@@ -77,12 +77,12 @@ pub(crate) fn write_payload(
                     guide.display()
                 )
             })?;
-            write_text(&rootfs.join(DOCS_TEXT), &text)?;
+            write_file(&rootfs.join(DOCS_TEXT), text, 0o644)?;
             let docs = crate::guest::render(
                 crate::guest::DOCS_TEXT,
                 &[("GUIDE", &format!("/{DOCS_TEXT}"))],
             )?;
-            write_executable(&rootfs.join(DOCS), &docs)?;
+            write_file(&rootfs.join(DOCS), docs, 0o755)?;
             vec![format!("/{DOCS}")]
         }
     };
@@ -99,7 +99,7 @@ pub(crate) fn write_payload(
             ("SMOKE", SMOKE_ENV),
         ],
     )?;
-    write_executable(&rootfs.join(LAUNCHER), &launcher)
+    write_file(&rootfs.join(LAUNCHER), launcher, 0o755)
 }
 
 /// Bundles the TUI app with bun into [`DOCS_BUNDLE`] and installs bun and [`DOCS`].
@@ -142,7 +142,7 @@ fn write_bun_docs(repo_root: &Path, rootfs: &Path, app: &str) -> Result<()> {
             ("BUN", &format!("/{BUN}")),
         ],
     )?;
-    write_executable(&rootfs.join(DOCS), &docs)
+    write_file(&rootfs.join(DOCS), docs, 0o755)
 }
 
 fn run(command: &mut Command, what: &str) -> Result<()> {

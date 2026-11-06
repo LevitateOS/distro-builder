@@ -63,6 +63,10 @@ impl Args {
                     print_help();
                     std::process::exit(0);
                 }
+                "--version" => {
+                    println!("install-split {}", env!("CARGO_PKG_VERSION"));
+                    std::process::exit(0);
+                }
                 "--left" => {
                     for word in args.by_ref() {
                         if word == "--right" {

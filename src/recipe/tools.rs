@@ -5,17 +5,37 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+/// The live tools `recipes/install-tools.rhai` builds: package, crate directory,
+/// binaries (the first is the package's default).
+const TOOLS: &[(&str, &str, &[&str])] = &[
+    ("recpart", "tools/recpart", &["recpart"]),
+    (
+        "recstrap",
+        "tools/recstrap",
+        &["recstrap", "recchroot", "recfstab"],
+    ),
+    ("recab", "tools/recab", &["recab"]),
+    (
+        "install-split-pane",
+        "distro/builder/install-split-pane",
+        &["install-split"],
+    ),
+];
+
+fn tool(package: &str) -> Result<(&'static str, &'static str, &'static [&'static str])> {
+    TOOLS
+        .iter()
+        .copied()
+        .find(|(name, _, _)| *name == package)
+        .with_context(|| format!("no live tool declared for package {package}"))
+}
+
 /// Prepare only the selected production crate and its local dependencies.
 /// Cargo resolves/prunes the copied workspace lock offline; every selected
 /// dependency must remain an exact member of the original lock.
 pub fn prepare_tool_source(repo: &Path, package: &str) -> Result<tempfile::TempDir> {
-    let relative = match package {
-        "recpart" => PathBuf::from("tools/recpart"),
-        "recstrap" => PathBuf::from("tools/recstrap"),
-        "recab" => PathBuf::from("tools/recab"),
-        "install-split-pane" => PathBuf::from("distro/builder/install-split-pane"),
-        _ => bail!("no live-tool source producer declared for {package}"),
-    };
+    let (_, relative, _) = tool(package)?;
+    let relative = PathBuf::from(relative);
     let repo = repo.canonicalize()?;
     let source = tempfile::Builder::new()
         .prefix("recipe-tool-source-")
@@ -33,7 +53,10 @@ pub fn prepare_tool_source(repo: &Path, package: &str) -> Result<tempfile::TempD
         vec![relative.to_string_lossy().to_string()].into(),
     );
     let root_manifest: toml::Value = toml::from_str(&fs::read_to_string(repo.join("Cargo.toml"))?)?;
-    if let Some(package) = root_manifest.get("workspace").and_then(|w| w.get("package")) {
+    if let Some(package) = root_manifest
+        .get("workspace")
+        .and_then(|w| w.get("package"))
+    {
         workspace.insert("package".into(), package.clone());
     }
     fs::write(
@@ -189,28 +212,17 @@ pub fn build_tool_program(
     binary: Option<&str>,
     target: Option<&str>,
 ) -> Result<PathBuf> {
-    let (recipe_name, default_binary, binaries): (&str, &str, &[&str]) = match package {
-        "recpart" => ("install-tools", "recpart", &["recpart"]),
-        "recstrap" => ("install-tools", "recstrap", &["recstrap", "recchroot", "recfstab"]),
-        "recab" => ("install-tools", "recab", &["recab"]),
-        "install-split-pane" => ("install-split-pane", "install-split", &["install-split"]),
-        _ => bail!("no managed live-tool recipe declared for {package}"),
-    };
-    let binary = binary.unwrap_or(default_binary);
+    let (_, _, binaries) = tool(package)?;
+    let binary = binary.unwrap_or(binaries[0]);
     if !binaries.contains(&binary) {
         bail!("package {package} does not build binary {binary}");
     }
+    // The recipe checks the target.
     let target = target.unwrap_or("x86_64-unknown-linux-gnu");
-    if !matches!(
-        target,
-        "x86_64-unknown-linux-gnu" | "x86_64-unknown-linux-musl"
-    ) {
-        bail!("unsupported live-tool Rust target {target}");
-    }
     let source = prepare_tool_source(repo, package)?;
     let recipe = repo
         .join("distro/builder/recipes")
-        .join(format!("{recipe_name}.rhai"));
+        .join("install-tools.rhai");
     let recipe_bin = super::find_recipe(repo)?;
     let work = repo
         .join(".artifacts/work/recipe-tools")

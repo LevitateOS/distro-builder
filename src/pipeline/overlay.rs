@@ -5,6 +5,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use crate::artifact::live_overlay::{self, InitSystem, InittabVariant, LiveOverlayConfig};
+use crate::artifact::filesystem::write_file;
 use crate::pipeline::io::rename_live_overlay_dir;
 
 #[derive(Debug, Clone)]
@@ -255,18 +256,11 @@ pub(crate) fn ensure_openrc_shell(
         )
     })?;
 
-    let autologin = usr_local_bin.join("serial-autologin");
-    fs::write(
-        &autologin,
+    write_file(
+        &usr_local_bin.join("serial-autologin"),
         crate::guest::render_boot(crate::guest::SERIAL_AUTOLOGIN_ROOTFS)?,
-    )
-    .with_context(|| format!("writing '{}'", autologin.display()))?;
-    let mut perms = fs::metadata(&autologin)
-        .with_context(|| format!("reading metadata '{}'", autologin.display()))?
-        .permissions();
-    perms.set_mode(0o755);
-    fs::set_permissions(&autologin, perms)
-        .with_context(|| format!("setting permissions on '{}'", autologin.display()))?;
+        0o755,
+    )?;
 
     let inittab_content = match inittab {
         InittabVariant::DesktopWithSerial => format!(
@@ -313,18 +307,11 @@ ttyS0::respawn:/sbin/getty -L -n -l /usr/local/bin/serial-autologin 115200 ttyS0
     )
     .with_context(|| format!("writing '{}'", issue_path.display()))?;
 
-    let shadow_path = etc_dir.join("shadow");
-    fs::write(
-        &shadow_path,
+    write_file(
+        &etc_dir.join("shadow"),
         "root::0:0:99999:7:::\nbin:!:0:0:99999:7:::\ndaemon:!:0:0:99999:7:::\nnobody:!:0:0:99999:7:::\n",
-    )
-    .with_context(|| format!("writing '{}'", shadow_path.display()))?;
-    let mut shadow_perms = fs::metadata(&shadow_path)
-        .with_context(|| format!("reading metadata '{}'", shadow_path.display()))?
-        .permissions();
-    shadow_perms.set_mode(0o640);
-    fs::set_permissions(&shadow_path, shadow_perms)
-        .with_context(|| format!("setting permissions on '{}'", shadow_path.display()))?;
+        0o640,
+    )?;
 
     Ok(())
 }

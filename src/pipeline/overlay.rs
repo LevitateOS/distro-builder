@@ -4,20 +4,13 @@ use std::os::unix::fs::symlink;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
+use crate::artifact::live_overlay::{self, InitSystem, InittabVariant, LiveOverlayConfig};
 use crate::pipeline::io::rename_live_overlay_dir;
-use crate::{
-    create_openrc_live_overlay, create_systemd_live_overlay, InittabVariant, LiveOverlayConfig,
-    SystemdLiveOverlayConfig,
-};
 
-const BOOT_MACHINE_ID: &str = "0123456789abcdef0123456789abcdef\n";
 #[derive(Debug, Clone)]
 pub enum BootOverlayPolicy {
     Systemd,
-    OpenRc {
-        inittab: InittabVariant,
-        seed_overlay: Option<PathBuf>,
-    },
+    OpenRc { inittab: InittabVariant },
 }
 
 pub(crate) fn create_live_overlay(
@@ -29,36 +22,24 @@ pub(crate) fn create_live_overlay(
     overlay: &BootOverlayPolicy,
     install_ux_consoles: &[String],
 ) -> Result<PathBuf> {
-    let overlay_issue_banner = overlay_issue_banner(os_name, overlay_label);
-    let live_overlay_dir = match overlay {
-        BootOverlayPolicy::Systemd => create_systemd_live_overlay(
-            output_dir,
-            &SystemdLiveOverlayConfig {
-                os_name,
-                issue: &overlay_issue_banner,
-                install_ux_consoles,
-                masked_units: &[],
-                write_serial_test_profile: true,
-                machine_id: Some(BOOT_MACHINE_ID),
-                enforce_utf8_locale_profile: false,
-            },
-        )
-        .with_context(|| format!("creating systemd live overlay for {}", distro_id))?,
-        BootOverlayPolicy::OpenRc {
-            inittab,
-            seed_overlay,
-        } => create_openrc_live_overlay(
-            output_dir,
-            &LiveOverlayConfig {
-                os_name,
-                inittab: *inittab,
-                seed_overlay: seed_overlay.as_deref(),
-                issue: &overlay_issue_banner,
-                install_ux_consoles,
-            },
-        )
-        .with_context(|| format!("creating openrc live overlay for {}", distro_id))?,
+    let issue = format!(
+        "\n{os_name} {overlay_label} - \\l\n\n{}\n\n",
+        crate::install_ux::LIVE_LOGIN_HINT
+    );
+    let init = match overlay {
+        BootOverlayPolicy::Systemd => InitSystem::Systemd,
+        BootOverlayPolicy::OpenRc { inittab } => InitSystem::OpenRc(*inittab),
     };
+    let live_overlay_dir = live_overlay::create_live_overlay(
+        output_dir,
+        &LiveOverlayConfig {
+            os_name,
+            issue: &issue,
+            init,
+            install_ux_consoles,
+        },
+    )
+    .with_context(|| format!("creating the live overlay for {distro_id}"))?;
 
     rename_live_overlay_dir(output_dir, &live_overlay_dir, dir_name).with_context(|| {
         format!(
@@ -346,13 +327,4 @@ ttyS0::respawn:/sbin/getty -L -n -l /usr/local/bin/serial-autologin 115200 ttyS0
         .with_context(|| format!("setting permissions on '{}'", shadow_path.display()))?;
 
     Ok(())
-}
-
-fn overlay_issue_banner(os_name: &str, overlay_label: &str) -> String {
-    format!(
-        "\n{} {} Live - \\l\n\n{}\n\n",
-        os_name,
-        overlay_label,
-        crate::install_ux::LIVE_LOGIN_HINT
-    )
 }

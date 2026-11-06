@@ -225,13 +225,6 @@ fn ensure_apk_packages(rootfs_source_dir: &Path, packages: &[String]) -> Result<
     )
 }
 
-pub(crate) fn install_shell_color_profile(rootfs_source_dir: &Path) -> Result<()> {
-    let profile_path = rootfs_source_dir.join("etc/profile.d/25-shell-color.sh");
-    let profile = crate::guest::SHELL_COLOR_PROFILE;
-    write_text(&profile_path, profile)
-        .with_context(|| format!("writing shell color profile '{}'", profile_path.display()))
-}
-
 pub(crate) fn write_executable(path: &Path, content: &str) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).with_context(|| format!("creating '{}'", parent.display()))?;

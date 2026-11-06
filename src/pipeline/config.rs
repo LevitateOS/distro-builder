@@ -6,11 +6,10 @@ use distro_contract::{
 use std::path::Path;
 
 use crate::pipeline::overlay::BootOverlayPolicy;
-use crate::pipeline::paths::resolve_repo_path;
 use crate::pipeline::plan::RootfsProducer;
 
+use crate::artifact::live_overlay::InittabVariant;
 use crate::pipeline::source::{rootfs_source_policy_from_contract, RootfsSourcePolicy};
-use crate::InittabVariant;
 
 #[derive(Debug, Clone)]
 pub(crate) struct BootLoadedConfig {
@@ -44,7 +43,6 @@ impl BootPayloadProduct {
 }
 
 fn load_boot_payload_config_with_rootfs_source_policy(
-    repo_root: &Path,
     contract: &ConformanceContract,
     rootfs_source_policy: Option<RootfsSourcePolicy>,
 ) -> Result<BootLoadedConfig> {
@@ -56,7 +54,7 @@ fn load_boot_payload_config_with_rootfs_source_policy(
             .required_services
             .clone(),
     );
-    let overlay = load_ring2_overlay_policy(repo_root, contract)?;
+    let overlay = overlay_policy_from_contract(&contract.product_config.live_overlay)?;
     let payload_producers = load_boot_payload_producers(contract, BootPayloadProduct::Live)?;
 
     Ok(BootLoadedConfig {
@@ -73,7 +71,7 @@ pub(crate) fn load_boot_payload_config_from_contract(
     contract: &ConformanceContract,
 ) -> Result<BootLoadedConfig> {
     let rootfs_source_policy = rootfs_source_policy_from_contract(repo_root, contract)?;
-    load_boot_payload_config_with_rootfs_source_policy(repo_root, contract, rootfs_source_policy)
+    load_boot_payload_config_with_rootfs_source_policy(contract, rootfs_source_policy)
 }
 
 pub(crate) fn load_boot_config_from_contract(
@@ -211,17 +209,7 @@ fn rootfs_producer_from_contract(producer: &PayloadProducerContract) -> Result<R
     })
 }
 
-fn load_ring2_overlay_policy(
-    repo_root: &Path,
-    contract: &ConformanceContract,
-) -> Result<BootOverlayPolicy> {
-    overlay_policy_from_contract(repo_root, &contract.product_config.live_overlay)
-}
-
-fn overlay_policy_from_contract(
-    repo_root: &Path,
-    overlay: &OverlayContract,
-) -> Result<BootOverlayPolicy> {
+fn overlay_policy_from_contract(overlay: &OverlayContract) -> Result<BootOverlayPolicy> {
     match overlay.kind {
         OverlayKind::Systemd => Ok(BootOverlayPolicy::Systemd),
         OverlayKind::OpenRc => {
@@ -232,14 +220,7 @@ fn overlay_policy_from_contract(
                     "invalid canonical live-overlay config: openrc overlay requires openrc_inittab"
                 ),
             };
-            let seed_overlay = overlay
-                .seed_overlay
-                .as_ref()
-                .map(|path| resolve_repo_path(repo_root, path));
-            Ok(BootOverlayPolicy::OpenRc {
-                inittab,
-                seed_overlay,
-            })
+            Ok(BootOverlayPolicy::OpenRc { inittab })
         }
     }
 }

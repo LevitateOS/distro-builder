@@ -74,10 +74,6 @@ pub use artifact::disk::{
     build_disk_image, build_disk_image_with_uuids, generate_disk_uuids, DiskImageConfig, DiskUuids,
 };
 pub use artifact::filesystem::{atomic_move, copy_dir_recursive};
-pub use artifact::live_overlay::{
-    create_openrc_live_overlay, create_systemd_live_overlay, InittabVariant, LiveOverlayConfig,
-    SystemdLiveOverlayConfig,
-};
 pub use artifact::overlayfs::{build_overlayfs_default, create_overlayfs_erofs};
 pub use artifact::rootfs::{build_erofs_default, create_erofs};
 pub use pipeline::io::resolve_release_product_rootfs_image_for_distro;

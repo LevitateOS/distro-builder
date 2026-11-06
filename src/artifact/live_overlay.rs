@@ -1,103 +1,114 @@
-//! Shared live overlay builders.
+//! The live overlay: the live session's configuration, layered over the read-only
+//! rootfs with overlayfs.
 //!
-//! This module provides:
-//! - OpenRC live overlay generation (AcornOS style)
-//! - Systemd live overlay generation (LevitateOS style)
+//! One writer per file. Every live overlay has:
+//! - `/etc/issue` (the caller's banner) and `/etc/shadow` (root with an empty password)
+//! - the payload role file
+//! - `etc/profile.d/20-live-shell.sh`: shell defaults (pager, editor, colours, prompt, history)
+//! - `etc/profile.d/99-serial-test.sh`: recqemu's serial test protocol, last so its
+//!   prompt and echo settings win on the serial console
+//! - `live-help`
+//! - getty autologin as root on the consoles, running the install screen's launcher
+//!   on the install-UX consoles
+//!
+//! Then per init system. OpenRC: `/etc/inittab`, a tmpfs `/var/log` in `/etc/fstab`,
+//! efivarfs, and suspend disabled (ACPI handler, sysctl, elogind). systemd: getty
+//! drop-ins, the network-setup and shutdown-cleanup units, `/run/sshd`, and an empty
+//! `/etc/machine-id` so each boot gets its own.
+//!
+//! The live-boot rootfs carries its own OpenRC inittab, serial autologin, issue and
+//! shadow (`pipeline::overlay::ensure_openrc_shell`): `recstrap` installs that rootfs,
+//! so those are what an installed system starts from. On the live ISO this overlay
+//! replaces them.
 
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Result};
 use std::fs;
 use std::os::unix::fs::symlink;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
-use crate::copy_dir_recursive;
-
-/// Inittab variant controlling which consoles are enabled.
+/// Which consoles an OpenRC inittab runs getty on.
 #[derive(Debug, Clone, Copy)]
 pub enum InittabVariant {
-    /// Desktop: 6 VTYs + serial console with autologin (AcornOS).
+    /// Six VTs and the serial console.
     DesktopWithSerial,
-    /// Headless appliance: serial console only.
+    /// The serial console only.
     SerialOnly,
 }
 
-/// Configuration for creating an OpenRC live overlay.
+#[derive(Debug, Clone, Copy)]
+pub enum InitSystem {
+    OpenRc(InittabVariant),
+    Systemd,
+}
+
 #[derive(Debug)]
 pub struct LiveOverlayConfig<'a> {
     /// OS display name (e.g., "AcornOS").
     pub os_name: &'a str,
-    /// Which inittab variant to generate.
-    pub inittab: InittabVariant,
-    /// Optional path to a variant-local live overlay seed directory to copy first.
-    pub seed_overlay: Option<&'a Path>,
     /// The text of `/etc/issue`.
     pub issue: &'a str,
+    pub init: InitSystem,
     /// Consoles whose getty starts the install screen instead of a shell.
     pub install_ux_consoles: &'a [String],
 }
 
-/// Configuration for creating a systemd live overlay.
-#[derive(Debug)]
-pub struct SystemdLiveOverlayConfig<'a> {
-    /// OS display name (e.g., "LevitateOS").
-    pub os_name: &'a str,
-    /// The text of `/etc/issue`.
-    pub issue: &'a str,
-    /// Consoles whose getty starts the install screen instead of a shell.
-    pub install_ux_consoles: &'a [String],
-    /// Systemd unit names to mask by linking to `/dev/null`.
-    pub masked_units: &'a [&'a str],
-    /// Whether to write a serial-console scenario test marker profile script.
-    pub write_serial_test_profile: bool,
-    /// Optional machine-id content to write at `/etc/machine-id`.
-    pub machine_id: Option<&'a str>,
-    /// When true, install a strict UTF-8 locale profile for live shells.
-    /// Live-rootfs producers must ensure UTF-8 locale payload exists in rootfs.
-    pub enforce_utf8_locale_profile: bool,
-}
-
-/// Create an OpenRC live overlay at `output_dir/live-overlay`.
-///
-/// The overlay contains live-session-specific configuration that sits
-/// on top of the read-only EROFS rootfs via overlayfs.
-pub fn create_openrc_live_overlay(
-    output_dir: &Path,
-    config: &LiveOverlayConfig,
-) -> Result<PathBuf> {
-    println!("Creating live overlay...");
-
+/// Writes the live overlay at `output_dir/live-overlay`, replacing any earlier one.
+pub fn create_live_overlay(output_dir: &Path, config: &LiveOverlayConfig) -> Result<PathBuf> {
     let live_overlay = output_dir.join("live-overlay");
-
-    // Clean previous
     if live_overlay.exists() {
         fs::remove_dir_all(&live_overlay)?;
     }
+    fs::create_dir_all(live_overlay.join("etc/profile.d"))?;
+    fs::create_dir_all(live_overlay.join("usr/local/bin"))?;
 
-    // Step 1: Copy variant-local live overlay seed files (test instrumentation, etc.)
-    if let Some(seed_overlay) = config.seed_overlay {
-        if seed_overlay.exists() {
-            println!("  Copying live overlay seed files...");
-            copy_dir_recursive(seed_overlay, &live_overlay).with_context(|| {
-                format!(
-                    "Failed to copy {} -> {}",
-                    seed_overlay.display(),
-                    live_overlay.display()
-                )
-            })?;
-        }
+    fs::write(live_overlay.join("etc/issue"), config.issue)?;
+    // lastchg is a recent day: 0 would demand a new password at the first login.
+    write_with_mode(
+        &live_overlay.join("etc/shadow"),
+        "root::20000:0:99999:7:::\n\
+         bin:!:0:0:99999:7:::\n\
+         daemon:!:0:0:99999:7:::\n\
+         nobody:!:0:0:99999:7:::\n",
+        0o600,
+    )?;
+    fs::write(
+        live_overlay.join(recinit::live::PAYLOAD_ROLE_FILE),
+        format!("{}\n", recinit::live::ROLE_OVERLAY),
+    )?;
+    write_with_mode(
+        &live_overlay.join("etc/profile.d/20-live-shell.sh"),
+        crate::guest::SHELL_UX_PROFILE,
+        0o755,
+    )?;
+    fs::write(
+        live_overlay.join("etc/profile.d/99-serial-test.sh"),
+        recqemu::serial::protocol::guest_profile(),
+    )?;
+    write_with_mode(
+        &live_overlay.join("usr/local/bin/live-help"),
+        &crate::guest::render(crate::guest::LIVE_HELP, &[("OS_NAME", config.os_name)])?,
+        0o755,
+    )?;
+
+    match config.init {
+        InitSystem::OpenRc(inittab) => write_openrc(&live_overlay, config, inittab)?,
+        InitSystem::Systemd => write_systemd(&live_overlay, config)?,
     }
+    Ok(live_overlay)
+}
 
-    // Step 2: Code-generated overlay files
-    fs::create_dir_all(live_overlay.join("etc")).with_context(|| "Failed to create etc")?;
-    write_serial_test_profile(&live_overlay)?;
-
-    // getty lines: the install screen on its consoles, else a plain getty on a VT
-    // and a root shell on the serial console.
-    let vts: &[&str] = match config.inittab {
+fn write_openrc(
+    live_overlay: &Path,
+    config: &LiveOverlayConfig,
+    inittab: InittabVariant,
+) -> Result<()> {
+    let launcher = format!("/{}", crate::install_ux::LAUNCHER);
+    let install_ux = |tty: &str| config.install_ux_consoles.iter().any(|c| c == tty);
+    let vts: &[&str] = match inittab {
         InittabVariant::DesktopWithSerial => &["tty1", "tty2", "tty3", "tty4", "tty5", "tty6"],
         InittabVariant::SerialOnly => &[],
     };
-    let install_ux = |tty: &str| config.install_ux_consoles.iter().any(|c| c == tty);
     if let Some(console) = config
         .install_ux_consoles
         .iter()
@@ -105,8 +116,7 @@ pub fn create_openrc_live_overlay(
     {
         bail!("install_ux console '{console}' has no getty in this inittab");
     }
-    let launcher = format!("/{}", crate::install_ux::LAUNCHER);
-    let vt_gettys = vts
+    let vt_gettys: String = vts
         .iter()
         .map(|tty| {
             if install_ux(tty) {
@@ -115,399 +125,214 @@ pub fn create_openrc_live_overlay(
                 format!("{tty}::respawn:/sbin/getty 38400 {tty}\n")
             }
         })
-        .collect::<String>();
+        .collect();
+    // Without the install screen, the rootfs's serial autologin gives a root shell.
     let serial_login = if install_ux("ttyS0") {
-        launcher.clone()
+        launcher.as_str()
     } else {
-        fs::create_dir_all(live_overlay.join("usr/local/bin"))?;
-        let autologin_script = crate::guest::render_boot(crate::guest::SERIAL_AUTOLOGIN_OPENRC)?;
-        write_executable(
-            &live_overlay.join("usr/local/bin/serial-autologin"),
-            &autologin_script,
-        )?;
-        "/usr/local/bin/serial-autologin".to_string()
+        "/usr/local/bin/serial-autologin"
     };
-    let serial_getty =
-        format!("ttyS0::respawn:/sbin/getty -L -n -l {serial_login} 115200 ttyS0 vt100");
-
-    // /etc/issue
-    fs::write(live_overlay.join("etc/issue"), config.issue)?;
     fs::write(
-        live_overlay.join(recinit::live::PAYLOAD_ROLE_FILE),
-        format!("{}\n", recinit::live::ROLE_OVERLAY),
+        live_overlay.join("etc/inittab"),
+        format!(
+            "# /etc/inittab - {os} Live\n\
+             \n\
+             ::sysinit:/sbin/openrc sysinit\n\
+             ::sysinit:/sbin/openrc boot\n\
+             \n\
+             {vt_gettys}\
+             ttyS0::respawn:/sbin/getty -L -n -l {serial_login} 115200 ttyS0 vt100\n\
+             \n\
+             ::wait:/sbin/openrc default\n\
+             ::ctrlaltdel:/sbin/reboot\n\
+             ::shutdown:/sbin/openrc shutdown\n",
+            os = config.os_name
+        ),
     )?;
 
-    // Empty root password for live session
-    let shadow_content = "root::0:0:99999:7:::\n\
-                          bin:!:0:0:99999:7:::\n\
-                          daemon:!:0:0:99999:7:::\n\
-                          nobody:!:0:0:99999:7:::\n";
-    fs::write(live_overlay.join("etc/shadow"), shadow_content)?;
-    let mut perms = fs::metadata(live_overlay.join("etc/shadow"))?.permissions();
-    perms.set_mode(0o640);
-    fs::set_permissions(live_overlay.join("etc/shadow"), perms)?;
-
-    // Inittab
-    let inittab_content = match config.inittab {
-        InittabVariant::DesktopWithSerial => format!(
-            r#"# /etc/inittab - {} Live
-
-::sysinit:/sbin/openrc sysinit
-::sysinit:/sbin/openrc boot
-
-# Virtual terminals
-{vt_gettys}
-# Serial console, logged in as root
-{serial_getty}
-
-# Continue remaining services after serial shell is available
-::wait:/sbin/openrc default
-
-# Ctrl+Alt+Del
-::ctrlaltdel:/sbin/reboot
-
-# Shutdown
-::shutdown:/sbin/openrc shutdown
-"#,
-            config.os_name
-        ),
-        InittabVariant::SerialOnly => format!(
-            r#"# /etc/inittab - {} Live (headless appliance)
-
-::sysinit:/sbin/openrc sysinit
-::sysinit:/sbin/openrc boot
-
-# Serial console PRIMARY, logged in as root - appliance has no display
-{serial_getty}
-
-# Continue remaining services after serial shell is available
-::wait:/sbin/openrc default
-
-# Ctrl+Alt+Del
-::ctrlaltdel:/sbin/reboot
-
-# Shutdown
-::shutdown:/sbin/openrc shutdown
-"#,
-            config.os_name
-        ),
-    };
-    fs::write(live_overlay.join("etc/inittab"), inittab_content)?;
-
-    // Runlevels and conf.d directories
     fs::create_dir_all(live_overlay.join("etc/runlevels/default"))?;
     fs::create_dir_all(live_overlay.join("etc/conf.d"))?;
-
-    // Volatile log storage
-    let fstab_content = format!(
-        "# {} Live fstab\n\
-         # Volatile log storage - prevents logs from filling overlay tmpfs\n\
-         tmpfs   /var/log    tmpfs   nosuid,nodev,noexec,size=64M,mode=0755   0 0\n",
-        config.os_name
-    );
-    fs::write(live_overlay.join("etc/fstab"), fstab_content)?;
-
-    // local.d scripts
+    // Logs in RAM, so they can't fill the overlay; localmount mounts it at boot.
+    fs::write(
+        live_overlay.join("etc/fstab"),
+        "tmpfs   /var/log    tmpfs   nosuid,nodev,noexec,size=64M,mode=0755   0 0\n",
+    )?;
     fs::create_dir_all(live_overlay.join("etc/local.d"))?;
-
-    let volatile_log_script = crate::guest::VOLATILE_LOG_START;
-    write_executable(
-        &live_overlay.join("etc/local.d/00-volatile-log.start"),
-        volatile_log_script,
-    )?;
-
-    let efivars_script = crate::guest::EFIVARFS_START;
-    write_executable(
+    write_with_mode(
         &live_overlay.join("etc/local.d/01-efivarfs.start"),
-        efivars_script,
+        crate::guest::EFIVARFS_START,
+        0o755,
     )?;
 
-    // Do-not-suspend configuration
-    // Method 1: ACPI handler
+    // No suspend during an install: ACPI events, sysctl and elogind.
     fs::create_dir_all(live_overlay.join("etc/acpi"))?;
-    let acpi_handler =
-        crate::guest::render(crate::guest::ACPI_HANDLER, &[("OS_NAME", config.os_name)])?;
-    write_executable(&live_overlay.join("etc/acpi/handler.sh"), &acpi_handler)?;
-
-    // Method 2: sysctl
+    write_with_mode(
+        &live_overlay.join("etc/acpi/handler.sh"),
+        &crate::guest::render(crate::guest::ACPI_HANDLER, &[("OS_NAME", config.os_name)])?,
+        0o755,
+    )?;
     fs::create_dir_all(live_overlay.join("etc/sysctl.d"))?;
-    let sysctl_content = format!(
-        "# {} Live: Disable suspend\n\
-         # Prevent accidental suspend during installation\n\
-         \n\
-         # Disable suspend-to-RAM\n\
-         kernel.sysrq = 1\n\
-         \n\
-         # Note: Full suspend disable requires either:\n\
-         # - elogind HandleLidSwitch=ignore (if using elogind)\n\
-         # - acpid handler (provided above)\n\
-         # - Or simply not having any suspend triggers\n",
-        config.os_name
-    );
     fs::write(
         live_overlay.join("etc/sysctl.d/50-live-no-suspend.conf"),
-        sysctl_content,
+        format!(
+            "# {} Live: Disable suspend\n\
+             # Prevent accidental suspend during installation\n\
+             \n\
+             # Disable suspend-to-RAM\n\
+             kernel.sysrq = 1\n",
+            config.os_name
+        ),
     )?;
-
-    // Method 3: elogind config
     fs::create_dir_all(live_overlay.join("etc/elogind/logind.conf.d"))?;
-    let logind_conf = format!(
-        "# {} Live: Disable suspend triggers\n\
-         [Login]\n\
-         HandlePowerKey=ignore\n\
-         HandleSuspendKey=ignore\n\
-         HandleHibernateKey=ignore\n\
-         HandleLidSwitch=ignore\n\
-         HandleLidSwitchExternalPower=ignore\n\
-         HandleLidSwitchDocked=ignore\n\
-         IdleAction=ignore\n",
-        config.os_name
-    );
     fs::write(
         live_overlay.join("etc/elogind/logind.conf.d/00-live-no-suspend.conf"),
-        logind_conf,
+        format!(
+            "# {} Live: Disable suspend triggers\n\
+             [Login]\n\
+             HandlePowerKey=ignore\n\
+             HandleSuspendKey=ignore\n\
+             HandleHibernateKey=ignore\n\
+             HandleLidSwitch=ignore\n\
+             HandleLidSwitchExternalPower=ignore\n\
+             HandleLidSwitchDocked=ignore\n\
+             IdleAction=ignore\n",
+            config.os_name
+        ),
     )?;
-
-    println!("  Live overlay created at {}", live_overlay.display());
-    Ok(live_overlay)
+    Ok(())
 }
 
-/// Create a systemd live overlay at `output_dir/live-overlay`.
-///
-/// The overlay includes:
-/// - tty1 autologin drop-in
-/// - serial-getty template autologin drop-in
-/// - empty root password for live session (`/etc/shadow`)
-/// - `/etc/issue` banner
-pub fn create_systemd_live_overlay(
-    output_dir: &Path,
-    config: &SystemdLiveOverlayConfig,
-) -> Result<PathBuf> {
-    println!("Creating systemd live overlay...");
-
-    let live_overlay = output_dir.join("live-overlay");
-    if live_overlay.exists() {
-        fs::remove_dir_all(&live_overlay)?;
+fn write_systemd(live_overlay: &Path, config: &LiveOverlayConfig) -> Result<()> {
+    let system = live_overlay.join("etc/systemd/system");
+    for dir in [
+        "getty@.service.d",
+        "serial-getty@.service.d",
+        "getty.target.wants",
+        "basic.target.wants",
+        "multi-user.target.wants",
+    ] {
+        fs::create_dir_all(system.join(dir))?;
     }
-
-    fs::create_dir_all(live_overlay.join("etc/systemd/system/getty@tty1.service.d"))?;
-    fs::create_dir_all(live_overlay.join("etc/systemd/system/getty@.service.d"))?;
-    fs::create_dir_all(live_overlay.join("etc/systemd/system/serial-getty@.service.d"))?;
-    fs::create_dir_all(live_overlay.join("etc/systemd/system/getty.target.wants"))?;
-    fs::create_dir_all(live_overlay.join("etc/systemd/system/basic.target.wants"))?;
-    fs::create_dir_all(live_overlay.join("etc/systemd/system/multi-user.target.wants"))?;
-    fs::create_dir_all(live_overlay.join("etc/systemd/network"))?;
-    fs::create_dir_all(live_overlay.join("etc/profile.d"))?;
     fs::create_dir_all(live_overlay.join("etc/tmpfiles.d"))?;
-    fs::create_dir_all(live_overlay.join("usr/local/bin"))?;
     fs::create_dir_all(live_overlay.join("usr/local/sbin"))?;
 
-    let live_help_script = crate::guest::LIVE_HELP;
-    write_executable(
-        &live_overlay.join("usr/local/bin/live-help"),
-        live_help_script,
-    )?;
-
-    let shell_ux_profile = crate::guest::SHELL_UX_PROFILE;
-    write_executable(
-        &live_overlay.join("etc/profile.d/20-live-shell-ux.sh"),
-        shell_ux_profile,
-    )?;
-
-    // Autologin as root. The install screen's consoles run its launcher in place of
-    // login. tty1's drop-in has the template drop-in's name, so it replaces it.
+    // Autologin as root: one template drop-in for the VTs, one for serial consoles.
+    // An install-screen console gets an instance drop-in of the same name, which
+    // replaces the template's and runs the launcher in place of login.
     if let Some(console) = config
         .install_ux_consoles
         .iter()
-        .find(|c| !matches!(c.as_str(), "tty1" | "ttyS0"))
+        .find(|c| !(c.starts_with("ttyS") || c.as_str() == "tty1"))
     {
         bail!("install_ux console '{console}' has no getty in the systemd live overlay");
     }
-    let login_program = |tty: &str| {
-        if config.install_ux_consoles.iter().any(|c| c == tty) {
-            format!(" --login-program /{}", crate::install_ux::LAUNCHER)
-        } else {
-            String::new()
-        }
+    let vt = |login: &str| {
+        format!("[Service]\nExecStart=\nExecStart=-/sbin/agetty --autologin root --noclear{login} %I $TERM\n")
     };
-    let tty1_autologin = format!(
-        "[Service]\nExecStart=\nExecStart=-/sbin/agetty --autologin root --noclear{} %I $TERM\n",
-        login_program("tty1")
-    );
+    let serial = |login: &str| {
+        format!("[Service]\nExecStart=\nExecStart=-/sbin/agetty --autologin root{login} --keep-baud 115200,57600,38400,9600 %I vt100\n")
+    };
+    fs::write(system.join("getty@.service.d/zz-autologin.conf"), vt(""))?;
     fs::write(
-        live_overlay.join("etc/systemd/system/getty@tty1.service.d/zz-autologin.conf"),
-        tty1_autologin,
+        system.join("serial-getty@.service.d/zz-autologin.conf"),
+        serial(""),
     )?;
-
-    let serial_autologin = "[Service]\nExecStart=\nExecStart=-/sbin/agetty --autologin root --keep-baud 115200,57600,38400,9600 %I vt100\n";
-    if !login_program("ttyS0").is_empty() {
-        fs::create_dir_all(live_overlay.join("etc/systemd/system/serial-getty@ttyS0.service.d"))?;
-        fs::write(
-            live_overlay.join("etc/systemd/system/serial-getty@ttyS0.service.d/zz-autologin.conf"),
-            format!(
-                "[Service]\nExecStart=\nExecStart=-/sbin/agetty --autologin root{} --keep-baud 115200,57600,38400,9600 %I vt100\n",
-                login_program("ttyS0")
-            ),
-        )?;
+    let launcher = format!(" --login-program /{}", crate::install_ux::LAUNCHER);
+    for console in config.install_ux_consoles {
+        let (unit, drop_in) = if console.starts_with("ttyS") {
+            (
+                format!("serial-getty@{console}.service.d"),
+                serial(&launcher),
+            )
+        } else {
+            (format!("getty@{console}.service.d"), vt(&launcher))
+        };
+        fs::create_dir_all(system.join(&unit))?;
+        fs::write(system.join(unit).join("zz-autologin.conf"), drop_in)?;
     }
-    fs::write(
-        live_overlay.join("etc/systemd/system/serial-getty@.service.d/zz-autologin.conf"),
-        serial_autologin,
-    )?;
-    fs::write(
-        live_overlay.join("etc/systemd/system/getty@.service.d/zz-autologin.conf"),
-        serial_autologin,
-    )?;
     symlink(
         "/usr/lib/systemd/system/getty@.service",
-        live_overlay.join("etc/systemd/system/getty.target.wants/getty@tty1.service"),
+        system.join("getty.target.wants/getty@tty1.service"),
     )?;
-    symlink(
-        "/usr/lib/systemd/system/serial-getty@.service",
-        live_overlay.join("etc/systemd/system/basic.target.wants/serial-getty@ttyS0.service"),
-    )?;
-    symlink(
-        "/usr/lib/systemd/system/serial-getty@.service",
-        live_overlay.join("etc/systemd/system/getty.target.wants/serial-getty@ttyS0.service"),
-    )?;
-    // Deterministic live NIC bring-up for slirp hostfwd SSH (QEMU usernet defaults).
-    // Resolve the first non-loopback NIC dynamically to avoid brittle interface names
-    // (e.g. ens3 vs ens4 depending on device ordering).
-    let live_net_setup_script = crate::guest::LIVE_NET_SETUP;
-    write_executable(
+    for target in ["basic.target.wants", "getty.target.wants"] {
+        symlink(
+            "/usr/lib/systemd/system/serial-getty@.service",
+            system.join(target).join("serial-getty@ttyS0.service"),
+        )?;
+    }
+
+    // NIC bring-up for QEMU user networking (SSH via hostfwd): the first
+    // non-loopback interface, whatever it is called.
+    write_with_mode(
         &live_overlay.join("usr/local/sbin/live-net-setup"),
-        live_net_setup_script,
+        crate::guest::LIVE_NET_SETUP,
+        0o755,
     )?;
-
-    let live_net_setup_unit = r#"[Unit]
-Description=Levitate live network setup (slirp SSH)
-DefaultDependencies=no
-After=basic.target local-fs.target
-Before=network.target network-online.target sshd.service
-Wants=network.target
-
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-ExecStart=/usr/local/sbin/live-net-setup
-
-[Install]
-WantedBy=multi-user.target
-"#;
     fs::write(
-        live_overlay.join("etc/systemd/system/live-net-setup.service"),
-        live_net_setup_unit,
+        system.join("live-net-setup.service"),
+        format!(
+            "[Unit]\n\
+             Description={} live network setup (slirp SSH)\n\
+             DefaultDependencies=no\n\
+             After=basic.target local-fs.target\n\
+             Before=network.target network-online.target sshd.service\n\
+             Wants=network.target\n\
+             \n\
+             [Service]\n\
+             Type=oneshot\n\
+             RemainAfterExit=yes\n\
+             ExecStart=/usr/local/sbin/live-net-setup\n\
+             \n\
+             [Install]\n\
+             WantedBy=multi-user.target\n",
+            config.os_name
+        ),
     )?;
     symlink(
         "/etc/systemd/system/live-net-setup.service",
-        live_overlay.join("etc/systemd/system/multi-user.target.wants/live-net-setup.service"),
+        system.join("multi-user.target.wants/live-net-setup.service"),
     )?;
-    for unit in config.masked_units {
-        symlink(
-            "/dev/null",
-            live_overlay.join(format!("etc/systemd/system/{unit}")),
-        )?;
-    }
 
-    let shutdown_cleanup_script = crate::guest::LIVE_SHUTDOWN_CLEANUP;
-    write_executable(
+    write_with_mode(
         &live_overlay.join("usr/local/sbin/live-shutdown-cleanup"),
-        shutdown_cleanup_script,
+        crate::guest::LIVE_SHUTDOWN_CLEANUP,
+        0o755,
     )?;
-
-    let shutdown_cleanup_unit = r#"[Unit]
-Description=Live ISO shutdown cleanup
-DefaultDependencies=no
-After=multi-user.target
-Before=run-live-media.mount umount.target shutdown.target
-Conflicts=shutdown.target umount.target
-
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-ExecStart=/bin/true
-ExecStop=/usr/local/sbin/live-shutdown-cleanup
-
-[Install]
-WantedBy=multi-user.target
-"#;
     fs::write(
-        live_overlay.join("etc/systemd/system/live-shutdown-cleanup.service"),
-        shutdown_cleanup_unit,
+        system.join("live-shutdown-cleanup.service"),
+        "[Unit]\n\
+         Description=Live ISO shutdown cleanup\n\
+         DefaultDependencies=no\n\
+         After=multi-user.target\n\
+         Before=run-live-media.mount umount.target shutdown.target\n\
+         Conflicts=shutdown.target umount.target\n\
+         \n\
+         [Service]\n\
+         Type=oneshot\n\
+         RemainAfterExit=yes\n\
+         ExecStart=/bin/true\n\
+         ExecStop=/usr/local/sbin/live-shutdown-cleanup\n\
+         \n\
+         [Install]\n\
+         WantedBy=multi-user.target\n",
     )?;
     symlink(
         "/etc/systemd/system/live-shutdown-cleanup.service",
-        live_overlay
-            .join("etc/systemd/system/multi-user.target.wants/live-shutdown-cleanup.service"),
+        system.join("multi-user.target.wants/live-shutdown-cleanup.service"),
     )?;
 
-    fs::write(live_overlay.join("etc/issue"), config.issue)?;
-
-    if config.write_serial_test_profile {
-        write_serial_test_profile(&live_overlay)?;
-    }
-
-    if config.enforce_utf8_locale_profile {
-        // Live override: use portable C locale for minimal rootfs payloads.
-        let locale_profile = r#"#!/bin/sh
-# Live override: use portable C locale (always available).
-export LANG=C
-unset LC_ALL LC_CTYPE LC_NUMERIC LC_TIME LC_COLLATE LC_MESSAGES \
-      LC_MONETARY LC_PAPER LC_NAME LC_ADDRESS LC_TELEPHONE LC_MEASUREMENT \
-      LC_IDENTIFICATION
-"#;
-        write_executable(&live_overlay.join("etc/profile.d/lang.sh"), locale_profile)?;
-    }
-
-    // Ensure runtime sshd directory exists on tmpfs-backed /run before sshd starts.
+    // sshd needs its runtime directory on the tmpfs /run.
     fs::write(
         live_overlay.join("etc/tmpfiles.d/sshd-local.conf"),
         "d /run/sshd 0755 root root -\n",
     )?;
-
-    if let Some(machine_id) = config.machine_id {
-        fs::write(live_overlay.join("etc/machine-id"), machine_id)?;
-    }
-
-    // Keep root password empty for live autologin, but avoid "password change
-    // required" at first login by using a non-zero lastchg day.
-    let shadow_content = "root::20000:0:99999:7:::\n\
-                          bin:!:0:0:99999:7:::\n\
-                          daemon:!:0:0:99999:7:::\n\
-                          nobody:!:0:0:99999:7:::\n";
-    fs::write(live_overlay.join("etc/shadow"), shadow_content)?;
-    let mut perms = fs::metadata(live_overlay.join("etc/shadow"))?.permissions();
-    perms.set_mode(0o600);
-    fs::set_permissions(live_overlay.join("etc/shadow"), perms)?;
-    fs::write(
-        live_overlay.join(recinit::live::PAYLOAD_ROLE_FILE),
-        format!("{}\n", recinit::live::ROLE_OVERLAY),
-    )?;
-
-    println!(
-        "  Systemd live overlay created at {}",
-        live_overlay.display()
-    );
-    Ok(live_overlay)
-}
-
-/// Write a file and make it executable (mode 0o755).
-fn write_executable(path: &Path, content: &str) -> Result<()> {
-    fs::write(path, content)?;
-    let mut perms = fs::metadata(path)?.permissions();
-    perms.set_mode(0o755);
-    fs::set_permissions(path, perms)?;
+    // Empty: systemd makes up a machine ID at each boot.
+    fs::write(live_overlay.join("etc/machine-id"), "")?;
     Ok(())
 }
 
-/// Install recqemu's serial test profile, which the install tests' serial
-/// console relies on (echo off, empty prompt, readiness marker).
-fn write_serial_test_profile(live_overlay: &Path) -> Result<()> {
-    let profile_d = live_overlay.join("etc/profile.d");
-    fs::create_dir_all(&profile_d)?;
-    fs::write(
-        profile_d.join("00-serial-test.sh"),
-        recqemu::serial::protocol::guest_profile(),
-    )?;
+fn write_with_mode(path: &Path, content: &str, mode: u32) -> Result<()> {
+    fs::write(path, content)?;
+    fs::set_permissions(path, fs::Permissions::from_mode(mode))?;
     Ok(())
 }

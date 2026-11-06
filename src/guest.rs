@@ -18,11 +18,8 @@ scripts! {
     LIVE_HELP = "live/live-help.sh";
     LIVE_NET_SETUP = "live/live-net-setup.sh";
     LIVE_SHUTDOWN_CLEANUP = "live/live-shutdown-cleanup.sh";
-    SERIAL_AUTOLOGIN_OPENRC = "live/serial-autologin.openrc.sh";
     SERIAL_AUTOLOGIN_ROOTFS = "live/serial-autologin.rootfs.sh";
-    SHELL_COLOR_PROFILE = "live/shell-color.sh";
     SHELL_UX_PROFILE = "live/shell-ux.sh";
-    VOLATILE_LOG_START = "live/volatile-log.start";
     DOCS_BUN = "install-ux/docs-bun.sh";
     DOCS_TEXT = "install-ux/docs-text.sh";
     INSTALL_UX = "install-ux/install-ux.sh";

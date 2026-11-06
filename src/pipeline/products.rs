@@ -10,7 +10,7 @@ use crate::pipeline::config::{
 use crate::pipeline::io::{
     create_empty_overlay_dir, create_unique_output_dir, extract_erofs_rootfs,
 };
-use crate::pipeline::live_tools::{add_required_tools, install_shell_color_profile};
+use crate::pipeline::live_tools::add_required_tools;
 use distro_contract::{InstallUxContract, RuntimeActionContract};
 use crate::pipeline::overlay::{
     create_live_overlay, ensure_openrc_shell, ensure_required_service_wiring,
@@ -481,7 +481,6 @@ pub fn prepare_live_tools_product(
         &spec.runtime_actions,
     )
     .with_context(|| format!("adding required live tools for '{}'", spec.distro_id))?;
-    install_shell_color_profile(&rootfs_source_dir)?;
     crate::install_ux::write_payload(
         &spec.repo_root,
         &rootfs_source_dir,

@@ -14,7 +14,12 @@ let ctx = #{
     program: join_path(RUNTIME.paths.output, "bin/recstrap"),
 };
 
-ctx.built_program = join_path(RUNTIME.paths.build, "target/" + ctx.rust_target + "/release/recstrap");
+if ctx.rust_target != "x86_64-unknown-linux-gnu" && ctx.rust_target != "x86_64-unknown-linux-musl" {
+    throw "Unsupported tool Rust target: " + ctx.rust_target;
+}
+let target_prefix = if ctx.rust_target == "x86_64-unknown-linux-gnu" { "target/release/" }
+                    else { "target/" + ctx.rust_target + "/release/" };
+ctx.built_program = join_path(RUNTIME.paths.build, target_prefix + "recstrap");
 
 fn _verify(ctx, program) {
     let actual = trim(exec_output(program, ["--version"]));
@@ -49,9 +54,17 @@ fn build(ctx) {
         _verify(ctx, ctx.supplied_program);
         return ctx;
     }
-    exec_checked("cargo", ["build", "--release", "--locked", "--offline", "--target", ctx.rust_target, "--bin", "recstrap",
-        "--manifest-path", join_path(ctx.source, "Cargo.toml"),
-        "--target-dir", join_path(work, "target")], #{
+    let args = ["build", "--release", "--locked", "--offline", "--bin", "recstrap",
+        "--manifest-path", join_path(ctx.source, "Cargo.toml"), "--target-dir", join_path(work, "target")];
+    if ctx.rust_target == "x86_64-unknown-linux-gnu" {
+        let compiler = exec_output("rustc", ["-vV"]);
+        if !compiler.contains("\nhost: " + ctx.rust_target + "\n") {
+            throw "Selected GNU tool target does not match the compiler image's native host";
+        }
+    } else {
+        args.push("--target"); args.push(ctx.rust_target);
+    }
+    exec_checked("cargo", args, #{
         cwd: ctx.source,
         env: #{CARGO_HOME: join_path(work, "cargo"), CARGO_BUILD_JOBS: jobs,
             RUSTFLAGS: "-C link-arg=-Wl,--threads=1", LD_LIBRARY_PATH: "/usr/lib"},

@@ -1,6 +1,6 @@
 // Pinned standalone QEMU/OVMF producer; host scenarios consume its named
 // published tree after explicit `just tools-install` preparation.
-// SHA256 facts: Rocky10.1 vault AppStream repodata primary XML.
+// SHA256 facts: Rocky10.1 vault BaseOS/AppStream repodata primary XML.
 const RECIPE_API = 2;
 let ctx = #{
     name: "qemu-tools",
@@ -8,6 +8,15 @@ let ctx = #{
     description: "QEMU and OVMF for boot scenarios",
     tools: RUNTIME.paths.output,
     rpms: [
+        // ELF runtime dependencies absent from the compiler/base image.
+        ["https://dl.rockylinux.org/vault/rocky/10.1/BaseOS/x86_64/os/Packages/l/libaio-0.3.111-22.el10.x86_64.rpm", "libaio.rpm", "9d6afa18f923b6020b1dde5333184002f15a1c63fe3ad4e13792aca69d6bf477"],
+        ["https://dl.rockylinux.org/vault/rocky/10.1/BaseOS/x86_64/os/Packages/l/libpng-1.6.40-8.el10_1.4.x86_64.rpm", "libpng.rpm", "dbbedb2df5ca13157926de2268ad36376939f15819e9df4585db1304d26903c0"],
+        ["https://dl.rockylinux.org/vault/rocky/10.1/BaseOS/x86_64/os/Packages/l/libseccomp-2.5.6-1.el10.x86_64.rpm", "libseccomp.rpm", "ee91ee0f4ad9b2b0deac8b215b2e9b335edfc43f6fc5cd90817f7dc4f3f1ccce"],
+        ["https://dl.rockylinux.org/vault/rocky/10.1/BaseOS/x86_64/os/Packages/l/liburing-2.5-5.el10.x86_64.rpm", "liburing.rpm", "5b1aa3dfd643836c950be5984444c8d741403259a352e757a725f8cb5dd54cfb"],
+        ["https://dl.rockylinux.org/vault/rocky/10.1/BaseOS/x86_64/os/Packages/l/lzo-2.10-14.el10.x86_64.rpm", "lzo.rpm", "c216409af7f24d009b41073e2fbd54d803ba4c63898e98b0eb782f4f355ebcf5"],
+        ["https://dl.rockylinux.org/vault/rocky/10.1/BaseOS/x86_64/os/Packages/n/numactl-libs-2.0.19-2.el10.x86_64.rpm", "numactl-libs.rpm", "4ae515aeb4b75bc0bdcf260414555d76e830bbec4334a84ab47f633d88d3cd7e"],
+        ["https://dl.rockylinux.org/vault/rocky/10.1/BaseOS/x86_64/os/Packages/s/snappy-1.1.10-7.el10.x86_64.rpm", "snappy.rpm", "8730234ef6ef6dd14bb5a05e4c8178293a1ae6c533420a81072fda4dd692e391"],
+        // QEMU, firmware, and libraries provided by AppStream.
         ["https://dl.rockylinux.org/vault/rocky/10.1/AppStream/x86_64/os/Packages/q/qemu-img-10.0.0-14.el10_1.x86_64.rpm", "qemu-img.rpm", "131e20dbdc855fec860fee6943c02a20c74abe406522b9064b1e8c319b7bd068"],
     ["https://dl.rockylinux.org/vault/rocky/10.1/AppStream/x86_64/os/Packages/q/qemu-kvm-core-10.0.0-14.el10_1.x86_64.rpm", "qemu-kvm-core.rpm", "36cd677807ab9f7aa6122b76220244ad939db7cf3c324c78e916121231986af4"],
     ["https://dl.rockylinux.org/vault/rocky/10.1/AppStream/x86_64/os/Packages/q/qemu-kvm-common-10.0.0-14.el10_1.x86_64.rpm", "qemu-kvm-common.rpm", "f9d599b8b87ace482bb4724d8ab2ae75e5bfaee7d4eba5440bdcf688e4865595"],
@@ -65,8 +74,11 @@ fn install(ctx) {
         verify_sha256(archive, rpm[2]);
         let cpio = archive + ".cpio";
         // The producer and extractor must each succeed; no swallowed pipe error.
-        exec_checked("bash", ["-c", "rpm2cpio \"$1\" > \"$2\"", "rpm2cpio", archive, cpio]);
-        exec_checked("bash", ["-c", "cpio -idmu --quiet < \"$1\"", "cpio", cpio], #{cwd: ctx.tools});
+        exec_checked("sh", ["-c", "rpm2cpio \"$1\" > \"$2\"", "rpm2cpio", archive, cpio]);
+        // Boot scenarios use user networking, not the privileged host-bridge
+        // helper. Select that package subset explicitly; extraction still fails
+        // on every error in the retained payload.
+        exec_checked("sh", ["-c", "cpio -idmu --quiet --nonmatching ./usr/libexec/qemu-bridge-helper < \"$1\"", "cpio", cpio], #{cwd: ctx.tools});
         rm(cpio);
     }
     let bin = join_path(ctx.tools, "usr/bin");

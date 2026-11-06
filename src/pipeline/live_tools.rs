@@ -276,13 +276,7 @@ fn install_bun_docs_tui_payload(
     rootfs_source_dir: &Path,
     docs_cmd_path: &Path,
 ) -> Result<()> {
-    let docs_app_dir = repo_root.join("tui/apps/live-tools/install-docs");
-    if !docs_app_dir.is_dir() {
-        bail!(
-            "live install docs app source missing at '{}'. Expected workspace path 'tui/apps/live-tools/install-docs'.",
-            docs_app_dir.display()
-        );
-    }
+    let docs_app = distro_contract::tui_apps::find(repo_root, "install-docs")?;
 
     let bun_bin = find_executable_in_path("bun").ok_or_else(|| {
         anyhow::anyhow!(
@@ -291,29 +285,19 @@ fn install_bun_docs_tui_payload(
         )
     })?;
 
-    // Ensure docs app dependencies are available for bundling.
-    let docs_tui_kit = docs_app_dir.join("node_modules/@levitate/tui-kit/package.json");
-    if !docs_tui_kit.is_file() {
-        let install = Command::new(&bun_bin)
-            .arg("install")
-            .current_dir(&docs_app_dir)
-            .output()
-            .with_context(|| {
-                format!(
-                    "running bun install for live install docs app at '{}'",
-                    docs_app_dir.display()
-                )
-            })?;
-        if !install.status.success() {
-            let stdout = String::from_utf8_lossy(&install.stdout);
-            let stderr = String::from_utf8_lossy(&install.stderr);
-            bail!(
-                "bun install failed for live install docs app '{}': {}\n{}",
-                docs_app_dir.display(),
-                stdout.trim(),
-                stderr.trim()
-            );
-        }
+    // The app is a member of the root JavaScript workspace; install it the one way xtask does.
+    let install = Command::new(&bun_bin)
+        .args(["install", "--frozen-lockfile"])
+        .current_dir(repo_root)
+        .output()
+        .context("running bun install --frozen-lockfile at the repo root")?;
+    if !install.status.success() {
+        bail!(
+            "bun install --frozen-lockfile failed at '{}': {}\n{}",
+            repo_root.display(),
+            String::from_utf8_lossy(&install.stdout).trim(),
+            String::from_utf8_lossy(&install.stderr).trim()
+        );
     }
 
     let docs_bundle_dir = rootfs_source_dir.join("usr/local/share/levitate/docs-tui");
@@ -327,17 +311,17 @@ fn install_bun_docs_tui_payload(
 
     let build = Command::new(&bun_bin)
         .arg("build")
-        .arg("src/main.ts")
+        .arg(&docs_app.entry)
         .arg("--target=bun")
         .arg("--minify")
         .arg("--outfile")
         .arg(&docs_bundle)
-        .current_dir(&docs_app_dir)
+        .current_dir(&docs_app.dir)
         .output()
         .with_context(|| {
             format!(
                 "building live install docs bundle from '{}' to '{}'",
-                docs_app_dir.display(),
+                docs_app.dir.display(),
                 docs_bundle.display()
             )
         })?;
@@ -346,7 +330,7 @@ fn install_bun_docs_tui_payload(
         let stderr = String::from_utf8_lossy(&build.stderr);
         bail!(
             "bun build failed for live install docs bundle '{}': {}\n{}",
-            docs_app_dir.display(),
+            docs_app.dir.display(),
             stdout.trim(),
             stderr.trim()
         );

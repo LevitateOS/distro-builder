@@ -121,12 +121,7 @@ fn resolve_right_command() -> Option<String> {
             }
         }
     }
-    for candidate in ["levitate-install-docs", "acorn-docs"] {
-        if command_exists(candidate) {
-            return Some(candidate.to_string());
-        }
-    }
-    None
+    command_exists("levitate-install-docs").then(|| "levitate-install-docs".to_string())
 }
 
 fn command_exists(cmd: &str) -> bool {
@@ -165,7 +160,7 @@ fn resolved_shell_path() -> String {
 
 fn run_smoke(config: &Config) -> Result<()> {
     let right_command = config.right_command.as_deref().ok_or_else(|| {
-        anyhow!("split-smoke: missing right-pane docs command (levitate-install-docs/acorn-docs)")
+        anyhow!("split-smoke: missing right-pane docs command (levitate-install-docs)")
     })?;
     let right_token = first_token(right_command)
         .ok_or_else(|| anyhow!("split-smoke: invalid right command '{}'", right_command))?;
@@ -575,7 +570,7 @@ fn apply_common_env(cmd: &mut CommandBuilder) {
 fn right_launch_script(right: Option<&str>) -> String {
     match right {
         Some(cmd) => format!("exec {}", cmd),
-        None => "printf '%s\\n' 'No docs TUI command found (levitate-install-docs/acorn-docs).'; exec \"${SHELL:-/bin/sh}\" -l".to_string(),
+        None => "printf '%s\\n' 'No install docs command found (levitate-install-docs).'; exec \"${SHELL:-/bin/sh}\" -l".to_string(),
     }
 }
 

@@ -280,7 +280,7 @@ fn live_tools_runtime_action_from_contract(
             }
             LiveToolsRuntimeAction::InstallModePayload {
                 interactive_shell,
-                ux_docs_frontend: *ux_docs_frontend,
+                ux_docs_frontend: ux_docs_frontend.clone(),
             }
         }
     })

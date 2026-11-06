@@ -104,7 +104,7 @@ pub(crate) fn add_required_tools(
                 distro_id,
                 install_experience,
                 interactive_shell,
-                *ux_docs_frontend,
+                ux_docs_frontend,
             )
             .with_context(|| format!("writing install experience payload for '{}'", distro_id))?,
         }
@@ -414,7 +414,7 @@ fn install_mode_payload(
     distro_id: &str,
     install_experience: InstallExperience,
     interactive_shell: &str,
-    ux_docs_frontend: InstallDocsFrontend,
+    ux_docs_frontend: &InstallDocsFrontend,
 ) -> Result<()> {
     let marker_path = rootfs_source_dir.join(INSTALL_EXPERIENCE_MARKER);
     write_text(&marker_path, &format!("{}\n", install_experience.as_str())).with_context(|| {
@@ -433,23 +433,6 @@ fn install_mode_payload(
     if install_experience == InstallExperience::Ux {
         let docs_cmd_path = rootfs_source_dir.join(INSTALL_DOCS);
         let docs_tui_cmd_path = rootfs_source_dir.join("usr/local/bin/docs-tui");
-        let docs_text_path = rootfs_source_dir.join(INSTALL_DOCS_TEXT);
-        let docs_text = format!(
-            "LevitateOS Live Install Tools\n\
-             Distro: {distro}\n\
-             \n\
-             This shell is intended for interactive install preparation.\n\
-             Available baseline commands include: recpart, recstrap, recfstab, recchroot, sfdisk, mkfs.ext4, ip, ping, curl.\n\
-             \n\
-             If this host is used for automation, switch to the profile that sets install_experience=automated_ssh.\n",
-            distro = distro_id
-        );
-        write_text(&docs_text_path, &docs_text).with_context(|| {
-            format!(
-                "writing install docs payload '{}'",
-                docs_text_path.display()
-            )
-        })?;
         match ux_docs_frontend {
             InstallDocsFrontend::BunBundle => {
                 install_bun_docs_tui_payload(repo_root, rootfs_source_dir, &docs_cmd_path)
@@ -460,7 +443,21 @@ fn install_mode_payload(
                         )
                     })?
             }
-            InstallDocsFrontend::PlainText => {
+            InstallDocsFrontend::PlainText { guide } => {
+                let guide_source = repo_root.join(guide);
+                let docs_text_path = rootfs_source_dir.join(INSTALL_DOCS_TEXT);
+                let guide_text = fs::read_to_string(&guide_source).with_context(|| {
+                    format!(
+                        "reading the variant install guide '{}' (ux_docs_guide)",
+                        guide_source.display()
+                    )
+                })?;
+                write_text(&docs_text_path, &guide_text).with_context(|| {
+                    format!(
+                        "writing install guide payload '{}'",
+                        docs_text_path.display()
+                    )
+                })?;
                 let docs_cmd = format!(
                     "#!/bin/sh\n\
 set -eu\n\
@@ -479,15 +476,11 @@ fi\n\
 \n\
 if [ -f \"$DOCS_FILE\" ]; then\n\
     if [ \"${{LEVITATE_DOCS_PLAIN:-0}}\" != \"1\" ] && command -v less >/dev/null 2>&1; then\n\
-        case \"${{TERM:-}}\" in\n\
-            \"\"|dumb|vt100)\n\
-                ;;\n\
-            *)\n\
-                exec less \"$DOCS_FILE\"\n\
-                ;;\n\
-        esac\n\
+        less \"$DOCS_FILE\" || true\n\
+        echo \"Install guide closed. Run 'levitate-install-docs' to reopen it.\"\n\
+    else\n\
+        cat \"$DOCS_FILE\"\n\
     fi\n\
-    cat \"$DOCS_FILE\"\n\
 else\n\
     echo \"install docs payload missing at $DOCS_FILE\"\n\
 fi\n\
@@ -532,10 +525,6 @@ choose_install_helper() {{\n\
     fi\n\
     if command -v levitate-install-docs >/dev/null 2>&1; then\n\
         printf '%s\\n' \"levitate-install-docs\"\n\
-        return 0\n\
-    fi\n\
-    if command -v acorn-docs >/dev/null 2>&1; then\n\
-        printf '%s\\n' \"acorn-docs\"\n\
         return 0\n\
     fi\n\
     return 1\n\

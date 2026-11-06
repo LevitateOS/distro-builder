@@ -64,10 +64,13 @@ fn build(ctx) {
     } else {
         args.push("--target"); args.push(ctx.rust_target);
     }
+    let flags = if ctx.rust_target == "x86_64-unknown-linux-musl" {
+        "-C linker=/usr/lib/rustlib/x86_64-unknown-linux-gnu/bin/rust-lld -C linker-flavor=ld.lld -C link-arg=--threads=1"
+    } else { "-C link-arg=-Wl,--threads=1" };
     exec_checked("cargo", args, #{
         cwd: ctx.source,
         env: #{CARGO_HOME: join_path(work, "cargo"), CARGO_BUILD_JOBS: jobs,
-            RUSTFLAGS: "-C link-arg=-Wl,--threads=1", LD_LIBRARY_PATH: "/usr/lib"},
+            RUSTFLAGS: flags, LD_LIBRARY_PATH: "/usr/lib"},
     });
     ctx
 }

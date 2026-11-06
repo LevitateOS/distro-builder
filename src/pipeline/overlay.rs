@@ -329,8 +329,9 @@ ttyS0::respawn:/sbin/getty -L -n -l /usr/local/bin/serial-autologin 115200 ttyS0
     fs::write(
         &issue_path,
         format!(
-            "\n{} Boot Live - \\l\n\nLogin as 'root' (no password)\n\n",
-            os_name
+            "\n{} Boot Live - \\l\n\n{}\n\n",
+            os_name,
+            crate::live_ux::LIVE_LOGIN_HINT
         ),
     )
     .with_context(|| format!("writing '{}'", issue_path.display()))?;
@@ -353,7 +354,9 @@ ttyS0::respawn:/sbin/getty -L -n -l /usr/local/bin/serial-autologin 115200 ttyS0
 
 fn overlay_issue_banner(os_name: &str, overlay_label: &str) -> String {
     format!(
-        "\n{} {} Live - \\l\n\nLogin as 'root' (no password)\n\n",
-        os_name, overlay_label
+        "\n{} {} Live - \\l\n\n{}\n\n",
+        os_name,
+        overlay_label,
+        crate::live_ux::LIVE_LOGIN_HINT
     )
 }

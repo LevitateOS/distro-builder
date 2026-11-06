@@ -96,20 +96,7 @@ pub fn create_openrc_live_overlay(
 
 # Optional boot-injection environment (e.g. SSH_AUTHORIZED_KEY, LEVITATE_INSTALL_SERIAL_UX).
 # Parse as literal KEY=VALUE lines to avoid executing payload content.
-if [ -r /run/boot-injection/payload.env ]; then
-    while IFS= read -r line; do
-        case "$line" in
-            ""|\#*) continue ;;
-            *=*)
-                key="${line%%=*}"
-                value="${line#*=}"
-                case "$key" in
-                    [A-Za-z_][A-Za-z0-9_]*) export "$key=$value" ;;
-                esac
-                ;;
-        esac
-    done < /run/boot-injection/payload.env
-fi
+@BOOT_INJECTION_IMPORT@
 
 echo "[autologin] Starting login shell..."
 echo "@SHELL_READY_MARKER@"
@@ -134,8 +121,9 @@ exec /bin/sh -l
 
     // /etc/issue
     let default_issue = format!(
-        "\n{} Live - \\l\n\nLogin as 'root' (no password)\n\n",
-        config.os_name
+        "\n{} Live - \\l\n\n{}\n\n",
+        config.os_name,
+        crate::live_ux::LIVE_LOGIN_HINT
     );
     fs::write(
         live_overlay.join("etc/issue"),
@@ -431,20 +419,7 @@ unset LC_ALL LC_CTYPE LC_NUMERIC LC_TIME LC_COLLATE LC_MESSAGES \
 
 # Optional boot-injection environment (e.g. SSH_AUTHORIZED_KEY, LEVITATE_INSTALL_SERIAL_UX).
 # Parse as literal KEY=VALUE lines to avoid executing payload content.
-if [ -r /run/boot-injection/payload.env ]; then
-    while IFS= read -r line; do
-        case "$line" in
-            ""|\#*) continue ;;
-            *=*)
-                key="${line%%=*}"
-                value="${line#*=}"
-                case "$key" in
-                    [A-Za-z_][A-Za-z0-9_]*) export "$key=$value" ;;
-                esac
-                ;;
-        esac
-    done < /run/boot-injection/payload.env
-fi
+@BOOT_INJECTION_IMPORT@
 
 echo "@SHELL_READY_MARKER@"
 
@@ -646,8 +621,9 @@ WantedBy=multi-user.target
     )?;
 
     let default_issue = format!(
-        "\n{} Live - \\l\n\nLogin as 'root' (no password)\n\n",
-        config.os_name
+        "\n{} Live - \\l\n\n{}\n\n",
+        config.os_name,
+        crate::live_ux::LIVE_LOGIN_HINT
     );
     fs::write(
         live_overlay.join("etc/issue"),
@@ -723,10 +699,16 @@ fn write_serial_test_profile(live_overlay: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Fill the serial readiness marker into a guest script.
+/// Fill the boot-protocol pieces into a guest script: the serial readiness
+/// marker and the boot-injection import.
 fn with_ready_marker(script: &str) -> String {
-    script.replace(
-        "@SHELL_READY_MARKER@",
-        recqemu::serial::protocol::SHELL_READY_MARKER,
-    )
+    script
+        .replace(
+            "@SHELL_READY_MARKER@",
+            recqemu::serial::protocol::SHELL_READY_MARKER,
+        )
+        .replace(
+            "@BOOT_INJECTION_IMPORT@",
+            &distro_spec::shared::live_boot::boot_injection_import_sh(),
+        )
 }

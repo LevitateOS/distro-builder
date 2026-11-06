@@ -1,7 +1,7 @@
 use anyhow::{bail, Result};
 use distro_contract::{
     ConformanceContract, InstallDocsFrontend as ContractInstallDocsFrontend,
-    InstallExperience as ContractInstallExperience, OpenRcInittab, OverlayContract, OverlayKind,
+    OpenRcInittab, OverlayContract, OverlayKind,
     PayloadProducerContract, RuntimeActionContract,
 };
 use std::path::Path;
@@ -355,10 +355,7 @@ fn rootfs_producer_from_contract(producer: &PayloadProducerContract) -> Result<R
     })
 }
 fn install_experience_from_contract(contract: &ConformanceContract) -> InstallExperience {
-    match contract.scenarios.live_tools.install_experience {
-        ContractInstallExperience::Ux => InstallExperience::Ux,
-        ContractInstallExperience::AutomatedSsh => InstallExperience::AutomatedSsh,
-    }
+    contract.scenarios.live_tools.install_experience
 }
 
 fn load_ring2_overlay_policy(

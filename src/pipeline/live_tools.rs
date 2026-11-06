@@ -6,21 +6,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum InstallExperience {
-    Ux,
-    AutomatedSsh,
-}
-
-impl InstallExperience {
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            Self::Ux => "ux",
-            Self::AutomatedSsh => "automated_ssh",
-        }
-    }
-}
+pub(crate) use distro_contract::InstallExperience;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -51,10 +37,12 @@ pub(crate) enum LiveToolsRuntimeAction {
     },
 }
 
-const CANONICAL_INSTALL_EXPERIENCE_MARKER: &str = "usr/lib/levitate/install-experience";
+use crate::live_ux::{
+    INSTALL_ENTRYPOINT as CANONICAL_INSTALL_ENTRYPOINT,
+    INSTALL_EXPERIENCE_MARKER as CANONICAL_INSTALL_EXPERIENCE_MARKER,
+    INSTALL_UX_PROFILE as CANONICAL_INSTALL_UX_PROFILE, PROBE_PREFIX, SMOKE_ENV, SPLIT_HELPER,
+};
 const CANONICAL_INSTALL_DOCS_TEXT: &str = "usr/local/share/levitate/install-docs.txt";
-const CANONICAL_INSTALL_ENTRYPOINT: &str = "usr/local/bin/levitate-install-entrypoint";
-const CANONICAL_INSTALL_UX_PROFILE: &str = "etc/profile.d/30-install-ux.sh";
 
 pub(crate) fn add_required_tools(
     repo_root: &Path,
@@ -544,12 +532,12 @@ exec /usr/local/bin/levitate-install-docs \"$@\"\n";
 set -eu\n\
 \n\
 choose_install_helper() {{\n\
-    if [ -x /usr/local/bin/levitate-install-docs-split ]; then\n\
-        printf '%s\\n' \"/usr/local/bin/levitate-install-docs-split\"\n\
+    if [ -x /usr/local/bin/{split} ]; then\n\
+        printf '%s\\n' \"/usr/local/bin/{split}\"\n\
         return 0\n\
     fi\n\
-    if command -v levitate-install-docs-split >/dev/null 2>&1; then\n\
-        printf '%s\\n' \"levitate-install-docs-split\"\n\
+    if command -v {split} >/dev/null 2>&1; then\n\
+        printf '%s\\n' \"{split}\"\n\
         return 0\n\
     fi\n\
     if command -v levitate-install-docs >/dev/null 2>&1; then\n\
@@ -566,10 +554,10 @@ choose_install_helper() {{\n\
 if [ \"${{1:-}}\" = \"--probe\" ]; then\n\
     helper=\"$(choose_install_helper || true)\"\n\
     if [ -n \"$helper\" ]; then\n\
-        printf 'install-entrypoint-helper=%s\\n' \"$helper\"\n\
+        printf '{probe}%s\\n' \"$helper\"\n\
         exit 0\n\
     fi\n\
-    printf 'install-entrypoint-helper=none\\n'\n\
+    printf '{probe}none\\n'\n\
     exit 3\n\
 fi\n\
 \n\
@@ -579,8 +567,8 @@ echo \"Starting local interactive install helper if available...\"\n\
 helper=\"$(choose_install_helper || true)\"\n\
 if [ -n \"$helper\" ]; then\n\
     case \"$helper\" in\n\
-        */levitate-install-docs-split|levitate-install-docs-split)\n\
-            if [ \"${{LEVITATE_INSTALL_ENTRYPOINT_SMOKE:-0}}\" = \"1\" ]; then\n\
+        */{split}|{split})\n\
+            if [ \"${{{smoke}:-0}}\" = \"1\" ]; then\n\
                 exec \"$helper\" --smoke\n\
             fi\n\
             ;;\n\
@@ -591,7 +579,10 @@ fi\n\
 echo \"No local docs TUI binary found; dropping to shell.\"\n\
 exec \"${{SHELL:-{shell}}}\" -l\n",
             shell = interactive_shell,
-            distro = distro_id
+            distro = distro_id,
+            split = SPLIT_HELPER,
+            probe = PROBE_PREFIX,
+            smoke = SMOKE_ENV
         ),
         InstallExperience::AutomatedSsh => format!(
             "#!/bin/sh\n\
@@ -621,20 +612,7 @@ esac\n\
 [ -n \"${TMUX:-}\" ] && return 0\n\
 [ \"${LEVITATE_INSTALL_UX_LAUNCHED:-0}\" = \"1\" ] && return 0\n\
 \n\
-if [ -r /run/boot-injection/payload.env ]; then\n\
-    while IFS= read -r line; do\n\
-        case \"$line\" in\n\
-            \"\"|\\#*) continue ;;\n\
-            *=*)\n\
-                key=\"${line%%=*}\"\n\
-                value=\"${line#*=}\"\n\
-                case \"$key\" in\n\
-                    [A-Za-z_][A-Za-z0-9_]*) export \"$key=$value\" ;;\n\
-                esac\n\
-                ;;\n\
-        esac\n\
-    done < /run/boot-injection/payload.env\n\
-fi\n\
+@BOOT_INJECTION_IMPORT@\n\
 \n\
 TTY=\"$(tty 2>/dev/null || true)\"\n\
 if [ -z \"${LEVITATE_INSTALL_LEFT_CMD:-}\" ]; then\n\
@@ -661,7 +639,11 @@ fi\n\
 echo \"[install-ux] Launching install UX on $TTY...\"\n\
 export LEVITATE_INSTALL_UX_LAUNCHED=1\n\
 exec /usr/local/bin/levitate-install-entrypoint\n";
-        write_text(&ux_profile_path, ux_profile).with_context(|| {
+        let ux_profile = ux_profile.replace(
+            "@BOOT_INJECTION_IMPORT@",
+            &distro_spec::shared::live_boot::boot_injection_import_sh(),
+        );
+        write_text(&ux_profile_path, &ux_profile).with_context(|| {
             format!(
                 "installing install UX profile hook '{}'",
                 ux_profile_path.display()

@@ -353,14 +353,6 @@ pub fn prepare_live_boot_product(
         &spec.overlay,
     )?;
 
-    if let BootOverlayPolicy::OpenRc { inittab, .. } = spec.overlay {
-        ensure_openrc_shell(&live_overlay_dir, &spec.os_name, inittab).with_context(|| {
-            format!(
-                "ensuring OpenRC live overlay serial shell for '{}'",
-                spec.distro_id
-            )
-        })?;
-    }
     ensure_required_service_wiring(&live_overlay_dir, &spec.overlay, &spec.required_services)
         .with_context(|| {
             format!(

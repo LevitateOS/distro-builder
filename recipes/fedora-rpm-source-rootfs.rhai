@@ -1,30 +1,29 @@
-// Materialize a rootfs from the explicit immutable iso input.
+// Materialize the rootfs from the locked Fedora RPM set, imported as `rpms`.
+// The RPMs are unpacked without a package manager; their install scripts do
+// not run, so the steps they would take are done below.
 const RECIPE_API = 2;
-let deps = ["dvd-source-deps"];
-import "sources/fedora.rhai" as source;
-let assets = source::facts();
+import "sources/levitate-rpm-lock.rhai" as lock;
 let ctx = #{
-    name: "fedora-dvd-source-rootfs",
-    description: "Fedora Server 43 DVD rootfs source producer",
-    iso_contents_path: join_path(RUNTIME.paths.build, "iso-contents"),
-    iso_name: assets.iso_name,
-    iso_path: join_path(RUNTIME.paths.inputs, "iso"),
+    name: "fedora-rpm-source-rootfs",
+    description: "Fedora " + lock::release() + " rootfs source from the locked RPM set",
+    rpms_path: join_path(RUNTIME.paths.inputs, "rpms"),
     rootfs_path: join_path(RUNTIME.paths.output, "rootfs"),
-    rootfs_recipe_version: "fedora-dvd-source-v2",
-    sha256: assets.sha256,
+    packages: lock::packages(),
 };
 
-fn _verify_iso(ctx) {
-    if !is_file(ctx.iso_path) { throw "Import the named iso output from explicit preseed acquisition"; }
-    verify_sha256(ctx.iso_path, ctx.sha256);
+// The rootfs records the exact builds it was made from; a new lock rebuilds it.
+fn _rootfs_marker(ctx) {
+    let marker = "fedora-rpm-set-v1";
+    for rpm in ctx.packages { marker += "\n" + rpm[1]; }
+    marker
 }
 
-fn _find_rpm_path(iso_contents, pkg_name) {
-    let cmd = "find '" + iso_contents + "' " +
-              "-type f -path '*/Packages/*/" + pkg_name + "-[0-9]*.rpm' 2>/dev/null | " +
-              "grep -E '(x86_64|noarch)\\.rpm$' | " +
-              "head -1";
-    trim(shell_output(cmd))
+fn _verify_rpms(ctx) {
+    for rpm in ctx.packages {
+        let file = join_path(ctx.rpms_path, basename(rpm[2]));
+        if !is_file(file) { throw "the rpms input lacks " + basename(file) + "; run the rootfs source preseed"; }
+        verify_sha256(file, rpm[3]);
+    }
 }
 
 fn _extract_rpm_into_rootfs(rootfs, rpm_path) {
@@ -33,21 +32,12 @@ fn _extract_rpm_into_rootfs(rootfs, rpm_path) {
 }
 
 fn is_acquired(ctx) {
-    let iso = ctx.iso_path;
-    _verify_iso(ctx);
-
-    ctx.iso_path = iso;
-    ctx.iso_contents_path = join_path(ctx.runtime.paths.build, "iso-contents");
+    _verify_rpms(ctx);
     ready(ctx)
 }
 
 fn acquire(ctx) {
-    mkdir(ctx.runtime.paths.build);
-    let iso = ctx.iso_path;
-    _verify_iso(ctx);
-
-    ctx.iso_path = iso;
-    ctx.iso_contents_path = join_path(ctx.runtime.paths.build, "iso-contents");
+    _verify_rpms(ctx);
     ctx
 }
 
@@ -58,8 +48,8 @@ fn is_built(ctx) {
     }
     let marker_path = join_path(rootfs, ".source-rootfs.recipe-version");
     let marker = trim(read_file_or_empty(marker_path));
-    if marker != ctx.rootfs_recipe_version {
-        return needs_work(ctx, "rootfs recipe version mismatch (" + marker + " != " + ctx.rootfs_recipe_version + ")");
+    if marker != _rootfs_marker(ctx) {
+        return needs_work(ctx, "rootfs was built from a different RPM lock");
     }
     let required_paths = [
         "usr/lib/systemd/systemd",
@@ -115,144 +105,30 @@ fn is_built(ctx) {
         }
     }
 
-    ctx.iso_path = join_path(ctx.runtime.paths.inputs, "iso");
-    ctx.iso_contents_path = join_path(ctx.runtime.paths.build, "iso-contents");
-    ctx.rootfs_path = rootfs;
     ready(ctx)
 }
 
 fn build(ctx) {
-    let iso = ctx.iso_path;
-    let iso_contents = join_path(ctx.runtime.paths.build, "iso-contents");
     let rootfs = ctx.rootfs_path;
+    _verify_rpms(ctx);
 
-    _verify_iso(ctx);
-
-    if !is_dir(join_path(iso_contents, "Packages")) && !is_dir(join_path(iso_contents, "os/Packages")) {
-        log("Extracting Fedora ISO contents...");
-        mkdir(iso_contents);
-        shell("7z x -o" + iso_contents + " " + iso + " -y");
-    }
-
-    let packages_dir_ok = is_dir(join_path(iso_contents, "Packages")) || is_dir(join_path(iso_contents, "os/Packages"));
-    let repodata_dir_ok = is_dir(join_path(iso_contents, "repodata")) || is_dir(join_path(iso_contents, "os/repodata"));
-    if !packages_dir_ok || !repodata_dir_ok {
-        throw "Fedora ISO package repositories missing after extraction (expected Packages/ and repodata/, or os/Packages and os/repodata under " + iso_contents + ")";
-    }
-
-    // Build the source rootfs from ISO RPMs via recipe-native extraction.
-    // No dnf/microdnf/yum in stage builds.
     if is_dir(rootfs) { shell("chmod -R u+rwX " + rootfs); }
     shell("rm -rf " + rootfs);
     mkdir(rootfs);
-    let packages = [
-        // Root filesystem skeleton and core runtime.
-        "filesystem",
-        "setup",
-        "bash",
-        "bash-completion",
-        "coreutils",
-        "coreutils-common",
-        "findutils",
-        "grep",
-        "gawk",
-        "ncurses-libs",
-        "sed",
-        "diffutils",
-        // System boot/service runtime for live boot.
-        "systemd",
-        "systemd-libs",
-        "systemd-udev",
-        "iproute",
-        "kmod",
-        "util-linux",
-        "util-linux-core",
-        "iputils",
-        "curl",
-        "libcurl",
-        "libidn2",
-        "libunistring",
-        "libnghttp2",
-        "libssh",
-        "libpsl",
-        "openldap",
-        "libbrotli",
-        "libevent",
-        "cyrus-sasl-lib",
-        "pciutils",
-        "pciutils-libs",
-        "usbutils",
-        "libusb1",
-        "less",
-        "libfdisk",
-        "readline",
-        "kmod-libs",
-        "libmount",
-        "libblkid",
-        "libsmartcols",
-        "libuuid",
-        "shadow-utils",
-        "sudo",
-        // SSH + service wiring expectations.
-        "openssh-server",
-        "openssh",
-        "openssh-clients",
-        // RPM dependency solving is not active in this extraction path; include
-        // OpenSSH Kerberos runtime libs explicitly for sshd-session.
-        "krb5-libs",
-        "keyutils-libs",
-        "libverto",
-        "libcom_err",
-        "dbus",
-        "dbus-common",
-        "dbus-daemon",
-        "dbus-broker",
-        "expat",
-        // Locale + console essentials.
-        "glibc",
-        "glibc-common",
-        "glibc-minimal-langpack",
-        "kbd",
-        "kbd-misc",
-        // Common runtime libs used by copied binaries.
-        "libgcc",
-        "libstdc++",
-        "pam",
-        "pam-libs",
-        "libacl",
-        "libattr",
-        "libcap-ng",
-        "libeconf",
-        "libseccomp",
-        "pcre2",
-        "libxcrypt",
-        "libcap",
-        "libbpf",
-        "elfutils-libelf",
-        "libmnl",
-        "libzstd",
-        "audit-libs",
-        "audit",
-        "libselinux",
-        "openssl-libs",
-        "zlib-ng-compat",
-        "xz-libs",
-        "procps-ng",
-    ];
-    log("Extracting DVD source package set into rootfs...");
-    for pkg in packages {
-        let rpm_path = _find_rpm_path(iso_contents, pkg);
-        if rpm_path == "" {
-            throw "required source package missing from Fedora ISO repos: " + pkg;
-        }
-        if !is_file(rpm_path) {
-            throw "resolved RPM path is not a file: " + rpm_path;
-        }
-        log("  Extracting " + basename(rpm_path));
-        _extract_rpm_into_rootfs(rootfs, rpm_path);
+    log("Extracting the locked Fedora " + lock::release() + " RPM set into the rootfs...");
+    for rpm in ctx.packages {
+        let rpm = join_path(ctx.rpms_path, basename(rpm[2]));
+        log("  Extracting " + rpm[1]);
+        _extract_rpm_into_rootfs(rootfs, rpm);
         // RPM payloads can carry restrictive directory modes; keep tree writable
         // so subsequent package extraction can add files into existing dirs.
-        if is_dir(rootfs) { shell("chmod -R u+rwX " + rootfs); }
+        shell("chmod -R u+rwX " + rootfs);
+    }
+
+    // Fedora merged /usr/sbin into /usr/bin: `filesystem` lists /usr/sbin as a
+    // ghost that its install script makes a link to bin.
+    if !exists(join_path(rootfs, "usr/sbin")) {
+        ln_force("bin", join_path(rootfs, "usr/sbin"));
     }
 
     // Normalize expected producer source directories even when package layout is sparse.
@@ -399,11 +275,7 @@ fn build(ctx) {
     shell("rm -rf '" + join_path(rootfs, "var/cache") + "' '" + join_path(rootfs, "var/log") + "'");
     shell("mkdir -p '" + join_path(rootfs, "var/cache") + "' '" + join_path(rootfs, "var/log") + "' '" + join_path(rootfs, "var/log/audit") + "'");
     chmod(join_path(rootfs, "var/log/audit"), 0o700);
-    write_file(join_path(rootfs, ".source-rootfs.recipe-version"), ctx.rootfs_recipe_version + "\n");
-
-    ctx.iso_path = iso;
-    ctx.iso_contents_path = iso_contents;
-    ctx.rootfs_path = rootfs;
+    write_file(join_path(rootfs, ".source-rootfs.recipe-version"), _rootfs_marker(ctx) + "\n");
     ctx
 }
 

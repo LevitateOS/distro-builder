@@ -105,19 +105,6 @@ impl LiveBootProductSpec {
         &self.required_services
     }
 
-    pub fn uses_rpm_dvd_rootfs_source(&self) -> bool {
-        self.rootfs_source_policy
-            .as_ref()
-            .is_some_and(|source| source.kind == distro_contract::RootfsSourceKind::RecipeRpmDvd)
-    }
-
-    pub fn rpm_dvd_preseed_recipe_script(&self) -> Option<&Path> {
-        self.rootfs_source_policy
-            .as_ref()
-            .filter(|source| source.kind == distro_contract::RootfsSourceKind::RecipeRpmDvd)
-            .and_then(|source| source.preseed_recipe_script.as_deref())
-    }
-
     /// Explicit source acquisition declaration, independent of recipe filename.
     pub fn rootfs_source_preseed(
         &self,

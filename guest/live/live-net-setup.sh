@@ -12,8 +12,12 @@ if [ -z "$IP_BIN" ]; then
     fi
 fi
 
-# Retry because virtio NIC names can race (e.g. eth0 -> ens5), and keep
-# applying until IPv4 + default route are stable.
+# Let NetworkManager acquire the network offered by the boot environment.
+# A libvirt passt guest can use the host's subnet, so QEMU's historical
+# 10.0.2.15/24 and 10.0.2.2 defaults are not portable.
+NMCLI_BIN="$(command -v nmcli)"
+
+# Retry because virtio NIC names and NetworkManager startup can race.
 stable_ok=0
 i=0
 while [ "$i" -lt 45 ]; do
@@ -26,13 +30,17 @@ while [ "$i" -lt 45 ]; do
                 ;;
         esac
         if "$IP_BIN" link set "$name" up 2>/dev/null; then
-            "$IP_BIN" addr replace 10.0.2.15/24 dev "$name" 2>/dev/null || true
-            "$IP_BIN" route replace default via 10.0.2.2 dev "$name" 2>/dev/null || true
+            if ! "$IP_BIN" -4 route show default dev "$name" | grep -q '^default '; then
+                "$NMCLI_BIN" --wait 5 device connect "$name" >/dev/null 2>&1 || true
+            fi
         fi
     done
 
-    addr_if="$("$IP_BIN" -o -4 addr show 2>/dev/null | awk '$4 ~ /^10\.0\.2\.15\// {print $2; exit}')"
-    default_if="$("$IP_BIN" -o -4 route show default 2>/dev/null | awk '/^default via 10\.0\.2\.2/ {for (i=1; i<=NF; i++) if ($i=="dev") {print $(i+1); exit}}')"
+    default_if="$("$IP_BIN" -o -4 route show default 2>/dev/null | awk '/^default / {for (i=1; i<=NF; i++) if ($i=="dev") {print $(i+1); exit}}')"
+    addr_if=""
+    if [ -n "$default_if" ]; then
+        addr_if="$("$IP_BIN" -o -4 addr show dev "$default_if" scope global 2>/dev/null | awk 'NR == 1 {print $2}')"
+    fi
     if [ -n "$addr_if" ] && [ "$addr_if" = "$default_if" ]; then
         stable_ok=$((stable_ok + 1))
         if [ "$stable_ok" -ge 3 ]; then

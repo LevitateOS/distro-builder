@@ -144,26 +144,6 @@ fn _rootfs_valid(rootfs, expected_version) {
     trim(read_file(marker)) == expected_version
 }
 
-fn _normalize_rootfs_permissions(rootfs, context) {
-    if !is_dir(rootfs) {
-        return;
-    }
-
-    // The source rootfs is copied via rsync; source files must be owner-readable.
-    let chmod_cmd = "chmod -R u+rX '" + rootfs + "'";
-    if shell_status(chmod_cmd) != 0 {
-        throw "failed to normalize rootfs permissions during " + context +
-              ": chmod -R u+rX returned non-zero for " + rootfs;
-    }
-
-    let unreadable_cmd = "find '" + rootfs + "' -xdev -type f ! -perm -u+r -print -quit";
-    let unreadable = trim(shell_output(unreadable_cmd));
-    if unreadable != "" {
-        throw "rootfs remains owner-unreadable after permission normalization during " +
-              context + ": " + unreadable;
-    }
-}
-
 fn _ensure_openrc_live_source_completeness(rootfs) {
     // Acorn uses password-authenticated doas for wheel administrators.
     let doas_conf = join_path(rootfs, "etc/doas.conf");
@@ -231,10 +211,6 @@ fn build(ctx) {
     }
 
     let rootfs = ctx.rootfs_path;
-    if is_dir(rootfs) {
-        // Normalize readability on cached rootfs before validity checks.
-        _normalize_rootfs_permissions(rootfs, "cached rootfs preflight");
-    }
     if _rootfs_valid(rootfs, ctx.rootfs_recipe_version) {
         log("Alpine live source rootfs already current; skipping rebuild");
         ctx.rootfs_path = rootfs;
@@ -266,7 +242,8 @@ fn build(ctx) {
     // the package metadata, independently of this subprocess identity.
     exec_checked(ctx.apk_static_path, args, #{uid: 1000, gid: 1000});
     target_capture_apks(rootfs, [join_path(iso_contents, "apks"), ctx.extra_apks_path, apk_cache]);
-    _normalize_rootfs_permissions(rootfs, "post-apk install");
+    // Make staging readable before applying policy; intended modes stay in metadata.
+    target_finalize(rootfs);
     _ensure_openrc_live_source_completeness(rootfs);
 
     if !is_file(join_path(rootfs, "bin/busybox")) {

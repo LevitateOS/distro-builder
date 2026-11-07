@@ -13,7 +13,6 @@ macro_rules! scripts {
 }
 
 scripts! {
-    DOCS_TEXT = "install-ux/docs-text.sh";
     INSTALL_UX = "install-ux/install-ux.sh";
 }
 

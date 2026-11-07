@@ -12,8 +12,7 @@
 //! installed system has no use for the install screen. Paths are relative to a layer's root.
 
 use anyhow::{bail, Context, Result};
-use distro_contract::{InstallDocs, InstallUxContract, RuntimeActionContract};
-use std::fs;
+use distro_contract::{InstallUxContract, RuntimeActionContract};
 use std::path::Path;
 
 use crate::artifact::filesystem::write_file;
@@ -24,10 +23,6 @@ pub const LAUNCHER: &str = "usr/local/bin/install-ux";
 /// The split pane (`install-split-pane`'s `install-split`); the variant's
 /// `tool_payload_workspace_binary` action puts it here.
 pub const SPLIT: &str = "usr/bin/install-split";
-/// The docs command when the docs are a text guide (a TUI docs app is its own command,
-/// under [`crate::tui_binary::BIN_DIR`]).
-pub const DOCS: &str = "usr/local/bin/install-docs";
-const DOCS_TEXT: &str = "usr/share/install-ux/install-guide.txt";
 /// The boot-injection key that turns the install screen on for the serial console.
 pub const SERIAL_KEY: &str = "INSTALL_UX_SERIAL";
 pub const PROBE_PREFIX: &str = "install-entrypoint-helper=";
@@ -40,8 +35,8 @@ pub const SPLIT_SMOKE_OK: &str = "split-smoke:ok";
 /// serial console being ready.
 pub const LIVE_LOGIN_HINT: &str = "Login as 'root' (no password)";
 
-/// Writes the install screen into `overlay`: the TUI apps (the docs app among them when
-/// the docs are one), the docs command and the launcher. The split pane must already be
+/// Writes the install screen into `overlay`: the TUI apps (the docs app among them)
+/// and the launcher. The split pane must already be
 /// there; `rootfs` is the root the overlay goes on.
 pub(crate) fn write_payload(
     repo_root: &Path,
@@ -59,10 +54,9 @@ pub(crate) fn write_payload(
     }
 
     let mut app_names: Vec<&str> = install_ux.apps.iter().map(String::as_str).collect();
-    if let InstallDocs::TuiApp { app, .. } = &install_ux.docs {
-        if !app_names.contains(&app.as_str()) {
-            app_names.insert(0, app);
-        }
+    let docs = &install_ux.docs;
+    if !app_names.contains(&docs.app.as_str()) {
+        app_names.insert(0, &docs.app);
     }
     let apps = app_names
         .iter()
@@ -83,42 +77,23 @@ pub(crate) fn write_payload(
     crate::tui_binary::install(repo_root, rootfs, overlay, &apps)
         .context("building the install screen's TUI apps")?;
 
-    let docs_argv = match &install_ux.docs {
-        InstallDocs::TuiApp { app, page } => {
-            let docs_app = apps
-                .iter()
-                .find(|a| &a.name == app)
-                .expect("the docs app is among the apps");
-            let mut argv = vec![
-                format!("/{}/{app}", crate::tui_binary::BIN_DIR),
-                "--title".to_string(),
-                format!("{os_name} install guide"),
-            ];
-            if let Some(page) = page {
-                // The flag that opens a page is the one the app's manifest declares.
-                let pages = docs_app.inspect.pages.as_ref().with_context(|| {
-                    format!("install_ux opens page '{page}', but {app} declares no inspect.pages")
-                })?;
-                argv.extend([pages.arg.clone(), page.clone()]);
-            }
-            argv
-        }
-        InstallDocs::Text(guide) => {
-            let text = fs::read_to_string(guide).with_context(|| {
-                format!(
-                    "reading the variant's install guide '{}' (install_ux.docs.text)",
-                    guide.display()
-                )
-            })?;
-            write_file(&overlay.join(DOCS_TEXT), text, 0o644)?;
-            let docs = crate::guest::render(
-                crate::guest::DOCS_TEXT,
-                &[("GUIDE", &format!("/{DOCS_TEXT}"))],
-            )?;
-            write_file(&overlay.join(DOCS), docs, 0o755)?;
-            vec![format!("/{DOCS}")]
-        }
-    };
+    let docs_app = apps
+        .iter()
+        .find(|a| a.name == docs.app)
+        .expect("the docs app is among the apps");
+    let mut docs_argv = vec![
+        format!("/{}/{}", crate::tui_binary::BIN_DIR, docs.app),
+        "--title".to_string(),
+        format!("{os_name} install guide"),
+    ];
+    docs_argv.extend(docs.args.iter().cloned());
+    if let Some(page) = &docs.page {
+        // The flag that opens a page is the one the app's manifest declares.
+        let pages = docs_app.inspect.pages.as_ref().with_context(|| {
+            format!("install_ux opens page '{page}', but {} declares no inspect.pages", docs.app)
+        })?;
+        docs_argv.extend([pages.arg.clone(), page.clone()]);
+    }
 
     let launcher = crate::guest::render(
         crate::guest::INSTALL_UX,

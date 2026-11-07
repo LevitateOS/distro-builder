@@ -84,7 +84,10 @@ pub(crate) fn write_payload(
                 )
             })?;
             write_file(&overlay.join(DOCS_TEXT), text, 0o644)?;
-            let docs = text_docs_script(&format!("/{DOCS_TEXT}"))?;
+            let docs = crate::guest::render(
+                crate::guest::DOCS_TEXT,
+                &[("GUIDE", &format!("/{DOCS_TEXT}"))],
+            )?;
             write_file(&overlay.join(DOCS), docs, 0o755)?;
             vec![format!("/{DOCS}")]
         }
@@ -103,12 +106,6 @@ pub(crate) fn write_payload(
         ],
     )?;
     write_file(&overlay.join(LAUNCHER), launcher, 0o755)
-}
-
-/// The text frontend's `install-docs` script, showing the guide at `guide`. The story
-/// gallery (`cargo xtask stories`) runs it on the host to show the text docs pane.
-pub fn text_docs_script(guide: &str) -> Result<String> {
-    crate::guest::render(crate::guest::DOCS_TEXT, &[("GUIDE", guide)])
 }
 
 /// Bundles the TUI app with bun into [`DOCS_BUNDLE`] and installs bun and [`DOCS`].

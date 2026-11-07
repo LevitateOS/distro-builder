@@ -21,7 +21,7 @@ let ctx = #{
     release_branch: assets.release_branch,
     rootfs_path: join_path(RUNTIME.paths.output, "rootfs"),
     // A new Alpine pin rebuilds the rootfs.
-    rootfs_recipe_version: "alpine-source-v10-busybox-links-" + assets.iso_version,
+    rootfs_recipe_version: "alpine-source-v12-runlevels-" + assets.iso_version,
 };
 
 fn _verify_inputs(ctx) {
@@ -52,9 +52,13 @@ fn _profile_packages(profile) {
         // pinned extra_apks files, which `apk add` takes alongside these names.
         // Deployment uses GNU cp's explicit xattr preservation; Busybox cp
         // cannot preserve package file capabilities.
+        // tzdata gives recsetup its time zones; kbd-bkeymaps the console
+        // keymaps busybox's loadkmap (and setup-keymap) load; wpa_supplicant and
+        // iw join WiFi, with dhcpcd addressing the interface.
         return "alpine-base busybox coreutils openrc doas " +
                "openssh openssh-server util-linux e2fsprogs dosfstools " +
-               "iproute2 iputils dhcpcd curl pciutils htop";
+               "iproute2 iputils dhcpcd curl pciutils htop " +
+               "tzdata kbd-bkeymaps wpa_supplicant wpa_supplicant-openrc iw";
     }
 
     throw "Unsupported Alpine live source profile '" + profile + "'. Use profile 'acorn'.";

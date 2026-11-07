@@ -103,14 +103,24 @@ fn openrc(root) {
     put(root, "etc/issue", "Linux \\l\n", 0o644);
     put(root, "etc/profile.d/locale.sh",
         "[ -r /etc/locale.conf ] && . /etc/locale.conf && export LANG\n", 0o644);
-    for service in ["networking", "dhcpcd"] {
-        if !is_file(join_path(root, "etc/init.d/" + service)) {
-            throw "installed system lacks OpenRC service " + service;
-        }
-        let level = if service == "networking" { "boot" } else { "default" };
-        let dir = join_path(root, "etc/runlevels/" + level);
+    // Alpine's runlevels (what setup-alpine enables): sysinit mounts /dev, /dev/pts and
+    // /dev/shm (devfs) and loads the drivers mdev finds; boot sets up the system; shutdown
+    // stops it cleanly. Then the network.
+    let levels = [
+        ["sysinit", ["devfs", "dmesg", "mdev", "hwdrivers"]],
+        ["boot", ["modules", "sysctl", "hostname", "bootmisc", "syslog", "hwclock", "seedrng", "networking"]],
+        ["shutdown", ["mount-ro", "killprocs", "savecache"]],
+        ["default", ["dhcpcd"]],
+    ];
+    for entry in levels {
+        let dir = join_path(root, "etc/runlevels/" + entry[0]);
         mkdir(dir);
-        ln_force("/etc/init.d/" + service, join_path(dir, service));
+        for service in entry[1] {
+            if !is_file(join_path(root, "etc/init.d/" + service)) {
+                throw "installed system lacks OpenRC service " + service;
+            }
+            ln_force("/etc/init.d/" + service, join_path(dir, service));
+        }
     }
     lock_root(root);
     setup_program(root, "openrc", "musl");

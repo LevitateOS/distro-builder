@@ -54,10 +54,18 @@ case "${1:-}" in
     keymap)
         if [ "$init" = systemd ]; then assignment /etc/vconsole.conf KEYMAP "$2"
         else
-            service=keymaps
-            if [ ! -f /etc/init.d/keymaps ] && [ -f /etc/init.d/loadkeys ]; then service=loadkeys; fi
-            assignment "/etc/conf.d/$service" keymap "\"$2\""
-            if [ -f "/etc/init.d/$service" ]; then rc-update add "$service" boot; fi
+            # busybox's binary keymaps (kbd-bkeymaps), loaded by busybox-openrc's loadkmap;
+            # otherwise kbd's, loaded by its keymaps (or loadkeys) service.
+            bmap=$(find /usr/share/bkeymaps -name "$2.bmap.gz" 2>/dev/null | head -n 1)
+            if [ -n "$bmap" ] && [ -f /etc/init.d/loadkmap ]; then
+                assignment /etc/conf.d/loadkmap KEYMAP "\"$bmap\""
+                rc-update add loadkmap boot
+            else
+                service=keymaps
+                if [ ! -f /etc/init.d/keymaps ] && [ -f /etc/init.d/loadkeys ]; then service=loadkeys; fi
+                assignment "/etc/conf.d/$service" keymap "\"$2\""
+                if [ -f "/etc/init.d/$service" ]; then rc-update add "$service" boot; fi
+            fi
         fi
         ;;
     hostname)

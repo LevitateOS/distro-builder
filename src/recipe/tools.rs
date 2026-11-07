@@ -12,7 +12,7 @@ const TOOLS: &[(&str, &str, &[&str])] = &[
     (
         "recstrap",
         "tools/recstrap",
-        &["recstrap", "recchroot", "recfstab"],
+        &["recstrap", "recchroot", "recfstab", "recsetup"],
     ),
     ("recab", "tools/recab", &["recab"]),
     (

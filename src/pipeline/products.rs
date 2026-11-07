@@ -483,9 +483,11 @@ pub fn prepare_live_tools_product(
     .with_context(|| format!("adding required live tools for '{}'", spec.distro_id))?;
     crate::install_ux::write_payload(
         &spec.repo_root,
+        &rootfs_source_dir,
         &live_overlay_dir,
         &spec.os_name,
         &spec.install_ux,
+        &spec.runtime_actions,
     )
     .with_context(|| format!("writing the install screen for '{}'", spec.distro_id))?;
 

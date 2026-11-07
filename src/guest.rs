@@ -19,7 +19,6 @@ scripts! {
     LIVE_SHUTDOWN_CLEANUP = "live/live-shutdown-cleanup.sh";
     SERIAL_AUTOLOGIN_ROOTFS = "live/serial-autologin.rootfs.sh";
     SHELL_UX_PROFILE = "live/shell-ux.sh";
-    DOCS_BUN = "install-ux/docs-bun.sh";
     DOCS_TEXT = "install-ux/docs-text.sh";
     INSTALL_UX = "install-ux/install-ux.sh";
 }

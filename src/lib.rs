@@ -56,6 +56,7 @@ pub mod component;
 pub mod contracts;
 pub mod executor;
 pub(crate) mod pipeline;
+pub(crate) mod tui_binary;
 pub mod preflight;
 pub mod process;
 pub mod recipe;

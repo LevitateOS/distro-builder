@@ -12,12 +12,11 @@
 //! installed system has no use for the install screen. Paths are relative to a layer's root.
 
 use anyhow::{bail, Context, Result};
-use distro_contract::{InstallDocs, InstallUxContract};
+use distro_contract::{InstallDocs, InstallUxContract, RuntimeActionContract};
 use std::fs;
 use std::path::Path;
-use std::process::Command;
 
-use crate::artifact::filesystem::{copy_executable, write_file};
+use crate::artifact::filesystem::write_file;
 
 /// What getty starts on an install-screen console; `--probe` prints
 /// `PROBE_PREFIX<split pane path>`.
@@ -25,11 +24,10 @@ pub const LAUNCHER: &str = "usr/local/bin/install-ux";
 /// The split pane (`install-split-pane`'s `install-split`); the variant's
 /// `tool_payload_workspace_binary` action puts it here.
 pub const SPLIT: &str = "usr/bin/install-split";
-/// The docs command, in the right pane and on the shell's PATH.
+/// The docs command when the docs are a text guide (a TUI docs app is its own command,
+/// under [`crate::tui_binary::BIN_DIR`]).
 pub const DOCS: &str = "usr/local/bin/install-docs";
-const DOCS_BUNDLE: &str = "usr/share/install-ux/install-docs.js";
 const DOCS_TEXT: &str = "usr/share/install-ux/install-guide.txt";
-const BUN: &str = "usr/local/bin/bun";
 /// The boot-injection key that turns the install screen on for the serial console.
 pub const SERIAL_KEY: &str = "INSTALL_UX_SERIAL";
 pub const PROBE_PREFIX: &str = "install-entrypoint-helper=";
@@ -42,13 +40,16 @@ pub const SPLIT_SMOKE_OK: &str = "split-smoke:ok";
 /// serial console being ready.
 pub const LIVE_LOGIN_HINT: &str = "Login as 'root' (no password)";
 
-/// Writes the install screen into `overlay`: the docs, their command and the
-/// launcher. The split pane must already be there.
+/// Writes the install screen into `overlay`: the TUI apps (the docs app among them when
+/// the docs are one), the docs command and the launcher. The split pane must already be
+/// there; `rootfs` is the root the overlay goes on.
 pub(crate) fn write_payload(
     repo_root: &Path,
+    rootfs: &Path,
     overlay: &Path,
     os_name: &str,
     install_ux: &InstallUxContract,
+    runtime_actions: &[RuntimeActionContract],
 ) -> Result<()> {
     if !overlay.join(SPLIT).is_file() {
         bail!(
@@ -57,13 +58,39 @@ pub(crate) fn write_payload(
         );
     }
 
+    let mut app_names: Vec<&str> = install_ux.apps.iter().map(String::as_str).collect();
+    if let InstallDocs::TuiApp { app, .. } = &install_ux.docs {
+        if !app_names.contains(&app.as_str()) {
+            app_names.insert(0, app);
+        }
+    }
+    let apps = app_names
+        .iter()
+        .map(|name| Ok(distro_contract::tui_apps::find(repo_root, name)?))
+        .collect::<Result<Vec<_>>>()?;
+    for app in &apps {
+        for tool in &app.tools {
+            if !runtime_actions.iter().any(|action| ships(action, tool)) {
+                bail!(
+                    "the install screen's app '{}' runs {tool}, but the variant's live tools \
+                     don't ship it: add a tool_payload_workspace_binary or \
+                     rootfs_workspace_binary action for the '{tool}' package",
+                    app.name
+                );
+            }
+        }
+    }
+    crate::tui_binary::install(repo_root, rootfs, overlay, &apps)
+        .context("building the install screen's TUI apps")?;
+
     let docs_argv = match &install_ux.docs {
         InstallDocs::TuiApp { app, page } => {
-            let docs_app = distro_contract::tui_apps::find(repo_root, app)?;
-            write_bun_docs(repo_root, overlay, &docs_app)
-                .with_context(|| format!("bundling the docs app '{app}'"))?;
+            let docs_app = apps
+                .iter()
+                .find(|a| &a.name == app)
+                .expect("the docs app is among the apps");
             let mut argv = vec![
-                format!("/{DOCS}"),
+                format!("/{}/{app}", crate::tui_binary::BIN_DIR),
                 "--title".to_string(),
                 format!("{os_name} install guide"),
             ];
@@ -108,64 +135,12 @@ pub(crate) fn write_payload(
     write_file(&overlay.join(LAUNCHER), launcher, 0o755)
 }
 
-/// Bundles the TUI app with bun into [`DOCS_BUNDLE`] and installs bun and [`DOCS`].
-fn write_bun_docs(
-    repo_root: &Path,
-    overlay: &Path,
-    docs_app: &distro_contract::tui_apps::TuiApp,
-) -> Result<()> {
-    let bun = crate::process::which("bun").context(
-        "bun is required to bundle the install docs: install it and put it on PATH (https://bun.sh)",
-    )?;
-
-    // The app is a member of the root JavaScript workspace; install it the one way xtask does.
-    run(
-        Command::new(&bun)
-            .args(["install", "--frozen-lockfile"])
-            .current_dir(repo_root),
-        "bun install --frozen-lockfile at the repo root",
-    )?;
-
-    let bundle = overlay.join(DOCS_BUNDLE);
-    if let Some(parent) = bundle.parent() {
-        fs::create_dir_all(parent).with_context(|| format!("creating '{}'", parent.display()))?;
+/// Whether `action` puts a binary of the Cargo `package` on the live ISO.
+fn ships(action: &RuntimeActionContract, package: &str) -> bool {
+    match action {
+        RuntimeActionContract::ToolPayloadWorkspaceBinary { package: p, .. }
+        | RuntimeActionContract::RootfsWorkspaceBinary { package: p, .. } => p == package,
     }
-    run(
-        Command::new(&bun)
-            .arg("build")
-            .arg(&docs_app.entry)
-            .args(["--target=bun", "--minify", "--outfile"])
-            .arg(&bundle)
-            .current_dir(&docs_app.dir),
-        &format!("bun build of '{}'", docs_app.dir.display()),
-    )?;
-    if !bundle.is_file() {
-        bail!("bun build wrote no bundle at '{}'", bundle.display());
-    }
-
-    copy_executable(Path::new(&bun), &overlay.join(BUN))?;
-    let docs = crate::guest::render(
-        crate::guest::DOCS_BUN,
-        &[
-            ("DOCS_BUNDLE", &format!("/{DOCS_BUNDLE}")),
-            ("BUN", &format!("/{BUN}")),
-        ],
-    )?;
-    write_file(&overlay.join(DOCS), docs, 0o755)
-}
-
-fn run(command: &mut Command, what: &str) -> Result<()> {
-    let output = command
-        .output()
-        .with_context(|| format!("running {what}"))?;
-    if !output.status.success() {
-        bail!(
-            "{what} failed: {}\n{}",
-            String::from_utf8_lossy(&output.stdout).trim(),
-            String::from_utf8_lossy(&output.stderr).trim()
-        );
-    }
-    Ok(())
 }
 
 /// `argv` as one POSIX shell command line, each word single-quoted where needed.

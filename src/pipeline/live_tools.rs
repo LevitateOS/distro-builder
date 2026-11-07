@@ -1,16 +1,16 @@
 //! The variant's live-tools runtime actions (`runtime_profiles` in products.toml).
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use crate::artifact::filesystem::copy_executable;
 use distro_contract::RuntimeActionContract;
 
 /// Runs the actions. `rootfs` and `overlay` are the live-tools product's two layers:
-/// tool payload binaries go into the overlay, rootfs binaries and apk packages into
-/// the rootfs (which is what `recstrap` installs).
+/// tool payload binaries go into the overlay, rootfs binaries into the rootfs (which
+/// is what `recstrap` installs). Packages come from the rootfs source recipe, never
+/// from here.
 pub(crate) fn add_required_tools(
     repo_root: &Path,
     rootfs: &Path,
@@ -59,14 +59,6 @@ pub(crate) fn add_required_tools(
                     binary.as_deref().unwrap_or(package)
                 )
             })?,
-            RuntimeActionContract::ApkPackages { packages } => {
-                ensure_apk_packages(rootfs, packages).with_context(|| {
-                    format!(
-                        "installing live-tools apk packages for '{distro_id}': {}",
-                        packages.join(", ")
-                    )
-                })?
-            }
         }
     }
     Ok(())
@@ -102,61 +94,4 @@ fn build_and_copy(
         copy_executable(&built, destination)?;
     }
     Ok(())
-}
-
-fn ensure_apk_packages(rootfs: &Path, packages: &[String]) -> Result<()> {
-    if packages.is_empty() {
-        return Ok(());
-    }
-
-    // apk resolves its mirror through the host's DNS while it runs; the rootfs keeps
-    // its own resolv.conf (or none) afterwards.
-    let resolv_conf = rootfs.join("etc/resolv.conf");
-    let original = fs::read(&resolv_conf).ok();
-    if let Some(parent) = resolv_conf.parent() {
-        fs::create_dir_all(parent).with_context(|| format!("creating '{}'", parent.display()))?;
-    }
-    fs::copy("/etc/resolv.conf", &resolv_conf).with_context(|| {
-        format!(
-            "copying host resolv.conf into prepared rootfs '{}'",
-            resolv_conf.display()
-        )
-    })?;
-
-    let pkg_string = packages.join(" ");
-    let output = Command::new("unshare")
-        .arg("-Urpf")
-        .arg("/bin/sh")
-        .arg("-c")
-        .arg("chroot \"$1\" /bin/sh -lc \"$2\"")
-        .arg("_")
-        .arg(rootfs)
-        .arg(format!(
-            "apk add --no-cache --no-check-certificate {}",
-            pkg_string
-        ))
-        .output()
-        .with_context(|| {
-            format!(
-                "running apk package install in rootfs '{}'",
-                rootfs.display()
-            )
-        });
-
-    match original {
-        Some(content) => fs::write(&resolv_conf, content),
-        None => fs::remove_file(&resolv_conf),
-    }
-    .with_context(|| format!("restoring '{}'", resolv_conf.display()))?;
-
-    let output = output?;
-    if output.status.success() {
-        return Ok(());
-    }
-    bail!(
-        "apk package install failed for packages [{}]: {}\n{}",
-        pkg_string,
-        String::from_utf8_lossy(&output.stdout).trim(),
-        String::from_utf8_lossy(&output.stderr).trim()
-    )
 }

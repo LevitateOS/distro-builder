@@ -11,13 +11,15 @@ let ctx = #{
     apk_tools_sha256: assets.apk_tools_sha256,
     apk_tools_version: assets.apk_tools_version,
     iso_path: join_path(RUNTIME.paths.inputs, "iso"),
+    extra_apks_path: join_path(RUNTIME.paths.inputs, "extra_apks"),
+    extra_apks: assets.extra_apks,
     iso_sha256: assets.iso_sha256,
     iso_name: assets.iso_name,
     apk_tools_name: assets.apk_tools_name,
     profile: "acorn",
     release_branch: assets.release_branch,
     rootfs_path: join_path(RUNTIME.paths.output, "rootfs"),
-    rootfs_recipe_version: "alpine-live-source-v6",
+    rootfs_recipe_version: "alpine-live-source-v7",
 };
 
 fn _verify_inputs(ctx) {
@@ -26,16 +28,31 @@ fn _verify_inputs(ctx) {
     }
     verify_sha256(ctx.iso_path, ctx.iso_sha256);
     verify_sha256(ctx.apk_tools_path, ctx.apk_tools_sha256);
+    for apk in ctx.extra_apks {
+        let file = join_path(ctx.extra_apks_path, apk[0]);
+        if !is_file(file) { throw "the extra_apks input lacks " + apk[0] + "; run the rootfs source preseed"; }
+        verify_sha256(file, apk[1]);
+    }
+}
+
+// The pinned packages the ISO lacks, as quoted file arguments to `apk add`.
+fn _extra_apk_files(ctx) {
+    let files = "";
+    for apk in ctx.extra_apks {
+        files += " '" + join_path(ctx.extra_apks_path, apk[0]) + "'";
+    }
+    files
 }
 
 fn _profile_packages(profile) {
     let normalized = trim(profile).to_lower();
     if normalized == "acorn" {
-        return "alpine-base busybox openrc openrc-init doas " +
+        // From the ISO. The rest (findutils, grep, less, musl-locales,
+        // openrc-init, systemd-boot, hdparm, smartmontools) are the pinned
+        // extra_apks files, which `apk add` takes alongside these names.
+        return "alpine-base busybox openrc doas " +
                "openssh openssh-server util-linux e2fsprogs dosfstools " +
-               "systemd-boot " +
-               "iproute2 iputils dhcpcd less grep findutils curl " +
-               "musl-locales musl-locales-lang";
+               "iproute2 iputils dhcpcd curl pciutils vim htop";
     }
 
     throw "Unsupported Alpine live source profile '" + profile + "'. Use profile 'acorn'.";
@@ -243,7 +260,8 @@ fn build(ctx) {
     let packages = _profile_packages(ctx.profile);
     log("Installing Alpine live source package baseline (" + ctx.profile + ")...");
     let apk_cmd = "'" + ctx.apk_static_path + "' --root '" + rootfs + "' " +
-        "--usermode --initdb --no-progress --allow-untrusted add " + packages;
+        "--usermode --initdb --no-progress --allow-untrusted add " + packages +
+        _extra_apk_files(ctx);
     shell(apk_cmd);
     _normalize_rootfs_permissions(rootfs, "post-apk install");
     _ensure_openrc_live_source_completeness(rootfs);

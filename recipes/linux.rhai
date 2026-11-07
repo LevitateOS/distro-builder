@@ -240,6 +240,8 @@ fn is_built(ctx) {
     if trim(read_file_or_empty(join_path(build_dir, ".config.kconfig-hash"))) != identity {
         return needs_work(ctx, "kernel configuration changed");
     }
+    let mismatch = kernel::release_mismatch(build_dir, spec.version, spec.localversion);
+    if mismatch != "" { return needs_work(ctx, mismatch); }
     let rel = kernel::release(build_dir, spec.version, spec.localversion);
     ctx.kernel_version = rel;
     ctx.build_dir = build_dir;
@@ -306,6 +308,8 @@ fn is_installed(ctx) {
     if trim(read_file_or_empty(join_path(build_dir, ".config.kconfig-hash"))) != identity {
         return needs_work(ctx, "kernel configuration changed");
     }
+    let mismatch = kernel::release_mismatch(build_dir, spec.version, spec.localversion);
+    if mismatch != "" { return needs_work(ctx, mismatch); }
     let rel = kernel::release(build_dir, spec.version, spec.localversion);
 
 

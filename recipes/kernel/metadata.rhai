@@ -59,6 +59,20 @@ fn artifact_root(kernel_artifact_root) {
     kernel_artifact_root
 }
 
+// Why the kernel in build_dir is not the pinned one, or "" when it is.
+// Readiness reports this as work to do, so a new pin replaces the old kernel
+// instead of failing on it.
+fn release_mismatch(build_dir, expected_version, expected_localversion) {
+    let rel = trim(read_file_or_empty(join_path(build_dir, "include/config/kernel.release")));
+    if expected_version != "" && !rel.starts_with(expected_version) {
+        return "Wrong kernel version: kernel.release '" + rel + "' does not start with '" + expected_version + "'";
+    }
+    if !rel.ends_with(expected_localversion) {
+        return "Wrong kernel localversion: kernel.release '" + rel + "' does not end with '" + expected_localversion + "'";
+    }
+    ""
+}
+
 fn release(build_dir, expected_version, expected_localversion) {
     let rel_file = join_path(build_dir, "include/config/kernel.release");
     if !is_file(rel_file) {

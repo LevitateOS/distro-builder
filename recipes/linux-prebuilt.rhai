@@ -108,6 +108,14 @@ fn _validate_payload_or_throw(kernel_root, expected_release, expected_version, e
     rel
 }
 
+// Why the installed payload is not the pinned bundle, or "" when it is. Readiness
+// reports this as work to do, so a new pin replaces the old kernel.
+fn _release_mismatch(kernel_root, spec) {
+    let rel = trim(read_file_or_empty(join_path(kernel_root, "kernel-build/include/config/kernel.release")));
+    if rel == spec.expected_release { return ""; }
+    "Wrong kernel.release: installed '" + rel + "', pinned '" + spec.expected_release + "'"
+}
+
 fn _payload_context(ctx, kernel_root, release, module_install_path) {
     ctx.kernel_version = release;
     ctx.build_dir = join_path(kernel_root, "kernel-build");
@@ -125,6 +133,8 @@ fn is_acquired(ctx) {
        !is_file(join_path(kernel_root, "staging/boot/vmlinuz")) {
         return needs_work(ctx, "kernel payload is missing");
     }
+    let mismatch = _release_mismatch(kernel_root, spec);
+    if mismatch != "" { return needs_work(ctx, mismatch); }
     let rel = _validate_payload_or_throw(
         kernel_root,
         spec.expected_release,
@@ -201,6 +211,8 @@ fn is_built(ctx) {
        !is_file(join_path(kernel_root, "staging/boot/vmlinuz")) {
         return needs_work(ctx, "kernel payload is missing");
     }
+    let mismatch = _release_mismatch(kernel_root, spec);
+    if mismatch != "" { return needs_work(ctx, mismatch); }
     let rel = _validate_payload_or_throw(
         kernel_root,
         spec.expected_release,
@@ -234,6 +246,8 @@ fn is_installed(ctx) {
        !is_file(join_path(kernel_root, "staging/boot/vmlinuz")) {
         return needs_work(ctx, "kernel payload is missing");
     }
+    let mismatch = _release_mismatch(kernel_root, spec);
+    if mismatch != "" { return needs_work(ctx, mismatch); }
     let rel = _validate_payload_or_throw(
         kernel_root,
         spec.expected_release,

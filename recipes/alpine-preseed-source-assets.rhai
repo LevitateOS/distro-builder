@@ -14,6 +14,7 @@ let ctx = #{
     apk_tools_sha256: assets.apk_tools_sha256,
     extra_apks_dir: join_path(RUNTIME.paths.output, "extra-apks"),
     extra_apks: assets.extra_apks,
+    extra_apks_url: assets.extra_apks_url,
 };
 
 fn _outputs(ctx) {
@@ -53,7 +54,7 @@ fn acquire(ctx) {
     _fetch(ctx.apk_tools_url, ctx.apk_tools_path, ctx.apk_tools_sha256, force);
     mkdir(ctx.extra_apks_dir);
     for apk in ctx.extra_apks {
-        _fetch(apk[2] + apk[0], join_path(ctx.extra_apks_dir, apk[0]), apk[1], force);
+        _fetch(ctx.extra_apks_url + apk[2] + "/x86_64/" + apk[0], join_path(ctx.extra_apks_dir, apk[0]), apk[1], force);
     }
     ctx.outputs = _outputs(ctx);
     ctx

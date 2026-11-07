@@ -11,7 +11,7 @@
 //! 5. System PATH (`which recipe`)
 
 pub mod linux;
-mod outputs;
+pub(crate) mod outputs;
 pub mod qemu;
 pub mod rootfs_source;
 pub mod tools;

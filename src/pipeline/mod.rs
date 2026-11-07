@@ -7,5 +7,4 @@ pub(crate) mod paths;
 pub(crate) mod plan;
 pub(crate) mod planner;
 pub(crate) mod products;
-pub(crate) mod scripts;
 pub(crate) mod source;

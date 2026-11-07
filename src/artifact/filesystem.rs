@@ -73,9 +73,3 @@ pub(crate) fn write_file(path: &Path, content: impl AsRef<[u8]>, mode: u32) -> R
     fs::set_permissions(path, fs::Permissions::from_mode(mode))
         .with_context(|| format!("setting the mode of '{}'", path.display()))
 }
-
-/// Copies the program at `source` to `destination` as an executable (0755).
-pub(crate) fn copy_executable(source: &Path, destination: &Path) -> Result<()> {
-    let content = fs::read(source).with_context(|| format!("reading '{}'", source.display()))?;
-    write_file(destination, content, 0o755)
-}

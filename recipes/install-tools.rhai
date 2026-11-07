@@ -16,6 +16,9 @@ if bin != "recpart" && bin != "recstrap" && bin != "recchroot" && bin != "recfst
 }
 let ctx = #{
     name: bin,
+    rootfs: join_path(RUNTIME.paths.output, "rootfs"),
+    install_path: if is_def_var("INSTALL_PATH") { INSTALL_PATH } else { "usr/bin/" + bin },
+    init_system: if is_def_var("INIT_SYSTEM") { INIT_SYSTEM } else { "systemd" },
     rust_target: if is_def_var("RUST_TARGET") { RUST_TARGET } else { "x86_64-unknown-linux-gnu" },
     source: "/inputs/source",
     supplied_program: "/inputs/program",
@@ -87,7 +90,10 @@ fn build(ctx) {
 fn is_installed(ctx) {
     if !is_file(ctx.program) { return needs_work(ctx, ctx.name + " output is missing"); }
     _verify(ctx, ctx.program);
-    ctx.outputs.program = ctx.program;
+    if !is_file(join_path(ctx.rootfs, ctx.install_path)) {
+        return needs_work(ctx, "installed package tree is missing");
+    }
+    ctx.outputs = #{program: ctx.program, rootfs: ctx.rootfs};
     ready(ctx)
 }
 
@@ -97,11 +103,34 @@ fn install(ctx) {
     mkdir(dirname(ctx.program));
     copy_file(source, ctx.program);
     chmod(ctx.program, 0o755);
-    ctx.outputs.program = ctx.program;
+    let installed = join_path(ctx.rootfs, ctx.install_path);
+    mkdir(dirname(installed)); copy_file(ctx.program, installed); chmod(installed, 0o755);
+    if ctx.name == "recab" {
+        let services = join_path(ctx.source, "tools/recab/src/services");
+        let dest = "";
+        let service = "";
+        let mode = 0o644;
+        if ctx.init_system == "systemd" {
+            service = "recab-trial.service";
+            dest = "usr/lib/systemd/system/recab-trial.service";
+        } else if ctx.init_system == "openrc" {
+            service = "recab-trial.openrc";
+            dest = "etc/init.d/recab-trial";
+            mode = 0o755;
+        } else { throw "unsupported recab init system"; }
+        let service_source = join_path(services, service);
+        let supplied_service = join_path(ctx.runtime.paths.inputs, "trial_service");
+        if is_file(supplied_service) { service_source = supplied_service; }
+        if !is_file(service_source) { throw "recab needs its source service definition or an explicit trial_service input"; }
+        let output = join_path(ctx.rootfs, dest);
+        mkdir(dirname(output)); copy_file(service_source, output); chmod(output, mode);
+    }
+    ctx.outputs = #{program: ctx.program, rootfs: ctx.rootfs};
     ctx
 }
 
 fn remove(ctx) {
+    if is_dir(ctx.rootfs) { rm(ctx.rootfs); }
     if is_file(ctx.program) { rm(ctx.program); }
     ctx
 }

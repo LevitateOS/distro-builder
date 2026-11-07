@@ -43,7 +43,7 @@ pub(super) fn file(ctx: &Value, name: &str) -> Result<PathBuf> {
     Ok(path)
 }
 
-pub(super) fn directory(ctx: &Value, name: &str) -> Result<PathBuf> {
+pub(crate) fn directory(ctx: &Value, name: &str) -> Result<PathBuf> {
     let path = declared_path(ctx, name)?;
     let metadata = std::fs::metadata(&path).with_context(|| {
         format!(

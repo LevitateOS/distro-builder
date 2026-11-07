@@ -3,6 +3,7 @@
 // not run, so the steps they would take are done below.
 const RECIPE_API = 2;
 import "sources/levitate-rpm-lock.rhai" as lock;
+import "installed-system.rhai" as installed;
 let ctx = #{
     name: "fedora-rpm-source-rootfs",
     description: "Fedora " + lock::release() + " rootfs source from the locked RPM set",
@@ -13,7 +14,7 @@ let ctx = #{
 
 // The rootfs records the exact builds it was made from; a new lock rebuilds it.
 fn _rootfs_marker(ctx) {
-    let marker = "fedora-rpm-set-v1";
+    let marker = "fedora-rpm-set-v2-installed";
     for rpm in ctx.packages { marker += "\n" + rpm[1]; }
     marker
 }
@@ -275,6 +276,7 @@ fn build(ctx) {
     shell("rm -rf '" + join_path(rootfs, "var/cache") + "' '" + join_path(rootfs, "var/log") + "'");
     shell("mkdir -p '" + join_path(rootfs, "var/cache") + "' '" + join_path(rootfs, "var/log") + "' '" + join_path(rootfs, "var/log/audit") + "'");
     chmod(join_path(rootfs, "var/log/audit"), 0o700);
+    installed::systemd(rootfs);
     write_file(join_path(rootfs, ".source-rootfs.recipe-version"), _rootfs_marker(ctx) + "\n");
     ctx
 }

@@ -1,6 +1,7 @@
 // Materialize one rootfs from explicit immutable iso/apk_tools inputs.
 const RECIPE_API = 2;
 import "sources/alpine.rhai" as source;
+import "installed-system.rhai" as installed;
 let assets = source::facts();
 let ctx = #{
     name: "alpine-live-source-rootfs",
@@ -19,7 +20,7 @@ let ctx = #{
     profile: "acorn",
     release_branch: assets.release_branch,
     rootfs_path: join_path(RUNTIME.paths.output, "rootfs"),
-    rootfs_recipe_version: "alpine-live-source-v7",
+    rootfs_recipe_version: "alpine-source-v8-installed",
 };
 
 fn _verify_inputs(ctx) {
@@ -59,12 +60,8 @@ fn _profile_packages(profile) {
 }
 
 fn _network_interfaces() {
-    "# /etc/network/interfaces - OpenRC live source boot\n" +
-    "auto lo\n" +
-    "iface lo inet loopback\n\n" +
-    "# QEMU slirp default interface\n" +
-    "auto eth0\n" +
-    "iface eth0 inet dhcp\n"
+    "# Installed loopback; dhcpcd discovers wired interfaces.\n" +
+    "auto lo\niface lo inet loopback\n"
 }
 
 fn _rootfs_marker(rootfs) {
@@ -128,9 +125,6 @@ fn _rootfs_valid(rootfs, expected_version) {
         return false;
     }
     if !is_file(join_path(rootfs, "etc/network/interfaces")) {
-        return false;
-    }
-    if shell_status("grep -qx 'iface eth0 inet dhcp' '" + join_path(rootfs, "etc/network/interfaces") + "'") != 0 {
         return false;
     }
     if !is_file(join_path(rootfs, "etc/init.d/networking")) {
@@ -274,6 +268,7 @@ fn build(ctx) {
         throw "invalid rootfs: missing /bin/sh path after apk install";
     }
 
+    installed::openrc(rootfs);
     write_file(_rootfs_marker(rootfs), ctx.rootfs_recipe_version + "\n");
     ctx.rootfs_path = rootfs;
     ctx

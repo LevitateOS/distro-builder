@@ -3,6 +3,7 @@ use distro_contract::ConformanceContract;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::artifact::live_overlay::InitSystem;
 use crate::pipeline::config::{
     load_boot_config_from_contract, load_installed_boot_payload_config_from_contract,
     load_live_tools_config_from_contract,
@@ -11,17 +12,12 @@ use crate::pipeline::io::{
     create_empty_overlay_dir, create_unique_output_dir, extract_erofs_rootfs,
 };
 use crate::pipeline::live_tools::add_required_tools;
+use crate::pipeline::overlay::create_live_overlay;
 use distro_contract::{InstallUxContract, RuntimeActionContract};
-use crate::pipeline::overlay::{
-    create_live_overlay, ensure_openrc_shell, ensure_required_service_wiring,
-    ensure_systemd_default_target, ensure_systemd_locale_completeness, ensure_systemd_sshd_dirs,
-};
-use crate::artifact::live_overlay::InitSystem;
 
 use crate::pipeline::plan::{
     apply_producer_plan, build_baseline_producers, ProducerPlan, RootfsProducer,
 };
-use crate::pipeline::scripts::install_scenario_test_scripts;
 use crate::pipeline::source::{
     cleanup_legacy_provider_dir, materialize_source_rootfs, RootfsSourcePolicy,
 };
@@ -291,64 +287,25 @@ pub fn prepare_live_boot_product(
         add_plan.source_rootfs_dir = Some(source_rootfs_dir);
     }
 
-    apply_producer_plan(&add_plan, &rootfs_source_dir).with_context(|| {
+    apply_system_payload(&add_plan, &rootfs_source_dir).with_context(|| {
         format!(
             "applying live boot product additive producers for '{}'",
             spec.distro_id
         )
     })?;
-    install_scenario_test_scripts(&spec.repo_root, &rootfs_source_dir).with_context(|| {
-        format!(
-            "installing scenario test scripts into live boot rootfs for '{}'",
-            spec.distro_id
-        )
-    })?;
-    if let InitSystem::OpenRc = spec.overlay {
-        ensure_openrc_shell(&rootfs_source_dir, &spec.os_name).with_context(|| {
-            format!(
-                "ensuring OpenRC live boot serial shell for '{}'",
-                spec.distro_id
-            )
-        })?;
-    }
-    if matches!(&spec.overlay, InitSystem::Systemd) {
-        ensure_systemd_default_target(&rootfs_source_dir).with_context(|| {
-            format!(
-                "ensuring systemd live boot default target for '{}'",
-                spec.distro_id
-            )
-        })?;
-        ensure_systemd_sshd_dirs(&rootfs_source_dir).with_context(|| {
-            format!(
-                "ensuring systemd live boot sshd directories for '{}'",
-                spec.distro_id
-            )
-        })?;
-        ensure_systemd_locale_completeness(&rootfs_source_dir).with_context(|| {
-            format!(
-                "ensuring systemd live boot locale completeness for '{}'",
-                spec.distro_id
-            )
-        })?;
-    }
-
+    validate_installed_rootfs(&rootfs_source_dir)?;
     let live_overlay_dir = create_live_overlay(
+        &spec.repo_root,
         output_dir,
+        &rootfs_source_dir,
         &spec.distro_id,
         &spec.os_name,
         &spec.live_overlay.issue_banner_label,
         &spec.live_overlay.dir_name,
         &spec.overlay,
         &[],
+        &spec.required_services,
     )?;
-
-    ensure_required_service_wiring(&live_overlay_dir, &spec.overlay, &spec.required_services)
-        .with_context(|| {
-            format!(
-                "ensuring live boot required service wiring for '{}'",
-                spec.distro_id
-            )
-        })?;
 
     Ok(LiveBootProduct {
         rootfs_source_dir,
@@ -448,29 +405,18 @@ pub fn prepare_live_tools_product(
         )
     })?;
 
-    install_scenario_test_scripts(&spec.repo_root, &rootfs_source_dir).with_context(|| {
-        format!(
-            "installing scenario test scripts into live tools rootfs for '{}'",
-            spec.distro_id
-        )
-    })?;
-    if matches!(&spec.overlay, InitSystem::Systemd) {
-        ensure_systemd_locale_completeness(&rootfs_source_dir).with_context(|| {
-            format!(
-                "ensuring systemd live tools locale completeness for '{}'",
-                spec.distro_id
-            )
-        })?;
-    }
-
+    validate_installed_rootfs(&rootfs_source_dir)?;
     let live_overlay_dir = create_live_overlay(
+        &spec.repo_root,
         output_dir,
+        &rootfs_source_dir,
         &spec.distro_id,
         &spec.os_name,
         &spec.live_overlay.issue_banner_label,
         &spec.live_overlay.dir_name,
         &spec.overlay,
         &spec.install_ux.consoles,
+        &spec.required_services,
     )?;
 
     add_required_tools(
@@ -490,14 +436,6 @@ pub fn prepare_live_tools_product(
         &spec.runtime_actions,
     )
     .with_context(|| format!("writing the install screen for '{}'", spec.distro_id))?;
-
-    ensure_required_service_wiring(&live_overlay_dir, &spec.overlay, &spec.required_services)
-        .with_context(|| {
-            format!(
-                "ensuring live tools required service wiring for '{}'",
-                spec.distro_id
-            )
-        })?;
 
     Ok(LiveToolsProduct {
         rootfs_source_dir,
@@ -553,13 +491,14 @@ pub fn prepare_installed_boot_product(
         add_plan.source_rootfs_dir = Some(source_rootfs_dir);
     }
 
-    apply_producer_plan(&add_plan, &rootfs_source_dir).with_context(|| {
+    apply_system_payload(&add_plan, &rootfs_source_dir).with_context(|| {
         format!(
             "applying installed boot product additive producers for '{}'",
             spec.distro_id
         )
     })?;
 
+    validate_installed_rootfs(&rootfs_source_dir)?;
     let live_overlay_dir = create_empty_overlay_dir(output_dir, &spec.live_overlay_dir_name)
         .with_context(|| {
             format!(
@@ -590,4 +529,56 @@ fn resolved_parent_rootfs_image<'a>(
             distro_id
         )
     })
+}
+
+/// Consumer boundary: a live payload must be safe to deploy as an installed
+/// system. Refuse stale parent products instead of carrying their live overrides.
+fn validate_installed_rootfs(root: &Path) -> Result<()> {
+    if !root.join("usr/libexec/recipe-system-setup").is_file() {
+        anyhow::bail!("{} lacks Recipe's installed-system setup program; rebuild the source and parent product with the current recipes", root.display());
+    }
+    for path in [
+        "usr/local/bin/serial-autologin",
+        "usr/local/bin/live-help",
+        "etc/profile.d/20-live-shell.sh",
+        "etc/profile.d/99-serial-test.sh",
+        "etc/systemd/system/getty@.service.d/zz-autologin.conf",
+        "etc/systemd/system/serial-getty@.service.d/zz-autologin.conf",
+        "usr/local/lib/scenario-tests",
+        "usr/local/bin/live-boot.sh",
+    ] {
+        if root.join(path).symlink_metadata().is_ok() {
+            anyhow::bail!("live-only path {path} leaked into {}; rebuild the parent product with the current system recipes", root.display());
+        }
+    }
+    let inittab = fs::read_to_string(root.join("etc/inittab")).unwrap_or_default();
+    if inittab.contains("serial-autologin")
+        || inittab.contains("-n -l")
+        || inittab.contains("--autologin")
+    {
+        anyhow::bail!(
+            "live autologin leaked into the installed inittab in {}",
+            root.display()
+        );
+    }
+    Ok(())
+}
+
+/// The variant contract owns identity. A full vendor tree can contain its own
+/// os-release (including a symlink); keep the identity of the parent product.
+fn apply_system_payload(plan: &ProducerPlan, root: &Path) -> Result<()> {
+    let path = root.join("etc/os-release");
+    if !fs::symlink_metadata(&path)?.is_file() {
+        anyhow::bail!(
+            "parent product {} must supply a regular contract-owned etc/os-release; rebuild it",
+            root.display()
+        );
+    }
+    let identity = fs::read(&path)?;
+    apply_producer_plan(plan, root)?;
+    if fs::symlink_metadata(&path)?.file_type().is_symlink() {
+        fs::remove_file(&path)?;
+    }
+    fs::write(&path, identity)?;
+    Ok(())
 }

@@ -132,3 +132,26 @@ searching the legacy distro crate. The older `linux(base_dir, ...)` entry point
 remains a compatibility wrapper. `has_linux_source` remains a filesystem cache
 hint for compatibility; it does not establish readiness or the validity of an
 installed kernel. Legacy Alpine/package/tool adapters still need path migration.
+
+## Installed system and live environment
+
+The Fedora/Alpine source recipes publish a complete installed filesystem. Both
+variants consume that whole tree; Ring 2 does not maintain a second list of
+package-owned paths. `installed-system.rhai` prepares authenticated consoles,
+network defaults, account policy and the target setup program, importing the
+variant's declared `system_setup` script input. Reusable images have a locked
+root account and an empty machine ID.
+
+`live-overlay.rhai` separately produces the live session's login overrides,
+password override, service links, network helpers and shell profiles. The Rust
+adapter supplies explicit configuration/assets and consumes `outputs.overlay`.
+It preserves the source tree's system accounts when overriding root for the
+live session. The product consumer refuses stale parent trees with live settings
+in their installed filesystem.
+
+Workspace tool recipes publish `outputs.program` and `outputs.rootfs`: the latter
+is the installed package tree, including recab's init-system-specific trial
+service. Product assembly selects its destination layer and merges that tree.
+`recsetup` invokes the target program installed by Recipe for machine choices;
+`recstrap` remains an image extractor. Scenario evidence scripts are transferred
+by the harness into `/run`, rather than shipped in the installed filesystem.

@@ -68,7 +68,6 @@ pub use contracts::component::{Installable, Op, Phase};
 pub use contracts::context::{BuildContext, DistroConfig, InitSystem, PackageManager};
 pub use contracts::kernel::KernelInstallConfig;
 pub use executor::{binaries, directories, files, openrc, users};
-pub use pipeline::scripts::install_scenario_test_scripts;
 
 // Re-export commonly used artifact utilities
 pub use artifact::disk::{

@@ -280,12 +280,14 @@ fn collect_local_dependencies(
 }
 
 /// Compile through the package's actual recipe and return its published program.
-pub fn build_tool_program(
+fn build_tool_outputs(
     repo: &Path,
     package: &str,
     binary: Option<&str>,
     target: Option<&str>,
-) -> Result<PathBuf> {
+    destination: Option<&str>,
+    init: &str,
+) -> Result<serde_json::Value> {
     let (_, _, binaries) = tool(package)?;
     let binary = binary.unwrap_or(binaries[0]);
     if !binaries.contains(&binary) {
@@ -302,16 +304,46 @@ pub fn build_tool_program(
         .join(".artifacts/work/recipe-tools")
         .join(binary)
         .join(target);
+    let install_path = destination
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("usr/bin/{binary}"));
     let ctx = super::run_recipe_phase_json_with_inputs(
         &recipe_bin.path,
         "install",
         &recipe,
         &work,
-        &[("RUST_TARGET", target), ("BIN", binary)],
+        &[
+            ("RUST_TARGET", target),
+            ("BIN", binary),
+            ("INSTALL_PATH", &install_path),
+            ("INIT_SYSTEM", init),
+        ],
         &[("source", source.path())],
         &[],
         None,
         recipe.parent(),
     )?;
+    Ok(ctx)
+}
+
+pub fn build_tool_program(
+    repo: &Path,
+    package: &str,
+    binary: Option<&str>,
+    target: Option<&str>,
+) -> Result<PathBuf> {
+    let ctx = build_tool_outputs(repo, package, binary, target, None, "systemd")?;
     super::outputs::file(&ctx, "program")
+}
+
+pub(crate) fn build_tool_tree(
+    repo: &Path,
+    package: &str,
+    binary: Option<&str>,
+    target: Option<&str>,
+    destination: Option<&str>,
+    init: &str,
+) -> Result<PathBuf> {
+    let ctx = build_tool_outputs(repo, package, binary, target, destination, init)?;
+    super::outputs::directory(&ctx, "rootfs")
 }

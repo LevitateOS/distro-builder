@@ -41,33 +41,6 @@ pub(crate) fn create_empty_overlay_dir(output_dir: &Path, dir_name: &str) -> Res
     Ok(overlay_dir)
 }
 
-pub(crate) fn rename_live_overlay_dir(
-    output_dir: &Path,
-    source_overlay: &Path,
-    target_dir_name: &str,
-) -> Result<PathBuf> {
-    let target_overlay = output_dir.join(target_dir_name);
-    if source_overlay == target_overlay {
-        return Ok(target_overlay);
-    }
-    if target_overlay.exists() {
-        fs::remove_dir_all(&target_overlay).with_context(|| {
-            format!(
-                "removing pre-existing live overlay '{}'",
-                target_overlay.display()
-            )
-        })?;
-    }
-    fs::rename(source_overlay, &target_overlay).with_context(|| {
-        format!(
-            "renaming live overlay '{}' -> '{}'",
-            source_overlay.display(),
-            target_overlay.display()
-        )
-    })?;
-    Ok(target_overlay)
-}
-
 pub fn resolve_release_product_rootfs_image_for_distro(
     repo_root: &Path,
     distro_id: &str,
@@ -75,7 +48,8 @@ pub fn resolve_release_product_rootfs_image_for_distro(
     parent_product_label: &str,
     rootfs_filename: &str,
 ) -> Result<PathBuf> {
-    let product_root = crate::run_history::release_product_dir(repo_root, distro_id, product_dir_name);
+    let product_root =
+        crate::run_history::release_product_dir(repo_root, distro_id, product_dir_name);
 
     let run_id = crate::run_history::latest_successful_run_id(&product_root)?.ok_or_else(|| {
         anyhow::anyhow!(
@@ -104,7 +78,8 @@ pub fn release_product_rootfs_exists_for_distro(
     product_dir_name: &str,
     rootfs_filename: &str,
 ) -> Result<bool> {
-    let product_root = crate::run_history::release_product_dir(repo_root, distro_id, product_dir_name);
+    let product_root =
+        crate::run_history::release_product_dir(repo_root, distro_id, product_dir_name);
 
     let Some(run_id) = crate::run_history::latest_successful_run_id(&product_root)? else {
         return Ok(false);

@@ -165,6 +165,7 @@ fn copy_crate(
     } else if original.join("build.rs").is_file() {
         fs::copy(original.join("build.rs"), output.join("build.rs"))?;
     }
+    copy_included_files(&original, &output)?;
     fs::write(output.join("Cargo.toml"), toml::to_string(&manifest)?)?;
     for dependency in local_dependencies {
         let dependency = dependency.canonicalize()?;
@@ -174,6 +175,79 @@ fn copy_crate(
         copy_crate(repo, relative, destination, copied)?;
     }
     Ok(())
+}
+
+/// Copy the files the copied Rust sources pull in with `include_str!`,
+/// `include_bytes!` or `include!` (for example templates kept beside `src`),
+/// so the source closure holds exactly what the crate compiles from.
+fn copy_included_files(original: &Path, output: &Path) -> Result<()> {
+    let mut pending = Vec::new();
+    collect_rust_files(output, &mut pending)?;
+    while let Some(file) = pending.pop() {
+        let text = fs::read_to_string(&file)?;
+        let directory = file.parent().context("source file has no parent")?;
+        for literal in included_paths(&text) {
+            let copied = directory.join(literal);
+            if copied.exists() {
+                continue;
+            }
+            let relative = copied
+                .strip_prefix(output)
+                .context("included file resolves outside the copied crate")?;
+            // A path that names nothing (say, a macro in a doc comment) is
+            // left for cargo to report if the code really includes it.
+            let Ok(source) = original.join(relative).canonicalize() else {
+                continue;
+            };
+            let inside = source.strip_prefix(original).with_context(|| {
+                format!(
+                    "{} includes {literal} from outside its crate",
+                    file.display()
+                )
+            })?;
+            let destination = output.join(inside);
+            if let Some(parent) = destination.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            fs::copy(&source, &destination)?;
+            if destination.extension().is_some_and(|e| e == "rs") {
+                pending.push(destination);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn collect_rust_files(directory: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
+    for entry in fs::read_dir(directory)? {
+        let path = entry?.path();
+        if path.is_dir() {
+            collect_rust_files(&path, files)?;
+        } else if path.extension().is_some_and(|e| e == "rs") {
+            files.push(path);
+        }
+    }
+    Ok(())
+}
+
+/// The literal paths given to `include_str!`, `include_bytes!` and `include!`.
+fn included_paths(text: &str) -> Vec<&str> {
+    let mut paths = Vec::new();
+    for macro_name in ["include_str!", "include_bytes!", "include!"] {
+        for (at, _) in text.match_indices(macro_name) {
+            let after = text[at + macro_name.len()..].trim_start();
+            let Some(after) = after.strip_prefix(['(', '[', '{']) else {
+                continue;
+            };
+            let Some(after) = after.trim_start().strip_prefix('"') else {
+                continue;
+            };
+            if let Some(end) = after.find('"') {
+                paths.push(&after[..end]);
+            }
+        }
+    }
+    paths
 }
 
 fn collect_local_dependencies(

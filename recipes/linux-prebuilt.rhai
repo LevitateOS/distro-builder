@@ -30,12 +30,12 @@ fn _prebuilt_spec_or_throw(selected_target) {
             distro_id: "levitate",
             repo: "LevitateOS/leviso",
             release_tag: "0.0.0-pre-alpha",
-            asset_name: "levitate-6.12.71-levitate-runtime.tar.xz",
-            asset_sha256: "064ec622912a8741967c92b4cdf523eca4311bc9179d8ef1049beaf95453a2c8",
-            expected_release: "6.12.71-levitate",
+            asset_name: "levitate-6.12.116-levitate-runtime.tar.xz",
+            asset_sha256: "a904236a538f488717fbb846ce359638676714585f08d98f4e27ebe3ad5c2c0b",
+            expected_release: "6.12.116-levitate",
             localversion: "-levitate",
             module_install_path: "/usr/lib/modules",
-            version: "6.12.71",
+            version: "6.12.116",
         };
     }
     if target == "acorn" {
@@ -43,12 +43,12 @@ fn _prebuilt_spec_or_throw(selected_target) {
             distro_id: "acorn",
             repo: "LevitateOS/AcornOS",
             release_tag: "0.0.0-pre-alpha",
-            asset_name: "acorn-6.19.0-acorn-runtime.v2.tar.xz",
-            asset_sha256: "04e10c6392680b75b80a09beb9036e5954b62cfabddd4cb0fe3c975c0a79e96e",
-            expected_release: "6.19.0-acorn",
+            asset_name: "acorn-7.3.3-acorn-runtime.tar.xz",
+            asset_sha256: "c3634752d628695eba64130b0b342042a283b164d6fa16e0c871c125256aabfc",
+            expected_release: "7.3.3-acorn",
             localversion: "-acorn",
             module_install_path: "/usr/lib/modules",
-            version: "6.19",
+            version: "7.3.3",
         };
     }
 

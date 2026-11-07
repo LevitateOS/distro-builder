@@ -10,16 +10,16 @@ fn source_spec(selected_target) {
 
     if target == "levitate" {
         return #{
-            version: "6.12.71",
-            sha256: "143e8bc76cc41f831b51aa5e75819bed55bed41f299d35922820f1d2d2b02600",
+            version: "6.12.116",
+            sha256: "cb3ed3dfdd47e6ade49dc933db334fd86e24cadee920da612c262b0e9b6a511b",
             localversion: "-levitate",
             module_install_path: "/usr/lib/modules",
         };
     }
     if target == "acorn" {
         return #{
-            version: "6.19",
-            sha256: "303079a8250b8f381f82b03f90463d12ac98d4f6b149b761ea75af1323521357",
+            version: "7.3.3",
+            sha256: "79c66dde66cd96877fcde8f7d36aec946b1f423d2b97b5a7b1751b75c764f3d1",
             localversion: "-acorn",
             module_install_path: "/usr/lib/modules",
         };

@@ -14,7 +14,7 @@ let ctx = #{
 
 // The rootfs records the exact builds it was made from; a new lock rebuilds it.
 fn _rootfs_marker(ctx) {
-    let marker = "fedora-rpm-set-v3-target-metadata";
+    let marker = "fedora-rpm-set-v4-mount-points";
     for rpm in ctx.packages { marker += "\n" + rpm[1]; }
     marker
 }
@@ -142,6 +142,13 @@ fn build(ctx) {
     shell("mkdir -p '" + join_path(rootfs, "usr/share/dbus-1") + "'");
     shell("mkdir -p '" + join_path(rootfs, "etc") + "'");
     shell("mkdir -p '" + join_path(rootfs, "var") + "'");
+    // The kernel filesystems' mount points. systemd's switch-root moves /proc and /sys
+    // into the new root and gives up without them, so a slot recab stages from this
+    // image must carry them (an install only got them from recchroot's bind mounts).
+    for dir in ["proc", "sys"] {
+        shell("mkdir -p '" + join_path(rootfs, dir) + "'");
+        chmod(join_path(rootfs, dir), 0o555);
+    }
     if !exists(join_path(rootfs, "usr/bin/sh")) {
         ln_force("bash", join_path(rootfs, "usr/bin/sh"));
     }

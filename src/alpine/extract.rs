@@ -24,7 +24,7 @@ impl ExtractPaths {
     pub fn new(base_dir: &Path) -> Self {
         let downloads = base_dir.join("downloads");
         Self {
-            iso: downloads.join("alpine-extended-3.23.2-x86_64.iso"),
+            iso: downloads.join("alpine-extended-3.24.4-x86_64.iso"),
             iso_contents: downloads.join("iso-contents"),
             rootfs: downloads.join("rootfs"),
             apk_tools: downloads.join("apk-tools"),

@@ -20,7 +20,8 @@ let ctx = #{
     profile: "acorn",
     release_branch: assets.release_branch,
     rootfs_path: join_path(RUNTIME.paths.output, "rootfs"),
-    rootfs_recipe_version: "alpine-source-v8-installed",
+    // A new Alpine pin rebuilds the rootfs.
+    rootfs_recipe_version: "alpine-source-v8-installed-" + assets.iso_version,
 };
 
 fn _verify_inputs(ctx) {
@@ -49,11 +50,11 @@ fn _profile_packages(profile) {
     let normalized = trim(profile).to_lower();
     if normalized == "acorn" {
         // From the ISO. The rest (findutils, grep, less, musl-locales,
-        // openrc-init, systemd-boot, hdparm, smartmontools) are the pinned
-        // extra_apks files, which `apk add` takes alongside these names.
+        // openrc-init, systemd-boot, hdparm, smartmontools, vim) are the
+        // pinned extra_apks files, which `apk add` takes alongside these names.
         return "alpine-base busybox openrc doas " +
                "openssh openssh-server util-linux e2fsprogs dosfstools " +
-               "iproute2 iputils dhcpcd curl pciutils vim htop";
+               "iproute2 iputils dhcpcd curl pciutils htop";
     }
 
     throw "Unsupported Alpine live source profile '" + profile + "'. Use profile 'acorn'.";

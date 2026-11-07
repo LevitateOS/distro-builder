@@ -294,7 +294,11 @@ fn build_tool_outputs(
         bail!("package {package} does not build binary {binary}");
     }
     // The recipe checks the target.
-    let target = target.unwrap_or("x86_64-unknown-linux-gnu");
+    let target = target.unwrap_or(if init == "openrc" {
+        "x86_64-unknown-linux-musl"
+    } else {
+        "x86_64-unknown-linux-gnu"
+    });
     let source = prepare_tool_source(repo, package)?;
     let recipe = repo
         .join("distro/builder/recipes")

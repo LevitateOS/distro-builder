@@ -4,7 +4,6 @@ use std::os::unix::fs::symlink;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Component;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 const LEGACY_ROOTFS_COMPONENT_SEQUENCES: &[&[&str]] = &[
     &["leviso", "downloads", "rootfs"],
@@ -112,7 +111,7 @@ pub(crate) fn apply_producer_plan(plan: &ProducerPlan, destination_root: &Path) 
                         target_path.display()
                     )
                 })?;
-                rsync_tree(&source_path, &target_path)?;
+                levitate_recipe::target::merge_tree(&source_path, &target_path)?;
             }
             RootfsProducer::CopySymlink {
                 source,
@@ -274,32 +273,4 @@ fn contains_component_sequence(haystack: &[String], needle: &[&str]) -> bool {
     haystack
         .windows(needle.len())
         .any(|window| window.iter().map(String::as_str).eq(needle.iter().copied()))
-}
-
-fn rsync_tree(source_dir: &Path, destination_dir: &Path) -> Result<()> {
-    let output = Command::new("rsync")
-        .arg("-a")
-        .arg(format!("{}/", source_dir.display()))
-        .arg(format!("{}/", destination_dir.display()))
-        .output()
-        .with_context(|| {
-            format!(
-                "running rsync from '{}' to '{}'",
-                source_dir.display(),
-                destination_dir.display()
-            )
-        })?;
-    if output.status.success() {
-        return Ok(());
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    bail!(
-        "rsync failed from '{}' to '{}': {}\n{}",
-        source_dir.display(),
-        destination_dir.display(),
-        stdout.trim(),
-        stderr.trim()
-    )
 }

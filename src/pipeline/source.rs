@@ -13,6 +13,7 @@ use crate::recipe::rootfs_source::{materialize_rootfs_from_recipe, RootfsSourceR
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RootfsSourcePolicy {
+    pub storage_max_objects: Option<u64>,
     pub kind: RootfsSourceKind,
     pub recipe_script: PathBuf,
     pub preseed_recipe_script: Option<PathBuf>,
@@ -38,6 +39,7 @@ fn rootfs_source_policy_from_source_contract(
     source: &RootfsSourceContract,
 ) -> Result<RootfsSourcePolicy> {
     Ok(RootfsSourcePolicy {
+        storage_max_objects: source.storage_max_objects,
         kind: source.kind,
         recipe_script: resolve_repo_path(repo_root, source.recipe_script.trim()),
         preseed_recipe_script: source
@@ -91,6 +93,7 @@ pub(crate) fn materialize_source_rootfs(
         repo_root,
         &build_dir,
         &RootfsSourceRecipeSpec {
+            storage_max_objects: source.storage_max_objects,
             recipe_script: source.recipe_script.clone(),
             defines: source.defines.clone(),
             network_hosts: source.network_hosts.clone(),

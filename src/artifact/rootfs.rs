@@ -83,8 +83,6 @@ pub fn create_erofs(
         bail!("Source path is not a directory: {}", source_dir.display());
     }
 
-    ensure_owner_readable_files(source_dir)?;
-
     // Check tool availability
     if !process::exists("mkfs.erofs") {
         bail!(
@@ -111,18 +109,19 @@ pub fn create_erofs(
     // Format compression argument: algorithm,level
     let compression_arg = format!("{},{}", compression, compression_level);
 
-    // IMPORTANT: mkfs.erofs argument order is OUTPUT SOURCE (opposite of mksquashfs!)
+    // Target ownership/modes/xattrs travel in tar headers, independently of
+    // staging privileges. Never bake host ownership or staging read grants in.
+    let mut archive = tempfile::NamedTempFile::new_in(output.parent().unwrap_or(Path::new(".")))?;
+    levitate_recipe::target::write_tar(source_dir, archive.as_file_mut())?;
+    archive.as_file().sync_all()?;
     Cmd::new("mkfs.erofs")
         .args(["-z", &compression_arg])
         .args(["-C", &chunk_size.to_string()])
-        .arg("--all-root") // All files owned by root (required for sshd, etc.)
-        .arg("-T0") // Reproducible builds (timestamp=0)
-        .arg_path(output) // OUTPUT FIRST
-        .arg_path(source_dir) // SOURCE SECOND
-        .error_msg(
-            "mkfs.erofs failed. Install erofs-utils: sudo dnf install erofs-utils\n\
-             NOTE: erofs-utils 1.5+ required for lz4hc, 1.8+ for zstd.",
-        )
+        .arg("--tar=f")
+        .arg("-T0")
+        .arg_path(output)
+        .arg_path(archive.path())
+        .error_msg("mkfs.erofs failed importing target metadata; erofs-utils with full tar import is required")
         .run_interactive()?;
 
     // Print size
@@ -151,57 +150,6 @@ fn format_size_human(bytes: u64) -> String {
     } else {
         format!("{value:.1} {}", UNITS[unit])
     }
-}
-
-fn ensure_owner_readable_files(source_dir: &Path) -> Result<()> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        use walkdir::WalkDir;
-
-        let mut adjusted = 0usize;
-        for entry in WalkDir::new(source_dir).follow_links(false) {
-            let entry = entry.with_context(|| {
-                format!(
-                    "walking source directory for EROFS: {}",
-                    source_dir.display()
-                )
-            })?;
-            if !entry.file_type().is_file() {
-                continue;
-            }
-
-            let metadata = fs::symlink_metadata(entry.path()).with_context(|| {
-                format!("reading file metadata for '{}'", entry.path().display())
-            })?;
-            let mode = metadata.permissions().mode();
-            if mode & 0o400 != 0 {
-                continue;
-            }
-
-            let mut perms = metadata.permissions();
-            perms.set_mode(mode | 0o400);
-            match fs::set_permissions(entry.path(), perms) {
-                Ok(()) => adjusted += 1,
-                Err(err) => {
-                    eprintln!(
-                        "warning: unable to set owner-read bit for '{}': {}",
-                        entry.path().display(),
-                        err
-                    );
-                }
-            }
-        }
-
-        if adjusted > 0 {
-            println!(
-                "Adjusted owner-read permission on {} source file(s) for EROFS packing",
-                adjusted
-            );
-        }
-    }
-
-    Ok(())
 }
 
 /// EROFS settings for the rootfs and live overlay images.

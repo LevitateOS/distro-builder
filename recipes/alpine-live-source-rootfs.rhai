@@ -21,7 +21,7 @@ let ctx = #{
     release_branch: assets.release_branch,
     rootfs_path: join_path(RUNTIME.paths.output, "rootfs"),
     // A new Alpine pin rebuilds the rootfs.
-    rootfs_recipe_version: "alpine-source-v8-installed-" + assets.iso_version,
+    rootfs_recipe_version: "alpine-source-v9-target-metadata-" + assets.iso_version,
 };
 
 fn _verify_inputs(ctx) {
@@ -52,7 +52,9 @@ fn _profile_packages(profile) {
         // From the ISO. The rest (findutils, grep, less, musl-locales,
         // openrc-init, systemd-boot, hdparm, smartmontools, vim) are the
         // pinned extra_apks files, which `apk add` takes alongside these names.
-        return "alpine-base busybox openrc doas " +
+        // Deployment uses GNU cp's explicit xattr preservation; Busybox cp
+        // cannot preserve package file capabilities.
+        return "alpine-base busybox coreutils openrc doas " +
                "openssh openssh-server util-linux e2fsprogs dosfstools " +
                "iproute2 iputils dhcpcd curl pciutils htop";
     }
@@ -168,7 +170,7 @@ fn _ensure_openrc_live_source_completeness(rootfs) {
     // Acorn uses password-authenticated doas for wheel administrators.
     let doas_conf = join_path(rootfs, "etc/doas.conf");
     write_file(doas_conf, "permit persist :wheel\n");
-    chmod(doas_conf, 0o600);
+    target_mode(rootfs, "etc/doas.conf", 0o600);
     mkdir(join_path(rootfs, "usr/share/empty.sshd"));
     shell("chmod 755 '" + join_path(rootfs, "usr/share/empty.sshd") + "'");
     write_file(join_path(rootfs, "etc/locale.conf"), "LANG=C.UTF-8\n");
@@ -211,7 +213,9 @@ fn build(ctx) {
         shell("rm -rf '" + iso_contents + "'");
         mkdir(iso_contents);
         if shell_status("command -v xorriso >/dev/null 2>&1") == 0 {
-            let extract_cmd = "xorriso -osirrox on -indev '" + ctx.iso_path;
+            // This is an immutable ISO file, not a writable optical drive.
+            // Avoid the default exclusive/read-write device acquisition.
+            let extract_cmd = "xorriso -drive_access shared:readonly -osirrox on -indev 'stdio:" + ctx.iso_path;
             extract_cmd += "' -extract / '" + iso_contents;
             extract_cmd += "/'";
             shell(extract_cmd);
@@ -254,10 +258,13 @@ fn build(ctx) {
 
     let packages = _profile_packages(ctx.profile);
     log("Installing Alpine live source package baseline (" + ctx.profile + ")...");
+    let apk_cache = join_path(ctx.runtime.paths.build, "apk-cache");
+    mkdir(apk_cache);
     let apk_cmd = "'" + ctx.apk_static_path + "' --root '" + rootfs + "' " +
-        "--usermode --initdb --no-progress --allow-untrusted add " + packages +
+        "--usermode --initdb --no-progress --allow-untrusted --cache-dir '" + apk_cache + "' add " + packages +
         _extra_apk_files(ctx);
     shell(apk_cmd);
+    target_capture_apks(rootfs, [join_path(iso_contents, "apks"), ctx.extra_apks_path, apk_cache]);
     _normalize_rootfs_permissions(rootfs, "post-apk install");
     _ensure_openrc_live_source_completeness(rootfs);
 
@@ -270,6 +277,7 @@ fn build(ctx) {
     }
 
     installed::openrc(rootfs);
+    target_finalize(rootfs);
     write_file(_rootfs_marker(rootfs), ctx.rootfs_recipe_version + "\n");
     ctx.rootfs_path = rootfs;
     ctx

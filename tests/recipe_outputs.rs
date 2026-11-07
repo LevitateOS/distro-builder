@@ -55,6 +55,7 @@ fn install(ctx) {{
         repo,
         &work,
         &RootfsSourceRecipeSpec {
+            storage_max_objects: None,
             recipe_script: recipe,
             defines: BTreeMap::new(),
             inputs: BTreeMap::new(),

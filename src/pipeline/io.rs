@@ -106,11 +106,27 @@ pub(crate) fn extract_erofs_rootfs(image: &Path, destination: &Path) -> Result<(
     let extract_arg = format!("--extract={}", destination.display());
     let output = Command::new("fsck.erofs")
         .arg(extract_arg)
+        // Keep staging writable; the embedded manifest is authoritative.
+        .arg("--no-preserve-owner")
+        .arg("--no-preserve-perms")
         .arg(image)
         .output()
         .with_context(|| format!("running fsck.erofs for '{}'", image.display()))?;
 
     if output.status.success() {
+        use std::os::unix::fs::PermissionsExt;
+        for entry in walkdir::WalkDir::new(destination).follow_links(false) {
+            let entry = entry?;
+            let meta = fs::symlink_metadata(entry.path())?;
+            if meta.file_type().is_symlink() {
+                continue;
+            }
+            let grant = if meta.is_dir() { 0o700 } else { 0o600 };
+            fs::set_permissions(
+                entry.path(),
+                fs::Permissions::from_mode((meta.permissions().mode() & 0o777) | grant),
+            )?;
+        }
         return Ok(());
     }
 

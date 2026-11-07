@@ -59,6 +59,6 @@ pub(crate) fn create_live_overlay(
     .context("preparing the live overlay with Recipe")?;
     let published = crate::recipe::outputs::directory(&ctx, "overlay")?;
     let destination = crate::pipeline::io::create_empty_overlay_dir(output_dir, dir_name)?;
-    crate::artifact::filesystem::copy_dir_recursive(&published, &destination)?;
+    levitate_recipe::target::merge_tree(&published, &destination)?;
     Ok(destination)
 }

@@ -14,7 +14,7 @@ let ctx = #{
 
 // The rootfs records the exact builds it was made from; a new lock rebuilds it.
 fn _rootfs_marker(ctx) {
-    let marker = "fedora-rpm-set-v2-installed";
+    let marker = "fedora-rpm-set-v3-target-metadata";
     for rpm in ctx.packages { marker += "\n" + rpm[1]; }
     marker
 }
@@ -28,8 +28,7 @@ fn _verify_rpms(ctx) {
 }
 
 fn _extract_rpm_into_rootfs(rootfs, rpm_path) {
-    let cmd = "bash -o pipefail -c \"rpm2cpio '" + rpm_path + "' | cpio -idmu --quiet\"";
-    shell_in(rootfs, cmd);
+    target_extract_rpm(rpm_path, rootfs);
 }
 
 fn is_acquired(ctx) {
@@ -118,12 +117,11 @@ fn build(ctx) {
     mkdir(rootfs);
     log("Extracting the locked Fedora " + lock::release() + " RPM set into the rootfs...");
     for rpm in ctx.packages {
-        let rpm = join_path(ctx.rpms_path, basename(rpm[2]));
         log("  Extracting " + rpm[1]);
-        _extract_rpm_into_rootfs(rootfs, rpm);
-        // RPM payloads can carry restrictive directory modes; keep tree writable
-        // so subsequent package extraction can add files into existing dirs.
-        shell("chmod -R u+rwX " + rootfs);
+        let path = join_path(ctx.rpms_path, basename(rpm[2]));
+        // The helper already grants staging access independently of target
+        // modes. Do not rescan/chmod the whole growing tree after each RPM.
+        _extract_rpm_into_rootfs(rootfs, path);
     }
 
     // Fedora merged /usr/sbin into /usr/bin: `filesystem` lists /usr/sbin as a
@@ -175,7 +173,7 @@ fn build(ctx) {
     mkdir(join_path(rootfs, "etc/sudoers.d"));
     let wheel_sudoers = join_path(rootfs, "etc/sudoers.d/10-wheel");
     write_file(wheel_sudoers, "%wheel ALL=(ALL:ALL) ALL\n");
-    chmod(wheel_sudoers, 0o440);
+    target_mode(rootfs, "etc/sudoers.d/10-wheel", 0o440);
 
     // RPM scriptlets are not executed in this producer path. Ensure OpenSSH
     // Privilege-separation account entries must exist so sshd can start in live boot.
@@ -275,8 +273,9 @@ fn build(ctx) {
     // Keep rootfs recipe outputs deterministic and lean.
     shell("rm -rf '" + join_path(rootfs, "var/cache") + "' '" + join_path(rootfs, "var/log") + "'");
     shell("mkdir -p '" + join_path(rootfs, "var/cache") + "' '" + join_path(rootfs, "var/log") + "' '" + join_path(rootfs, "var/log/audit") + "'");
-    chmod(join_path(rootfs, "var/log/audit"), 0o700);
+    target_mode(rootfs, "var/log/audit", 0o700);
     installed::systemd(rootfs);
+    target_finalize(rootfs);
     write_file(join_path(rootfs, ".source-rootfs.recipe-version"), _rootfs_marker(ctx) + "\n");
     ctx
 }

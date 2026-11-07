@@ -250,6 +250,7 @@ pub fn run_recipe_phase_json_with_defines(
         &[],
         None,
         false,
+        None,
     )
 }
 
@@ -278,6 +279,7 @@ pub fn run_recipe_phase_json_with_inputs(
         network_hosts,
         memory_mib,
         false,
+        None,
     )
 }
 
@@ -292,6 +294,7 @@ fn run_recipe_phase_json_impl(
     network_hosts: &[String],
     memory_mib: Option<u64>,
     force_acquire: bool,
+    storage_max_objects: Option<u64>,
 ) -> Result<serde_json::Value> {
     eprintln!("  Running recipe: {}", recipe_path.display());
     eprintln!("    Phase: {}", phase);
@@ -318,6 +321,9 @@ fn run_recipe_phase_json_impl(
     cmd.arg("--state-dir").arg(build_dir.join("recipe-state"));
     if force_acquire {
         cmd.args(["--force-acquire", "--force-install"]);
+    }
+    if let Some(objects) = storage_max_objects {
+        cmd.arg("--storage-max-objects").arg(objects.to_string());
     }
     if let Some(memory_mib) = memory_mib {
         cmd.arg("--memory-mib").arg(memory_mib.to_string());

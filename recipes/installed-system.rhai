@@ -4,7 +4,7 @@ fn put(root, path, content, mode) {
     let dest = join_path(root, path);
     mkdir(dirname(dest));
     write_file(dest, content);
-    chmod(dest, mode);
+    target_mode(root, path, mode);
 }
 
 fn setup_program(root, init, libc) {
@@ -40,7 +40,7 @@ fn systemd(root) {
         join_path(root, "etc/systemd/system/default.target"));
     for path in ["var/empty/sshd", "usr/share/empty.sshd"] {
         mkdir(join_path(root, path));
-        chmod(join_path(root, path), 0o755);
+        target_mode(root, path, 0o755);
     }
     let config = join_path(root, "etc/ssh/sshd_config");
     if !is_file(config) {

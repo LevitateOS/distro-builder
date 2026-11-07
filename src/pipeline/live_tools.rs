@@ -38,7 +38,7 @@ pub(crate) fn add_required_tools(
             init,
         )
         .with_context(|| format!("preparing {package} for {distro_id}"))?;
-        crate::artifact::filesystem::copy_dir_recursive(&tree, layer)?;
+        levitate_recipe::target::merge_tree(&tree, layer)?;
     }
     Ok(())
 }

@@ -580,5 +580,9 @@ fn apply_system_payload(plan: &ProducerPlan, root: &Path) -> Result<()> {
         fs::remove_file(&path)?;
     }
     fs::write(&path, identity)?;
+    // The contract replaces the vendor identity; discard its content binding.
+    let mut metadata = levitate_recipe::target::load(root)?;
+    metadata.entries.remove("etc/os-release");
+    levitate_recipe::target::save(root, &metadata)?;
     Ok(())
 }

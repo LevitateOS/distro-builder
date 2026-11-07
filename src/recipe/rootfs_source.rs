@@ -2,10 +2,11 @@ use anyhow::{bail, Context, Result};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use super::{find_recipe, recipe_work_dir, run_recipe_phase_json_with_inputs};
+use super::{find_recipe, recipe_work_dir};
 
 #[derive(Debug, Clone)]
 pub struct RootfsSourceRecipeSpec {
+    pub storage_max_objects: Option<u64>,
     pub recipe_script: PathBuf,
     pub defines: BTreeMap<String, String>,
     pub inputs: BTreeMap<String, PathBuf>,
@@ -52,16 +53,18 @@ pub fn materialize_rootfs_from_recipe(
         .iter()
         .map(|(name, path)| (name.as_str(), path.as_path()))
         .collect();
-    let ctx = run_recipe_phase_json_with_inputs(
+    let ctx = super::run_recipe_phase_json_impl(
         &recipe_bin.path,
         "install",
         &recipe_path,
         build_dir,
         &defines,
+        Some(recipes_path),
         &inputs,
         &spec.network_hosts,
         spec.memory_mib,
-        Some(recipes_path),
+        false,
+        spec.storage_max_objects,
     )
     .with_context(|| {
         format!(
@@ -119,6 +122,7 @@ pub fn preseed_rootfs_source(
         network_hosts,
         memory_mib,
         refresh,
+        None,
     )
     .with_context(|| format!("preseeding rootfs source via '{}'", recipe_path.display()))?;
     let outputs: BTreeMap<String, PathBuf> = required_outputs

@@ -1,41 +1,30 @@
-//! Filesystem utilities for artifact building.
-//!
-//! Common filesystem operations used during ISO, initramfs, and EROFS artifact creation.
+//! Filesystem helpers for artifact building.
 
 use anyhow::{Context, Result};
 use std::fs;
 use std::path::Path;
 
-/// Recursively copy a directory, preserving symlinks.
-///
-/// Unlike `fs::copy`, this properly handles:
-/// - Nested directories
-/// - Symbolic links (preserved, not followed)
-/// - File permissions
-///
-/// This uses the overwrite variant from `leviso-elf`, which replaces existing
-/// symlinks. This is the desired behavior for overlay creation.
-///
-/// # Arguments
-///
-/// * `src` - Source directory to copy
-/// * `dst` - Destination directory (created if it doesn't exist)
-///
-/// # Example
-///
-/// ```rust,ignore
-/// use distro_builder::artifact::filesystem::copy_dir_recursive;
-/// use std::path::Path;
-///
-/// copy_dir_recursive(
-///     Path::new("/tmp/source"),
-///     Path::new("/tmp/dest"),
-/// )?;
-/// ```
+/// Copy the tree `src` into `dst`. Symlinks are recreated, replacing whatever
+/// is at their destination; regular files are overwritten.
 pub fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
-    // Use leviso-elf's overwrite variant (replaces existing symlinks)
-    // and discard the byte count since callers expect Result<()>
-    leviso_elf::copy_dir_recursive_overwrite(src, dst)?;
+    fs::create_dir_all(dst).with_context(|| format!("creating '{}'", dst.display()))?;
+    for entry in fs::read_dir(src).with_context(|| format!("reading '{}'", src.display()))? {
+        let path = entry?.path();
+        let dest = dst.join(path.file_name().expect("read_dir entries have a name"));
+        let meta = fs::symlink_metadata(&path)?;
+        if meta.file_type().is_symlink() {
+            if fs::symlink_metadata(&dest).is_ok() {
+                fs::remove_file(&dest).with_context(|| format!("replacing '{}'", dest.display()))?;
+            }
+            std::os::unix::fs::symlink(fs::read_link(&path)?, &dest)
+                .with_context(|| format!("linking '{}'", dest.display()))?;
+        } else if meta.is_dir() {
+            copy_dir_recursive(&path, &dest)?;
+        } else {
+            fs::copy(&path, &dest)
+                .with_context(|| format!("copying '{}' to '{}'", path.display(), dest.display()))?;
+        }
+    }
     Ok(())
 }
 

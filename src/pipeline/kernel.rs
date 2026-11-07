@@ -1,64 +1,49 @@
+//! The kernel artifacts of a variant: where the kernel build puts them, and
+//! the Recipe check that they are installed.
+
 use anyhow::{bail, Context, Result};
-use distro_contract::VariantOwnerPaths;
+use distro_contract::Variant;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use crate::recipe::recipe_work_dir;
 
-#[derive(Debug, Clone)]
-pub struct KernelSpec {
-    pub recipe_kernel_script: String,
-    pub kernel_kconfig_path: String,
+/// The recipe that installs a variant's kernel (the prebuilt release bundle).
+pub const KERNEL_RECIPE: &str = "distro/builder/recipes/linux-prebuilt.rhai";
+/// `kernel.release` under the kernel output directory.
+pub const KERNEL_RELEASE_PATH: &str = "kernel-build/include/config/kernel.release";
+/// The kernel image under the kernel output directory.
+pub const KERNEL_IMAGE_PATH: &str = "staging/boot/vmlinuz";
+/// The directory under the kernel output directory that holds `<kernel.release>/`
+/// with the modules (`/usr/lib/modules` in the image).
+pub const KERNEL_MODULES_DIR: &str = "staging/usr/lib/modules";
+
+/// The kernel configuration of `variant` and its optional `kconfig.d` fragments.
+pub fn kconfig_inputs(variant: &Variant) -> (PathBuf, Option<PathBuf>) {
+    let fragments = variant.path("kconfig.d");
+    (variant.path("kconfig"), fragments.is_dir().then_some(fragments))
 }
 
-#[derive(Debug, Clone)]
-pub struct EvidenceSpec {
-    pub script_path: String,
-    pub pass_marker: String,
-    pub kernel_release_path: String,
-    pub kernel_image_path: String,
-    pub iso_filename: String,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum KernelEnsureOutcome {
-    AlreadyInstalled,
-}
-
-pub fn check_kernel_installed_with_recipe(
-    repo_root: &Path,
-    variant_paths: &VariantOwnerPaths,
-    distro_id: &str,
-    kernel_output_dir: &Path,
-    spec: &KernelSpec,
-) -> Result<()> {
-    let recipe_script = repo_root.join(&spec.recipe_kernel_script);
+/// Ask the kernel recipe whether `kernel_output_dir` holds the variant's kernel.
+pub fn check_kernel_installed(variant: &Variant, kernel_output_dir: &Path) -> Result<()> {
+    let repo_root = &variant.repo_root;
+    let recipe_script = repo_root.join(KERNEL_RECIPE);
     let recipes_path = recipe_script
         .parent()
-        .ok_or_else(|| {
-            anyhow::anyhow!(
-                "recipe_kernel_script has no parent directory: {}",
-                recipe_script.display()
-            )
-        })?
+        .context("the kernel recipe has no parent directory")?
         .to_path_buf();
-    let build_dir = work_dir_for_distro(repo_root, distro_id)?;
-    let kconfig = variant_paths.build_host_declared_path(&spec.kernel_kconfig_path);
-    let fragments = kconfig
-        .parent()
-        .context("kconfig has no parent")?
-        .join("kconfig.d");
+    let build_dir = work_dir_for_distro(repo_root, &variant.id)?;
+    let (kconfig, fragments) = kconfig_inputs(variant);
 
     let recipe_bin = crate::recipe::find_recipe(repo_root)
         .context("Resolving recipe binary for build kernel")?;
-    let defines = [("KERNEL_TARGET", distro_id)];
+    let defines = [("KERNEL_TARGET", variant.id.as_str())];
     // The kernel output is a symlink to the selected bundle; Recipe stages
     // only real files and directories, so pass the bundle itself.
     let target = std::fs::canonicalize(kernel_output_dir)
         .unwrap_or_else(|_| kernel_output_dir.to_path_buf());
     let mut inputs: Vec<(&str, &Path)> = vec![("kconfig", &kconfig), ("target", &target)];
-    if fragments.is_dir() {
-        inputs.push(("kconfig_fragments", &fragments));
+    if let Some(fragments) = &fragments {
+        inputs.push(("kconfig_fragments", fragments));
     }
     crate::recipe::run_recipe_phase_json_with_inputs(
         &recipe_bin.path,
@@ -76,76 +61,17 @@ pub fn check_kernel_installed_with_recipe(
     Ok(())
 }
 
-pub fn ensure_kernel_preinstalled_with_recipe(
-    repo_root: &Path,
-    variant_paths: &VariantOwnerPaths,
-    distro_id: &str,
-    kernel_output_dir: &Path,
-    spec: &KernelSpec,
-) -> Result<KernelEnsureOutcome> {
-    match check_kernel_installed_with_recipe(
-        repo_root,
-        variant_paths,
-        distro_id,
-        kernel_output_dir,
-        spec,
-    ) {
-        Ok(()) => Ok(KernelEnsureOutcome::AlreadyInstalled),
-        Err(e) => bail!(
-            "build-host kernel is not preinstalled for '{}': {}\n\
+/// Fail unless the variant's kernel is already installed: release builds
+/// never build a kernel.
+pub fn ensure_kernel_preinstalled(variant: &Variant, kernel_output_dir: &Path) -> Result<()> {
+    if let Err(e) = check_kernel_installed(variant, kernel_output_dir) {
+        bail!(
+            "the {id} kernel is not installed: {e}\n\
              Kernel rebuilds are forbidden during release ISO builds.\n\
-             Remediation: run 'cargo xtask build kernel {}' (add '--rebuild' if provenance is stale, or use '--prebuilt'), then retry the ISO build.",
-            distro_id,
-            e,
-            distro_id
-        ),
-    }
-}
-
-pub fn run_build_evidence_script(
-    repo_root: &Path,
-    variant_paths: &VariantOwnerPaths,
-    kernel_output_dir: &Path,
-    release_output_dir: &Path,
-    spec: &EvidenceSpec,
-) -> Result<()> {
-    let script = variant_paths.build_host_declared_path(&spec.script_path);
-    if !script.is_file() {
-        bail!("build evidence script not found: {}", script.display());
-    }
-
-    let kernel_release_path = kernel_output_dir.join(&spec.kernel_release_path);
-    let kernel_image_path = kernel_output_dir.join(&spec.kernel_image_path);
-    let iso_path = release_output_dir.join(&spec.iso_filename);
-
-    let output = Command::new("sh")
-        .arg(&script)
-        .current_dir(repo_root)
-        .env("KERNEL_RELEASE_PATH", &kernel_release_path)
-        .env("KERNEL_IMAGE_PATH", &kernel_image_path)
-        .env("ISO_PATH", &iso_path)
-        .output()
-        .with_context(|| format!("executing build evidence script '{}'", script.display()))?;
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    let combined = format!("{}{}", stdout, stderr);
-
-    if !output.status.success() {
-        bail!(
-            "build evidence script failed (status {}): {}",
-            output.status,
-            combined.trim()
+             Remediation: run 'cargo xtask build kernel {id}' (add '--rebuild' if provenance is stale, or use '--prebuilt'), then retry the ISO build.",
+            id = variant.id,
         );
     }
-
-    if !combined.contains(&spec.pass_marker) {
-        bail!(
-            "build evidence script did not emit required pass marker '{}'",
-            spec.pass_marker
-        );
-    }
-
     Ok(())
 }
 

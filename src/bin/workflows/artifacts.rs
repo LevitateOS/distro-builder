@@ -11,10 +11,7 @@ use distro_builder::{
     prepare_live_tools_product, BaseProductLayout, DerivedProductLayout, OverlayLayout,
     ParentRootfsInput, ProductRealizationStep,
 };
-use distro_contract::{
-    load_variant_contract_bundle_for_distro_from, require_valid_contract, ConformanceContract,
-    LoadedVariantContract, ProductDecl,
-};
+use distro_contract::{ConformanceContract, ProductDecl, Variant};
 
 use crate::workflows::prepared_products::{
     canonical_prepared_output_names, canonical_rootfs_erofs_filename,
@@ -59,7 +56,7 @@ fn canonical_derived_product_layout(
         .as_deref()
         .ok_or_else(|| {
             anyhow::anyhow!(
-                "missing canonical Ring 2 composition edge for '{}': product '{}' must declare `extends` in ring2/products.toml",
+                "product '{}' ({}) has no parent product to extend",
                 product.canonical,
                 runtime_product.logical_name
             )
@@ -88,7 +85,7 @@ fn runtime_product_decl(
         crate::PRODUCT_LIVE_TOOLS => Ok(&contract.products.live_tools),
         crate::PRODUCT_INSTALLED_BOOT => contract.products.boot_installed.as_ref().ok_or_else(|| {
             anyhow::anyhow!(
-                "missing canonical Ring 2 product declaration for '{}': ring2/products.toml must define `boot_installed`",
+                "the variant declares no installed-boot product, so '{}' cannot be built",
                 product.canonical
             )
         }),
@@ -158,9 +155,8 @@ pub(crate) fn build_prepared_product_erofs_cmd(prepared_dir: &Path) -> Result<()
 
 pub(crate) fn prepare_product_cmd(product: &str, distro_id: &str, output_dir: &Path) -> Result<()> {
     let product = crate::workflows::parse_product(Some(product))?;
-    let cwd = std::env::current_dir().context("resolving current directory")?;
-    let bundle = load_variant_contract_bundle_for_distro_from(&cwd, distro_id)
-        .with_context(|| format!("loading canonical variant contract for '{}'", distro_id))?;
+    let repo_root = crate::workflows::repo_root()?;
+    let bundle = distro_contract::load(&repo_root, distro_id)?;
     crate::workflows::ensure_release_prerequisites(&bundle.repo_root, distro_id, product)
         .with_context(|| {
             format!(
@@ -203,7 +199,7 @@ pub(crate) fn prepare_product_cmd(product: &str, distro_id: &str, output_dir: &P
 }
 
 fn prepare_product_inputs(
-    bundle: &LoadedVariantContract,
+    bundle: &Variant,
     product: crate::BuildProduct,
     distro_id: &str,
     output_dir: &Path,
@@ -246,7 +242,7 @@ fn prepare_product_inputs(
                 planned_parent_rootfs_image(planned_step, product, distro_id, &layout)?;
             let spec = load_live_boot_product_spec(
                 &bundle.repo_root,
-                &bundle.variant_dir,
+                &bundle.dir,
                 &bundle.contract,
                 distro_id,
                 layout,
@@ -267,7 +263,7 @@ fn prepare_product_inputs(
                 planned_parent_rootfs_image(planned_step, product, distro_id, &layout)?;
             let spec = load_live_tools_product_spec(
                 &bundle.repo_root,
-                &bundle.variant_dir,
+                &bundle.dir,
                 &bundle.contract,
                 distro_id,
                 layout,
@@ -288,7 +284,7 @@ fn prepare_product_inputs(
                 planned_parent_rootfs_image(planned_step, product, distro_id, &layout)?;
             let spec = load_installed_boot_product_spec(
                 &bundle.repo_root,
-                &bundle.variant_dir,
+                &bundle.dir,
                 &bundle.contract,
                 distro_id,
                 layout,
@@ -330,15 +326,14 @@ fn planned_parent_rootfs_image(
 }
 
 pub(crate) fn preseed_rootfs_source_cmd(distro_id: &str, refresh: bool) -> Result<()> {
-    let cwd = std::env::current_dir().context("resolving current directory")?;
-    let bundle = load_variant_contract_bundle_for_distro_from(&cwd, distro_id)
-        .with_context(|| format!("loading canonical variant contract for '{}'", distro_id))?;
+    let repo_root = crate::workflows::repo_root()?;
+    let bundle = distro_contract::load(&repo_root, distro_id)?;
     let live_boot_spec = canonical_live_boot_product_spec(&bundle, distro_id)
         .with_context(|| format!("loading canonical rootfs source policy for '{}'", distro_id))?;
 
-    let (recipe_script, outputs) = live_boot_spec.rootfs_source_preseed().with_context(|| format!(
-        "rootfs source for '{distro_id}' does not declare sources.rootfs_source.preseed_recipe_script in '{}'",
-        bundle.paths.ring3_sources_manifest.display()))?;
+    let (recipe_script, outputs) = live_boot_spec.rootfs_source_preseed().with_context(|| {
+        format!("the {distro_id} rootfs source has no preseed recipe")
+    })?;
     let paths = preseed_rootfs_source(
         &bundle.repo_root,
         distro_id,
@@ -357,9 +352,8 @@ pub(crate) fn preseed_rootfs_source_cmd(distro_id: &str, refresh: bool) -> Resul
 }
 
 pub(crate) fn materialize_rootfs_source_cmd(distro_id: &str) -> Result<()> {
-    let cwd = std::env::current_dir().context("resolving current directory")?;
-    let bundle = load_variant_contract_bundle_for_distro_from(&cwd, distro_id)
-        .with_context(|| format!("loading canonical variant contract for '{}'", distro_id))?;
+    let repo_root = crate::workflows::repo_root()?;
+    let bundle = distro_contract::load(&repo_root, distro_id)?;
     let live_boot_spec = canonical_live_boot_product_spec(&bundle, distro_id)
         .with_context(|| format!("loading canonical rootfs source policy for '{}'", distro_id))?;
 
@@ -372,16 +366,14 @@ pub(crate) fn materialize_rootfs_source_cmd(distro_id: &str) -> Result<()> {
 }
 
 fn canonical_live_boot_product_spec(
-    bundle: &LoadedVariantContract,
+    bundle: &Variant,
     distro_id: &str,
 ) -> Result<distro_builder::LiveBootProductSpec> {
-    require_valid_contract(&bundle.contract)
-        .with_context(|| format!("validating canonical variant contract for '{distro_id}'"))?;
     let product = crate::workflows::parse_product(Some(crate::PRODUCT_LIVE_BOOT))?;
     let layout = canonical_derived_product_layout(&bundle.contract, product)?;
     load_live_boot_product_spec(
         &bundle.repo_root,
-        &bundle.variant_dir,
+        &bundle.dir,
         &bundle.contract,
         distro_id,
         layout,

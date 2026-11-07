@@ -3,7 +3,7 @@
 pub mod artifact;
 pub mod install_ux;
 pub(crate) mod guest;
-pub mod build_host;
+pub use pipeline::kernel;
 pub(crate) mod pipeline;
 pub(crate) mod tui_binary;
 pub mod process;

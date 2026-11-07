@@ -2,12 +2,13 @@ use std::path::Path;
 use std::process::Command;
 
 use anyhow::{bail, Context, Result};
-use distro_contract::LoadedVariantContract;
+use distro_builder::kernel::{KERNEL_IMAGE_PATH, KERNEL_RELEASE_PATH};
+use distro_contract::Variant;
 
 use crate::{BuildOutputLayout, BuildProduct};
 
 pub(crate) fn ensure_release_iso_via_variant_hook(
-    bundle: &LoadedVariantContract,
+    bundle: &Variant,
     distro_id: &str,
     kernel_output_dir: &Path,
     build_layout: &BuildOutputLayout,
@@ -15,14 +16,11 @@ pub(crate) fn ensure_release_iso_via_variant_hook(
 ) -> Result<()> {
     let output_dir = &build_layout.output_dir;
     let live_uki = &bundle.contract.transforms.live_uki;
+    // The contract validates exactly three outputs: live, emergency, debug.
     let [live_uki_filename, emergency_uki_filename, debug_uki_filename] =
         live_uki.output_names.as_slice()
     else {
-        bail!(
-            "invalid canonical Ring 1 live UKI transform for '{}': expected exactly three output names in `contract.transforms.live_uki.output_names`, found {:?}",
-            distro_id,
-            live_uki.output_names
-        );
+        unreachable!("the contract validates three live UKI outputs")
     };
     let live_cmdline = live_uki.extra_cmdline.clone().unwrap_or_default();
     let initramfs_live_filename = crate::workflows::canonical_initramfs_live_filename(
@@ -59,21 +57,18 @@ pub(crate) fn ensure_release_iso_via_variant_hook(
             product.canonical
         )
     })?;
-    let native_build = bundle.paths.ring0_hook_path(release_hook_script);
+    let native_build = bundle.path("hooks").join(release_hook_script);
     if !native_build.is_file() {
         bail!(
-            "missing variant release build hook for product '{}' on '{}': {}\n\
-             expected '{}' under '{}'.",
+            "missing variant release build hook for product '{}' on '{}': {}",
             product.canonical,
             distro_id,
             native_build.display(),
-            release_hook_script,
-            bundle.paths.ring0_hooks_dir.display()
         );
     }
 
-    let kernel_release_path = kernel_output_dir.join(&bundle.contract.build.kernel.release_path);
-    let kernel_image_path = kernel_output_dir.join(&bundle.contract.build.kernel.image_path);
+    let kernel_release_path = kernel_output_dir.join(KERNEL_RELEASE_PATH);
+    let kernel_image_path = kernel_output_dir.join(KERNEL_IMAGE_PATH);
 
     println!(
         "[release:iso:{}:{distro_id}] building release run {} via variant release hook {} (output: {})",
@@ -138,9 +133,9 @@ pub(crate) fn ensure_release_iso_via_variant_hook(
         bail!("builder command failed for '{distro_id}' with status {status}");
     }
 
-    if !iso_path.is_file() {
+    if std::fs::metadata(&iso_path).map_or(true, |m| !m.is_file() || m.len() == 0) {
         bail!(
-            "builder finished but ISO still missing for '{}': {}",
+            "builder finished but the ISO for '{}' is missing or empty: {}",
             distro_id,
             iso_path.display()
         );
@@ -150,7 +145,7 @@ pub(crate) fn ensure_release_iso_via_variant_hook(
 }
 
 fn product_required_kernel_cmdline(
-    bundle: &LoadedVariantContract,
+    bundle: &Variant,
     product: BuildProduct,
 ) -> String {
     match product.canonical {

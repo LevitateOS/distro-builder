@@ -56,7 +56,7 @@ impl Installable for MyComponent {
 
 ## Build model
 
-Canonical builds load ring-owned manifests from `distro/variants/<distro>/`: sources (Ring 3), filesystem products (Ring 2), artifact transforms (Ring 1), and releases (Ring 0). Build-host and scenario declarations are separate owners.
+Builds read the variant contract `distro/variants/<distro>/distro.toml` through `distro_contract::load`: sources, filesystem products, artifact transforms, release and scenarios, with the kernel configuration (`kconfig`) and release hooks (`hooks/`) beside it. The kernel artifact layout (`kernel-build/include/config/kernel.release`, `staging/boot/vmlinuz`, `staging/usr/lib/modules`) and the kernel recipe are constants in `distro_builder::kernel`.
 
 Build explicitly with `cargo xtask build live-tools levitate`. Run an independent scenario with `cargo xtask test live-tools levitate`; scenario commands consume existing artifacts. The workspace `architecture.md` describes product outputs, scenarios, and validation.
 

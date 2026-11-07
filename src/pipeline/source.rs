@@ -41,11 +41,11 @@ fn rootfs_source_policy_from_source_contract(
     Ok(RootfsSourcePolicy {
         storage_max_objects: source.storage_max_objects,
         kind: source.kind,
-        recipe_script: resolve_repo_path(repo_root, source.recipe_script.trim()),
+        recipe_script: resolve_repo_path(repo_root, &source.recipe_script),
         preseed_recipe_script: source
             .preseed_recipe_script
             .as_deref()
-            .map(|script| resolve_repo_path(repo_root, script.trim())),
+            .map(|script| resolve_repo_path(repo_root, script)),
         preseed_outputs: source.preseed_outputs.clone(),
         defines: source.defines.clone(),
         network_hosts: source.network_hosts.clone(),

@@ -15,7 +15,7 @@ pub(crate) fn is_release_build_invocation(args: &[String]) -> bool {
 }
 
 pub(crate) fn run_release_build_command(args: &[String]) -> Result<()> {
-    let repo_root = crate::workflows::locate_repo_root()?;
+    let repo_root = crate::workflows::repo_root()?;
     let build_args: Vec<&String> = match args {
         [release, build, iso] if release == "release" && build == "build" && iso == "iso" => {
             vec![]
@@ -89,7 +89,7 @@ pub(crate) fn dispatch_non_release_command(args: &[String]) -> Result<()> {
             crate::workflows::build_overlayfs_erofs(Path::new(source_dir), Path::new(output))
         }
         [artifact, prepare] if artifact == "artifact" && prepare == "prepare-qemu-tools" => {
-            let repo = crate::workflows::locate_repo_root()?;
+            let repo = crate::workflows::repo_root()?;
             let tools = distro_builder::recipe::qemu::prepare_qemu_tools(&repo)?;
             println!("{}", tools.display());
             Ok(())
@@ -97,7 +97,7 @@ pub(crate) fn dispatch_non_release_command(args: &[String]) -> Result<()> {
         [artifact, prepare_source, package, output]
             if artifact == "artifact" && prepare_source == "prepare-tool-source" =>
         {
-            let repo = crate::workflows::locate_repo_root()?;
+            let repo = crate::workflows::repo_root()?;
             let output = Path::new(output);
             if std::fs::symlink_metadata(output).is_ok() {
                 bail!("source output already exists: {}", output.display());

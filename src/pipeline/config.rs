@@ -46,13 +46,9 @@ fn load_boot_payload_config_with_rootfs_source_policy(
     rootfs_source_policy: Option<RootfsSourcePolicy>,
 ) -> Result<BootLoadedConfig> {
     let os_name = contract.identity.os_name.clone();
-    let required_services = normalize_services(
-        contract
-            .scenarios
-            .live_environment
-            .required_services
-            .clone(),
-    );
+    // The contract guarantees distinct service names; the overlay takes them sorted.
+    let mut required_services = contract.scenarios.live_environment.required_services.clone();
+    required_services.sort();
     let overlay = overlay_policy_from_contract(&contract.product_config.live_overlay)?;
     let payload_producers = load_boot_payload_producers(contract, BootPayloadProduct::Live)?;
 
@@ -143,57 +139,31 @@ fn load_boot_payload_producers(
         .collect()
 }
 
+/// The contract validates the producer paths as relative paths below the rootfs.
 fn rootfs_producer_from_contract(producer: &PayloadProducerContract) -> Result<RootfsProducer> {
-    fn normalized_relative_path(raw: &str, field: &str) -> Result<std::path::PathBuf> {
-        let path = std::path::PathBuf::from(raw.trim());
-        if raw.trim().is_empty() {
-            bail!(
-                "Ring 2 payload producer field '{}' must not be empty",
-                field
-            );
-        }
-        if path.is_absolute() {
-            bail!(
-                "Ring 2 payload producer field '{}' must be relative, got '{}'",
-                field,
-                path.display()
-            );
-        }
-        if path
-            .components()
-            .any(|component| matches!(component, std::path::Component::ParentDir))
-        {
-            bail!(
-                "Ring 2 payload producer field '{}' must not traverse parents, got '{}'",
-                field,
-                path.display()
-            );
-        }
-        Ok(path)
-    }
-
+    use std::path::PathBuf;
     Ok(match producer {
         PayloadProducerContract::CopyTree {
             source,
             destination,
         } => RootfsProducer::CopyTree {
-            source: normalized_relative_path(source, "source")?,
-            destination: normalized_relative_path(destination, "destination")?,
+            source: PathBuf::from(source),
+            destination: PathBuf::from(destination),
         },
         PayloadProducerContract::CopySymlink {
             source,
             destination,
         } => RootfsProducer::CopySymlink {
-            source: normalized_relative_path(source, "source")?,
-            destination: normalized_relative_path(destination, "destination")?,
+            source: PathBuf::from(source),
+            destination: PathBuf::from(destination),
         },
         PayloadProducerContract::CopyFile {
             source,
             destination,
             optional,
         } => RootfsProducer::CopyFile {
-            source: normalized_relative_path(source, "source")?,
-            destination: normalized_relative_path(destination, "destination")?,
+            source: PathBuf::from(source),
+            destination: PathBuf::from(destination),
             optional: *optional,
         },
         PayloadProducerContract::WriteText {
@@ -201,7 +171,7 @@ fn rootfs_producer_from_contract(producer: &PayloadProducerContract) -> Result<R
             content,
             mode,
         } => RootfsProducer::WriteText {
-            path: normalized_relative_path(path, "path")?,
+            path: PathBuf::from(path),
             content: content.clone(),
             mode: *mode,
         },
@@ -213,15 +183,4 @@ fn overlay_policy_from_contract(overlay: &OverlayContract) -> Result<InitSystem>
         OverlayKind::Systemd => InitSystem::Systemd,
         OverlayKind::OpenRc => InitSystem::OpenRc,
     })
-}
-
-fn normalize_services(raw_services: Vec<String>) -> Vec<String> {
-    let mut required_services = raw_services
-        .into_iter()
-        .map(|service| service.trim().to_ascii_lowercase())
-        .filter(|service| !service.is_empty())
-        .collect::<Vec<_>>();
-    required_services.sort();
-    required_services.dedup();
-    required_services
 }

@@ -1,9 +1,4 @@
 use anyhow::{Context, Result};
-use distro_builder::build_host::{
-    ensure_kernel_preinstalled_via_recipe, run_build_host_evidence_script, BuildHostEvidenceSpec,
-    BuildHostKernelEnsureOutcome, BuildHostKernelSpec,
-};
-use distro_contract::{load_variant_contract_bundle_for_distro_from, require_valid_contract};
 use std::path::Path;
 use time::OffsetDateTime;
 
@@ -14,12 +9,11 @@ pub(crate) fn ensure_release_prerequisites(
     distro_id: &str,
     product: BuildProduct,
 ) -> Result<()> {
-    let bundle = load_variant_contract_bundle_for_distro_from(repo_root, distro_id)
-        .with_context(|| format!("loading variant contract for '{}'", distro_id))?;
+    let variant = distro_contract::load(repo_root, distro_id)?;
     let prerequisite_plan = distro_builder::plan_release_prerequisite_realization(
         repo_root,
         distro_id,
-        &bundle.contract,
+        &variant.contract,
         product.canonical,
     )?;
     for prerequisite in prerequisite_plan.missing_products() {
@@ -35,26 +29,22 @@ pub(crate) fn ensure_release_prerequisites(
 }
 
 pub(crate) fn build_all(product: BuildProduct) -> Result<()> {
-    let cwd = std::env::current_dir().context("resolving current directory")?;
-    let distro_ids = crate::workflows::parse::discover_distro_ids(&cwd)?;
+    let repo_root = crate::workflows::repo_root()?;
+    let distro_ids = crate::workflows::parse::discover_distro_ids(&repo_root)?;
     for distro_id in &distro_ids {
         println!(
             "[release:iso:{}] building {}...",
             product.canonical, distro_id
         );
-        ensure_release_prerequisites(&cwd, distro_id, product)?;
+        ensure_release_prerequisites(&repo_root, distro_id, product)?;
         build_one(distro_id, product)?;
     }
     Ok(())
 }
 
 pub(crate) fn build_one(distro_id: &str, product: BuildProduct) -> Result<()> {
-    let cwd = std::env::current_dir().context("resolving current directory")?;
-    let bundle = load_variant_contract_bundle_for_distro_from(&cwd, distro_id)
-        .with_context(|| format!("loading variant contract for '{distro_id}'"))?;
-
-    require_valid_contract(&bundle.contract)
-        .with_context(|| format!("validating variant contract for '{distro_id}'"))?;
+    let repo_root = crate::workflows::repo_root()?;
+    let bundle = distro_contract::load(&repo_root, distro_id)?;
 
     let kernel_output_dir =
         distro_builder::run_history::kernel_output_dir(&bundle.repo_root, distro_id);
@@ -67,13 +57,6 @@ pub(crate) fn build_one(distro_id: &str, product: BuildProduct) -> Result<()> {
     let build_layout = product_release_output_layout_for(&bundle.repo_root, distro_id, product)?;
 
     let output_dir = build_layout.output_dir.clone();
-    let build = &bundle.contract.build;
-
-    let kernel_spec = BuildHostKernelSpec {
-        recipe_kernel_script: build.kernel.recipe_script.clone(),
-        kernel_kconfig_path: build.kernel.kconfig_path.clone(),
-    };
-
     let base_iso_filename = crate::workflows::canonical_iso_filename(&bundle.contract)
         .with_context(|| format!("resolving canonical Ring 0 ISO output for '{}'", distro_id))?;
     let created_at_utc = now_utc_compact()?;
@@ -99,22 +82,12 @@ pub(crate) fn build_one(distro_id: &str, product: BuildProduct) -> Result<()> {
     }
 
     let build_result = (|| -> Result<()> {
-        match ensure_kernel_preinstalled_via_recipe(
-            &bundle.repo_root,
-            &bundle.paths,
-            distro_id,
-            &kernel_output_dir,
-            &kernel_spec,
-        )
-        .with_context(|| format!("ensuring kernel artifacts for '{distro_id}'"))?
-        {
-            BuildHostKernelEnsureOutcome::AlreadyInstalled => {
-                println!(
-                    "[release:iso:{}:{distro_id}] kernel already installed",
-                    product.canonical
-                );
-            }
-        }
+        distro_builder::kernel::ensure_kernel_preinstalled(&bundle, &kernel_output_dir)
+            .with_context(|| format!("ensuring kernel artifacts for '{distro_id}'"))?;
+        println!(
+            "[release:iso:{}:{distro_id}] kernel already installed",
+            product.canonical
+        );
         crate::workflows::ensure_release_iso_via_variant_hook(
             &bundle,
             distro_id,
@@ -122,23 +95,6 @@ pub(crate) fn build_one(distro_id: &str, product: BuildProduct) -> Result<()> {
             &build_layout,
             product,
         )?;
-
-        let evidence_spec = BuildHostEvidenceSpec {
-            script_path: build.evidence.script_path.clone(),
-            pass_marker: build.evidence.pass_marker.clone(),
-            kernel_release_path: build.kernel.release_path.clone(),
-            kernel_image_path: build.kernel.image_path.clone(),
-            iso_filename: iso_filename_for_product(&base_iso_filename, product),
-        };
-
-        run_build_host_evidence_script(
-            &bundle.repo_root,
-            &bundle.paths,
-            &kernel_output_dir,
-            &output_dir,
-            &evidence_spec,
-        )
-        .with_context(|| format!("running build evidence for '{distro_id}'"))?;
 
         println!(
             "[release:iso:{}:{distro_id}] built at {}",

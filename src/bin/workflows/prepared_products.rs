@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug)]
@@ -31,25 +31,25 @@ pub(crate) struct PreparedOutputNames {
 pub(crate) fn canonical_rootfs_erofs_filename(
     contract: &distro_contract::ConformanceContract,
 ) -> Result<String> {
-    require_single_transform_output(&contract.transforms.rootfs_image, "rootfs_image")
+    Ok(contract.transforms.rootfs_image.output().to_string())
 }
 
 pub(crate) fn canonical_overlay_erofs_filename(
     contract: &distro_contract::ConformanceContract,
 ) -> Result<String> {
-    require_single_transform_output(&contract.transforms.overlay_image, "overlay_image")
+    Ok(contract.transforms.overlay_image.output().to_string())
 }
 
 pub(crate) fn canonical_initramfs_live_filename(
     contract: &distro_contract::ConformanceContract,
 ) -> Result<String> {
-    require_single_transform_output(&contract.transforms.initramfs_live, "initramfs_live")
+    Ok(contract.transforms.initramfs_live.output().to_string())
 }
 
 pub(crate) fn canonical_iso_filename(
     contract: &distro_contract::ConformanceContract,
 ) -> Result<String> {
-    require_single_transform_output(&contract.transforms.iso, "iso")
+    Ok(contract.transforms.iso.output().to_string())
 }
 
 pub(crate) fn canonical_prepared_output_names(
@@ -150,24 +150,4 @@ fn relative_prepared_product_path(output_dir: &Path, path: &Path) -> Result<Stri
         )
     })?;
     Ok(relative.display().to_string())
-}
-
-fn require_single_transform_output(
-    transform: &distro_contract::ArtifactTransform,
-    field: &str,
-) -> Result<String> {
-    match transform.output_names.as_slice() {
-        [output] => Ok(output.clone()),
-        [] => bail!(
-            "invalid canonical Ring 1 transform '{}': `contract.transforms.{}` must declare exactly one output name",
-            transform.logical_name,
-            field
-        ),
-        outputs => bail!(
-            "invalid canonical Ring 1 transform '{}': `contract.transforms.{}` must declare exactly one output name, found {:?}",
-            transform.logical_name,
-            field,
-            outputs
-        ),
-    }
 }

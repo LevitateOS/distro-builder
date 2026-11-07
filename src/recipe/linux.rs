@@ -2,8 +2,7 @@
 
 use super::{find_recipe, recipe_work_dir, run_recipe_phase_json_with_inputs};
 use crate::pipeline::paths::normalize_distro_id;
-use anyhow::{Context, Result};
-use distro_contract::{load_variant_contract_bundle_for_distro_from, require_valid_contract};
+use anyhow::Result;
 use std::path::{Path, PathBuf};
 
 /// Paths produced by the linux.rhai recipe after execution.
@@ -27,10 +26,7 @@ impl LinuxPaths {
 /// Run the source kernel producer with canonical variant configuration and work paths.
 pub fn linux_for_distro(repo_root: &Path, distro_id: &str) -> Result<LinuxPaths> {
     let distro_id = normalize_distro_id(distro_id, "Linux adapter")?;
-    let bundle = load_variant_contract_bundle_for_distro_from(repo_root, distro_id)
-        .with_context(|| format!("loading kernel configuration for '{distro_id}'"))?;
-    require_valid_contract(&bundle.contract)
-        .with_context(|| format!("validating kernel contract for '{distro_id}'"))?;
+    let bundle = distro_contract::load(repo_root, distro_id)?;
     let monorepo_dir = &bundle.repo_root;
     let work_dir = recipe_work_dir(monorepo_dir, distro_id)?;
     // Single SSOT kernel recipe for all distros (parity). Distro-specific overrides
@@ -44,17 +40,11 @@ pub fn linux_for_distro(repo_root: &Path, distro_id: &str) -> Result<LinuxPaths>
     }
     let recipe_path = shared_recipe;
 
-    let kconfig_path = bundle
-        .paths
-        .build_host_declared_path(&bundle.contract.build.kernel.kconfig_path);
-    let fragments = kconfig_path
-        .parent()
-        .context("kconfig has no parent")?
-        .join("kconfig.d");
+    let (kconfig_path, fragments) = crate::kernel::kconfig_inputs(&bundle);
     let current = crate::run_history::kernel_output_dir(monorepo_dir, distro_id);
     let mut inputs: Vec<(&str, &Path)> = vec![("kconfig", &kconfig_path)];
-    if fragments.is_dir() {
-        inputs.push(("kconfig_fragments", &fragments));
+    if let Some(fragments) = &fragments {
+        inputs.push(("kconfig_fragments", fragments));
     }
     if current.is_dir() {
         inputs.push(("target", &current));

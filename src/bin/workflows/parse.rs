@@ -1,6 +1,4 @@
-use anyhow::{bail, Context, Result};
-use distro_contract::resolve_variant_owner_paths;
-use std::fs;
+use anyhow::{bail, Result};
 use std::path::Path;
 
 pub(crate) fn parse_release_build_command(
@@ -172,51 +170,12 @@ fn product_installed_boot() -> crate::BuildProduct {
 }
 
 pub(crate) fn discover_distro_ids(repo_root: &Path) -> Result<Vec<String>> {
-    let variants_dir = repo_root.join("distro/variants");
-    let entries = fs::read_dir(&variants_dir)
-        .with_context(|| format!("reading variants directory '{}'", variants_dir.display()))?;
-
-    let mut distro_ids = Vec::new();
-    for entry in entries {
-        let entry = entry.with_context(|| {
-            format!(
-                "reading entry under variants directory '{}'",
-                variants_dir.display()
-            )
-        })?;
-        let path = entry.path();
-        if !path.is_dir() {
-            continue;
-        }
-
-        let Some(name) = path.file_name().and_then(|part| part.to_str()) else {
-            continue;
-        };
-        if name.starts_with('_') {
-            continue;
-        }
-
-        let has_identity_manifest = path.join("identity").join("identity.toml").is_file();
-        if !has_identity_manifest {
-            continue;
-        }
-
-        resolve_variant_owner_paths(&path).with_context(|| {
-            format!(
-                "validating canonical owner layout for distro variant '{}'",
-                path.display()
-            )
-        })?;
-        distro_ids.push(name.to_string());
-    }
-
+    let distro_ids = distro_contract::distro_ids(repo_root);
     if distro_ids.is_empty() {
         bail!(
-            "no distro variants discovered under '{}'; expected directories with identity/identity.toml",
-            variants_dir.display()
+            "no distro variants under '{}'",
+            repo_root.join("distro/variants").display()
         );
     }
-
-    distro_ids.sort();
     Ok(distro_ids)
 }

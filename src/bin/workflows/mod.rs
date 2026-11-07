@@ -16,7 +16,7 @@ pub(crate) use build::{
 pub(crate) use commands::{
     dispatch_non_release_command, is_release_build_invocation, run_release_build_command,
 };
-pub(crate) use layout::locate_repo_root;
+pub(crate) use layout::repo_root;
 pub(crate) use parse::{
     discover_distro_ids, parse_product, parse_release_build_command, parse_release_product,
     product_for_logical_name,

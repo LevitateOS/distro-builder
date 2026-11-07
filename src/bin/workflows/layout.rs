@@ -1,17 +1,16 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 
-pub(crate) fn locate_repo_root() -> Result<PathBuf> {
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    for ancestor in manifest_dir.ancestors() {
-        let candidate = Path::new(ancestor);
-        if candidate.join("xtask").is_dir() && candidate.join("distro/variants").is_dir() {
-            return Ok(candidate.to_path_buf());
-        }
+/// The checkout distro-builder works on: the current directory (xtask and the
+/// release hooks run it from the repository root).
+pub(crate) fn repo_root() -> Result<PathBuf> {
+    let cwd = std::env::current_dir().context("resolving the current directory")?;
+    if !cwd.join("distro/variants").is_dir() {
+        bail!(
+            "'{}' is not a LevitateOS checkout (no distro/variants); run distro-builder from the repository root",
+            cwd.display()
+        );
     }
-    bail!(
-        "unable to locate repository root from '{}' for policy guard",
-        manifest_dir.display()
-    )
+    Ok(cwd)
 }

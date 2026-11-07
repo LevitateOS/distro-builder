@@ -1,79 +1,16 @@
-//! Shared infrastructure for building Linux distribution ISOs.
-//!
-//! This crate provides common abstractions used by both leviso (LevitateOS)
-//! and AcornOS builders. It extracts the distro-agnostic parts:
-//!
-//! - **Component system** - Declarative component definitions with traits and operations
-//! - **Artifact builders** - EROFS rootfs, initramfs, and ISO creation wrappers
-//! - **Build utilities** - Filesystem operations and context management
-//! - **Preflight checks** - Host tool validation before builds
-//!
-//! # Architecture
-//!
-//! ```text
-//! distro-builder (this crate)
-//!     │
-//!     ├── Defines: Installable trait, generic Op variants
-//!     ├── Defines: BuildContext trait, DistroConfig trait
-//!     └── Provides: Filesystem utilities, EROFS/ISO wrappers
-//!
-//! ```
-//!
-//! # Example
-//!
-//! ```rust,ignore
-//! use distro_builder::component::{Installable, Op, Phase};
-//!
-//! struct NetworkComponent;
-//!
-//! impl Installable for NetworkComponent {
-//!     fn name(&self) -> &str { "Network" }
-//!     fn phase(&self) -> Phase { Phase::Services }
-//!     fn ops(&self) -> Vec<Op> {
-//!         vec![
-//!             Op::Dir("etc/network".into()),
-//!             Op::WriteFile("etc/network/interfaces".into(), "auto lo\n".into()),
-//!         ]
-//!     }
-//! }
-//! ```
-//!
-//! # Status
-//!
-//! This crate is currently a structural skeleton. The abstractions are defined
-//! but not all functionality is extracted from leviso yet. Full extraction
-//! requires testing with both LevitateOS and AcornOS builds.
+//! Builds a variant's products (rootfs, overlays, release ISOs) over Recipe.
 
-pub mod alpine;
 pub mod artifact;
 pub mod install_ux;
 pub(crate) mod guest;
-pub mod artifact_store;
-pub mod build;
 pub mod build_host;
-pub mod cache;
-pub mod component;
-pub mod contracts;
-pub mod executor;
 pub(crate) mod pipeline;
 pub(crate) mod tui_binary;
-pub mod preflight;
 pub mod process;
 pub mod recipe;
 pub mod run_history;
-pub mod timing;
 
-pub use build::licenses::LicenseTracker;
-pub use contracts::component::{Installable, Op, Phase};
-pub use contracts::context::{BuildContext, DistroConfig, InitSystem, PackageManager};
-pub use contracts::kernel::KernelInstallConfig;
-pub use executor::{binaries, directories, files, openrc, users};
-
-// Re-export commonly used artifact utilities
-pub use artifact::disk::{
-    build_disk_image, build_disk_image_with_uuids, generate_disk_uuids, DiskImageConfig, DiskUuids,
-};
-pub use artifact::filesystem::{atomic_move, copy_dir_recursive};
+pub use artifact::filesystem::copy_dir_recursive;
 pub use artifact::overlayfs::{build_overlayfs_default, create_overlayfs_erofs};
 pub use artifact::rootfs::{build_erofs_default, create_erofs};
 pub use pipeline::io::resolve_release_product_rootfs_image_for_distro;

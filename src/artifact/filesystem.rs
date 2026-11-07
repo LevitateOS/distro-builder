@@ -39,30 +39,6 @@ pub fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Atomically move a file by renaming, with fallback to copy+delete.
-///
-/// Useful for the "atomic artifacts" pattern where we build to a temp file
-/// and then atomically move to the final destination.
-///
-/// # Arguments
-///
-/// * `src` - Source file path
-/// * `dst` - Destination file path
-pub fn atomic_move(src: &Path, dst: &Path) -> Result<()> {
-    // Try atomic rename first (works if same filesystem)
-    match fs::rename(src, dst) {
-        Ok(()) => Ok(()),
-        Err(_) => {
-            // Different filesystem, fall back to copy+delete
-            fs::copy(src, dst).with_context(|| {
-                format!("Failed to copy {} to {}", src.display(), dst.display())
-            })?;
-            fs::remove_file(src).with_context(|| format!("Failed to remove {}", src.display()))?;
-            Ok(())
-        }
-    }
-}
-
 /// Writes `content` to `path`, creating its directory, with permission bits `mode`.
 pub(crate) fn write_file(path: &Path, content: impl AsRef<[u8]>, mode: u32) -> Result<()> {
     use std::os::unix::fs::PermissionsExt;

@@ -5,28 +5,20 @@ edition = "2021"
 autobins = false
 description = "Shared infrastructure for building LevitateOS and AcornOS ISOs"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/LevitateOS/distro-builder"
-keywords = ["linux", "distro", "iso", "build"]
-categories = ["development-tools::build-utils"]
 
 [dependencies]
 recqemu = { path = "../../tools/recqemu" }
 anyhow = "1.0"
-dirs = "5.0"
 distro-contract = { path = "../contract" }
 recinit = { path = "../../tools/recinit" }
-fs2 = "0.4"
 libc = "0.2"
 leviso-elf = { path = "../elf" }
 levitate-recipe = { path = "../../tools/recipe" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 toml = "0.8"
-sha2 = "0.10"
-tar = "0.4"
 walkdir = "2"
 which = "5.0"
-zstd = "0.13"
 time = "0.3"
 tempfile = "3"
 

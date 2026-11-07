@@ -383,16 +383,3 @@ fn run_recipe_phase_json_impl(
     }
     Ok(ctx)
 }
-
-/// Clear the recipe cache directory (~/.cache/levitate/).
-pub fn clear_cache() -> Result<()> {
-    let cache_dir = dirs::cache_dir()
-        .unwrap_or_else(|| PathBuf::from("/tmp"))
-        .join("levitate");
-
-    if cache_dir.exists() {
-        std::fs::remove_dir_all(&cache_dir)?;
-        std::fs::create_dir_all(&cache_dir)?;
-    }
-    Ok(())
-}

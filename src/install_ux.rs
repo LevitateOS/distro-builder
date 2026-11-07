@@ -3,7 +3,7 @@
 //! The variant declares it (`[install_ux]` in products.toml). On each console it
 //! lists, getty starts [`LAUNCHER`] in place of login (the live overlay writes those
 //! getty lines, taking the console list and the launcher path from here). The
-//! launcher runs [`SPLIT`] with the variant's shell on the left and the docs on the
+//! launcher runs [`SPLIT`] with the variant's install hub (or, without one, its shell) on the left and the docs on the
 //! right, and becomes a root login shell when the screen ends. A serial console runs
 //! the screen only when the boot-injection payload sets [`SERIAL_KEY`]`=1`; otherwise
 //! it gets the shell straight away.
@@ -55,8 +55,10 @@ pub(crate) fn write_payload(
 
     let mut app_names: Vec<&str> = install_ux.apps.iter().map(String::as_str).collect();
     let docs = &install_ux.docs;
-    if !app_names.contains(&docs.app.as_str()) {
-        app_names.insert(0, &docs.app);
+    for app in std::iter::once(&docs.app).chain(&install_ux.hub) {
+        if !app_names.contains(&app.as_str()) {
+            app_names.insert(0, app);
+        }
     }
     let apps = app_names
         .iter()
@@ -95,10 +97,16 @@ pub(crate) fn write_payload(
         docs_argv.extend([pages.arg.clone(), page.clone()]);
     }
 
+    // The left pane: the hub, which opens the shell on request, or the shell itself.
+    let left = match &install_ux.hub {
+        Some(hub) => format!("/{}/{hub}", crate::tui_binary::BIN_DIR),
+        None => "\"$SHELL\" -l".to_string(),
+    };
     let launcher = crate::guest::render(
         crate::guest::INSTALL_UX,
         &[
             ("SHELL", &install_ux.shell),
+            ("LEFT", &left),
             ("SPLIT", &format!("/{SPLIT}")),
             ("DOCS_ARGV", &shell_words(&docs_argv)),
             ("SERIAL_KEY", SERIAL_KEY),

@@ -25,6 +25,6 @@ case "$(tty 2>/dev/null)" in
         ;;
 esac
 
-@SPLIT@ --left "$SHELL" -l --right @DOCS_ARGV@ ||
+@SPLIT@ --left @LEFT@ --right @DOCS_ARGV@ ||
     echo "The install screen stopped with an error; starting a shell."
 exec "$SHELL" -l

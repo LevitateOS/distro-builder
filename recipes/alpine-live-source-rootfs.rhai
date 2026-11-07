@@ -37,12 +37,10 @@ fn _verify_inputs(ctx) {
     }
 }
 
-// The pinned packages the ISO lacks, as quoted file arguments to `apk add`.
+// The pinned packages the ISO lacks, as explicit argv paths.
 fn _extra_apk_files(ctx) {
-    let files = "";
-    for apk in ctx.extra_apks {
-        files += " '" + join_path(ctx.extra_apks_path, apk[0]) + "'";
-    }
+    let files = [];
+    for apk in ctx.extra_apks { files.push(join_path(ctx.extra_apks_path, apk[0])); }
     files
 }
 
@@ -260,10 +258,13 @@ fn build(ctx) {
     log("Installing Alpine live source package baseline (" + ctx.profile + ")...");
     let apk_cache = join_path(ctx.runtime.paths.build, "apk-cache");
     mkdir(apk_cache);
-    let apk_cmd = "'" + ctx.apk_static_path + "' --root '" + rootfs + "' " +
-        "--usermode --initdb --no-progress --allow-untrusted --cache-dir '" + apk_cache + "' add " + packages +
-        _extra_apk_files(ctx);
-    shell(apk_cmd);
+    let args = ["--root", rootfs, "--usermode", "--initdb", "--no-progress",
+        "--no-scripts", "--allow-untrusted", "--force-non-repository", "--no-network", "--cache-dir", apk_cache, "add"];
+    for pkg in packages.split(" ") { if pkg != "" { args.push(pkg); } }
+    for path in _extra_apk_files(ctx) { args.push(path); }
+    // APK 3 requires non-root usermode execution. Target ownership comes from
+    // the package metadata, independently of this subprocess identity.
+    exec_checked(ctx.apk_static_path, args, #{uid: 1000, gid: 1000});
     target_capture_apks(rootfs, [join_path(iso_contents, "apks"), ctx.extra_apks_path, apk_cache]);
     _normalize_rootfs_permissions(rootfs, "post-apk install");
     _ensure_openrc_live_source_completeness(rootfs);

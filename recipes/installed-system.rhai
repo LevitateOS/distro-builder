@@ -67,6 +67,30 @@ fn systemd(root) {
     setup_program(root, "systemd", "glibc");
 }
 
+// APK runs without package scripts. Reproduce BusyBox's link installation from
+// its own packaged inventory, retaining files supplied by the full-size tools.
+fn busybox_applets(root) {
+    let privileged = ["bin/mount", "bin/umount", "bin/su", "usr/bin/crontab",
+        "usr/bin/passwd", "usr/bin/traceroute", "usr/bin/traceroute6", "usr/bin/vlock"];
+    for path in read_file(join_path(root, "etc/busybox-paths.d/busybox")).split("\n") {
+        path = trim(path);
+        if path == "" { continue; }
+        if !(path.starts_with("bin/") || path.starts_with("sbin/") ||
+             path.starts_with("usr/bin/") || path.starts_with("usr/sbin/")) ||
+             path.contains("..") {
+            throw "invalid packaged BusyBox applet path: " + path;
+        }
+        let dest = join_path(root, path);
+        if exists(dest) { continue; }
+        let program = if privileged.contains(path) { "bbsuid" } else { "busybox" };
+        if !is_file(join_path(root, "bin/" + program)) { throw "missing BusyBox provider: " + program; }
+        mkdir(dirname(dest));
+        let prefix = if path.starts_with("usr/") { "../../bin/" }
+                     else if path.starts_with("sbin/") { "../bin/" } else { "" };
+        ln_force(prefix + program, dest);
+    }
+}
+
 fn openrc(root) {
     // Busybox init reads this in the installed system. No alternate login program.
     let inittab = "::sysinit:/sbin/openrc sysinit\n::sysinit:/sbin/openrc boot\n";

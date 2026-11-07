@@ -21,7 +21,7 @@ let ctx = #{
     release_branch: assets.release_branch,
     rootfs_path: join_path(RUNTIME.paths.output, "rootfs"),
     // A new Alpine pin rebuilds the rootfs.
-    rootfs_recipe_version: "alpine-source-v9-target-metadata-" + assets.iso_version,
+    rootfs_recipe_version: "alpine-source-v10-busybox-links-" + assets.iso_version,
 };
 
 fn _verify_inputs(ctx) {
@@ -99,6 +99,9 @@ fn _rootfs_valid(rootfs, expected_version) {
         return false;
     }
     if !is_file(join_path(rootfs, "bin/busybox")) {
+        return false;
+    }
+    if !exists(join_path(rootfs, "sbin/init")) || !exists(join_path(rootfs, "sbin/getty")) {
         return false;
     }
     if !is_file(join_path(rootfs, "usr/bin/doas")) {
@@ -244,6 +247,7 @@ fn build(ctx) {
     target_capture_apks(rootfs, [join_path(iso_contents, "apks"), ctx.extra_apks_path, apk_cache]);
     // Make staging readable before applying policy; intended modes stay in metadata.
     target_finalize(rootfs);
+    installed::busybox_applets(rootfs);
     _ensure_openrc_live_source_completeness(rootfs);
 
     if !is_file(join_path(rootfs, "bin/busybox")) {

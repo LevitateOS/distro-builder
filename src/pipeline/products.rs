@@ -12,7 +12,7 @@ use crate::pipeline::io::{
 };
 use crate::pipeline::live_tools::add_required_tools;
 use crate::pipeline::overlay::create_live_overlay;
-use distro_contract::{InstallUxContract, Profile, RuntimeActionContract};
+use distro_contract::{InstallUxContract, ProductId, Profile};
 
 use crate::pipeline::plan::{
     apply_producer_plan, build_baseline_producers, ProducerPlan, RootfsProducer,
@@ -62,13 +62,6 @@ pub struct BaseProductLayout {
 }
 
 #[derive(Debug, Clone)]
-pub struct ParentRootfsInput {
-    pub release_dir_name: String,
-    pub producer_label: String,
-    pub rootfs_filename: String,
-}
-
-#[derive(Debug, Clone)]
 pub struct OverlayLayout {
     pub issue_banner_label: String,
     pub dir_name: String,
@@ -76,8 +69,8 @@ pub struct OverlayLayout {
 
 #[derive(Debug, Clone)]
 pub struct DerivedProductLayout {
+    pub product: ProductId,
     pub rootfs_source_dir: PathBuf,
-    pub parent_rootfs: ParentRootfsInput,
     pub live_overlay: OverlayLayout,
 }
 
@@ -87,7 +80,7 @@ pub struct LiveBootProductSpec {
     pub distro_id: String,
     pub os_name: String,
     pub rootfs_source_dir: PathBuf,
-    parent_rootfs: ParentRootfsInput,
+    product: ProductId,
     resolved_parent_rootfs_image: Option<PathBuf>,
     live_overlay: OverlayLayout,
     add_plan: ProducerPlan,
@@ -126,10 +119,9 @@ pub struct LiveToolsProductSpec {
     repo_root: PathBuf,
     pub distro_id: String,
     pub os_name: String,
-    runtime_actions: Vec<RuntimeActionContract>,
     install_ux: InstallUxContract,
     pub rootfs_source_dir: PathBuf,
-    parent_rootfs: ParentRootfsInput,
+    product: ProductId,
     resolved_parent_rootfs_image: Option<PathBuf>,
     live_overlay: OverlayLayout,
     profile: Profile,
@@ -148,7 +140,7 @@ pub struct InstalledBootProductSpec {
     repo_root: PathBuf,
     pub distro_id: String,
     pub rootfs_source_dir: PathBuf,
-    parent_rootfs: ParentRootfsInput,
+    product: ProductId,
     resolved_parent_rootfs_image: Option<PathBuf>,
     live_overlay_dir_name: String,
     add_plan: ProducerPlan,
@@ -167,10 +159,9 @@ pub fn load_base_rootfs_product_spec(
     os_name: &str,
     os_id: &str,
     profile: &Profile,
-    _output_root: &Path,
     layout: BaseProductLayout,
-) -> Result<BaseRootfsProductSpec> {
-    Ok(BaseRootfsProductSpec {
+) -> BaseRootfsProductSpec {
+    BaseRootfsProductSpec {
         distro_id: distro_id.to_string(),
         os_name: os_name.to_string(),
         os_id: os_id.to_string(),
@@ -180,7 +171,7 @@ pub fn load_base_rootfs_product_spec(
             source_rootfs_dir: None,
             producers: build_baseline_producers(distro_id, os_name, os_id, profile),
         },
-    })
+    }
 }
 
 pub fn prepare_base_rootfs_product(
@@ -209,12 +200,11 @@ pub fn prepare_base_rootfs_product(
 
 pub fn load_live_boot_product_spec(
     repo_root: &Path,
-    _variant_dir: &Path,
     contract: &ConformanceContract,
     distro_id: &str,
     layout: DerivedProductLayout,
 ) -> Result<LiveBootProductSpec> {
-    let loaded = load_boot_config_from_contract(repo_root, distro_id, contract)?;
+    let loaded = load_boot_config_from_contract(repo_root, contract)?;
 
     let mut add_producers = loaded.payload_producers.clone();
     if loaded.rootfs_source_policy.is_none() {
@@ -226,7 +216,7 @@ pub fn load_live_boot_product_spec(
         distro_id: distro_id.to_string(),
         os_name: loaded.os_name,
         rootfs_source_dir: layout.rootfs_source_dir,
-        parent_rootfs: layout.parent_rootfs,
+        product: layout.product,
         resolved_parent_rootfs_image: None,
         live_overlay: layout.live_overlay,
         add_plan: ProducerPlan {
@@ -244,9 +234,8 @@ pub fn prepare_live_boot_product(
     output_dir: &Path,
 ) -> Result<LiveBootProduct> {
     let parent_rootfs = resolved_parent_rootfs_image(
-        "live-boot",
+        spec.product,
         &spec.distro_id,
-        &spec.parent_rootfs,
         spec.resolved_parent_rootfs_image.as_deref(),
     )?;
     fs::create_dir_all(output_dir).with_context(|| {
@@ -275,8 +264,6 @@ pub fn prepare_live_boot_product(
         matches!(
             producer,
             RootfsProducer::CopyTree { .. }
-                | RootfsProducer::CopySymlink { .. }
-                | RootfsProducer::CopyFile { .. }
         )
     }) {
         let source_rootfs_dir = materialize_source_rootfs(
@@ -319,16 +306,14 @@ pub fn materialize_live_boot_source_rootfs(spec: &LiveBootProductSpec) -> Result
 
 pub fn load_live_tools_product_spec(
     repo_root: &Path,
-    variant_dir: &Path,
     contract: &ConformanceContract,
     distro_id: &str,
     layout: DerivedProductLayout,
 ) -> Result<LiveToolsProductSpec> {
-    let loaded = load_live_tools_config_from_contract(contract)
-        .with_context(|| format!("loading live-tools config for '{}'", distro_id))?;
+    let loaded = load_live_tools_config_from_contract(contract);
 
     let live_boot_spec =
-        load_live_boot_product_spec(repo_root, variant_dir, contract, distro_id, layout.clone())
+        load_live_boot_product_spec(repo_root, contract, distro_id, layout.clone())
             .with_context(|| {
                 format!(
                     "loading live boot baseline while preparing live tools for '{}'",
@@ -340,10 +325,9 @@ pub fn load_live_tools_product_spec(
         repo_root: repo_root.to_path_buf(),
         distro_id: distro_id.to_string(),
         os_name: loaded.os_name,
-        runtime_actions: loaded.runtime_actions,
         install_ux: loaded.install_ux,
         rootfs_source_dir: layout.rootfs_source_dir,
-        parent_rootfs: layout.parent_rootfs,
+        product: layout.product,
         resolved_parent_rootfs_image: None,
         live_overlay: layout.live_overlay,
         profile: live_boot_spec.profile,
@@ -353,12 +337,11 @@ pub fn load_live_tools_product_spec(
 
 pub fn load_installed_boot_product_spec(
     repo_root: &Path,
-    _variant_dir: &Path,
     contract: &ConformanceContract,
     distro_id: &str,
     layout: DerivedProductLayout,
 ) -> Result<InstalledBootProductSpec> {
-    let loaded = load_installed_boot_payload_config_from_contract(repo_root, distro_id, contract)?;
+    let loaded = load_installed_boot_payload_config_from_contract(repo_root, contract)?;
 
     let mut add_producers = loaded.payload_producers.clone();
     if loaded.rootfs_source_policy.is_none() {
@@ -369,7 +352,7 @@ pub fn load_installed_boot_product_spec(
         repo_root: repo_root.to_path_buf(),
         distro_id: distro_id.to_string(),
         rootfs_source_dir: layout.rootfs_source_dir,
-        parent_rootfs: layout.parent_rootfs,
+        product: layout.product,
         resolved_parent_rootfs_image: None,
         live_overlay_dir_name: layout.live_overlay.dir_name,
         add_plan: ProducerPlan {
@@ -385,9 +368,8 @@ pub fn prepare_live_tools_product(
     output_dir: &Path,
 ) -> Result<LiveToolsProduct> {
     let parent_rootfs = resolved_parent_rootfs_image(
-        "live-tools",
+        spec.product,
         &spec.distro_id,
-        &spec.parent_rootfs,
         spec.resolved_parent_rootfs_image.as_deref(),
     )?;
     fs::create_dir_all(output_dir).with_context(|| {
@@ -425,7 +407,6 @@ pub fn prepare_live_tools_product(
         &live_overlay_dir,
         &spec.distro_id,
         &spec.profile,
-        &spec.runtime_actions,
     )
     .with_context(|| format!("adding required live tools for '{}'", spec.distro_id))?;
     crate::install_ux::write_payload(
@@ -435,7 +416,6 @@ pub fn prepare_live_tools_product(
         &spec.os_name,
         &spec.profile,
         &spec.install_ux,
-        &spec.runtime_actions,
     )
     .with_context(|| format!("writing the install screen for '{}'", spec.distro_id))?;
 
@@ -450,9 +430,8 @@ pub fn prepare_installed_boot_product(
     output_dir: &Path,
 ) -> Result<InstalledBootProduct> {
     let parent_rootfs = resolved_parent_rootfs_image(
-        "installed-boot",
+        spec.product,
         &spec.distro_id,
-        &spec.parent_rootfs,
         spec.resolved_parent_rootfs_image.as_deref(),
     )?;
     fs::create_dir_all(output_dir).with_context(|| {
@@ -481,8 +460,6 @@ pub fn prepare_installed_boot_product(
         matches!(
             producer,
             RootfsProducer::CopyTree { .. }
-                | RootfsProducer::CopySymlink { .. }
-                | RootfsProducer::CopyFile { .. }
         )
     }) {
         let source_rootfs_dir = materialize_source_rootfs(
@@ -516,19 +493,15 @@ pub fn prepare_installed_boot_product(
 }
 
 fn resolved_parent_rootfs_image<'a>(
-    product: &str,
+    product: ProductId,
     distro_id: &str,
-    parent_rootfs: &ParentRootfsInput,
     resolved_parent_rootfs_image: Option<&'a Path>,
 ) -> Result<&'a Path> {
     resolved_parent_rootfs_image.ok_or_else(|| {
         anyhow::anyhow!(
-            "missing resolved parent rootfs image for canonical product '{}' on '{}': workflow must resolve parent release '{}' before preparation\nRemediation: use the planner-backed `distro-builder product prepare {} {} <output_dir>` entrypoint or inject the parent rootfs path into the product spec before calling the preparer",
-            product,
-            distro_id,
-            parent_rootfs.producer_label,
-            product,
-            distro_id
+            "preparing {distro_id} {product} needs the rootfs image of its parent product \
+             ({}), and none was given",
+            product.parent().map_or("none", ProductId::name),
         )
     })
 }

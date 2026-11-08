@@ -1,9 +1,6 @@
-use anyhow::{bail, Result};
-use distro_contract::{
-    ConformanceContract, InstallUxContract, PayloadProducerContract, Profile,
-    RuntimeActionContract,
-};
-use std::path::Path;
+use anyhow::Result;
+use distro_contract::{ConformanceContract, InstallUxContract, Profile};
+use std::path::{Path, PathBuf};
 
 use crate::pipeline::plan::RootfsProducer;
 
@@ -21,157 +18,68 @@ pub(crate) struct BootLoadedConfig {
 #[derive(Debug, Clone)]
 pub(crate) struct LiveToolsLoadedConfig {
     pub(crate) os_name: String,
-    pub(crate) runtime_actions: Vec<RuntimeActionContract>,
     pub(crate) install_ux: InstallUxContract,
 }
 
+/// Which system a boot payload is.
 #[derive(Debug, Clone, Copy)]
-enum BootPayloadProduct {
+enum BootPayload {
     Live,
     Installed,
 }
 
-impl BootPayloadProduct {
-    fn logical_name(self) -> &'static str {
-        match self {
-            Self::Live => "product.payload.boot.live",
-            Self::Installed => "product.payload.boot.installed",
-        }
+/// Both payloads are the whole Recipe-built system tree. The live one is
+/// marked as the live init's rootfs layer (recinit's payload-role protocol).
+fn boot_payload_producers(payload: BootPayload) -> Vec<RootfsProducer> {
+    let system = RootfsProducer::CopyTree {
+        source: PathBuf::from("."),
+        destination: PathBuf::from("."),
+    };
+    match payload {
+        BootPayload::Live => vec![
+            system,
+            RootfsProducer::WriteText {
+                path: PathBuf::from(recinit::live::PAYLOAD_ROLE_FILE),
+                content: format!("{}\n", recinit::live::ROLE_ROOTFS),
+            },
+        ],
+        BootPayload::Installed => vec![system],
     }
 }
 
-fn load_boot_payload_config_with_rootfs_source_policy(
-    contract: &ConformanceContract,
-    rootfs_source_policy: Option<RootfsSourcePolicy>,
-) -> Result<BootLoadedConfig> {
-    let os_name = contract.identity.os_name.clone();
-    // The contract guarantees distinct service names; the overlay takes them sorted.
-    let mut required_services = contract.scenarios.live_environment.required_services.clone();
-    required_services.sort();
-    let payload_producers = load_boot_payload_producers(contract, BootPayloadProduct::Live)?;
-
-    Ok(BootLoadedConfig {
-        os_name,
-        required_services,
-        rootfs_source_policy,
-        profile: contract.profile,
-        payload_producers,
-    })
-}
-
-pub(crate) fn load_boot_payload_config_from_contract(
+fn load_boot_payload_config(
     repo_root: &Path,
     contract: &ConformanceContract,
+    payload: BootPayload,
 ) -> Result<BootLoadedConfig> {
-    let rootfs_source_policy = rootfs_source_policy_from_contract(repo_root, contract)?;
-    load_boot_payload_config_with_rootfs_source_policy(contract, rootfs_source_policy)
+    Ok(BootLoadedConfig {
+        os_name: contract.identity.os_name.clone(),
+        required_services: contract.live_service_units(),
+        rootfs_source_policy: rootfs_source_policy_from_contract(repo_root, contract)?,
+        profile: contract.profile,
+        payload_producers: boot_payload_producers(payload),
+    })
 }
 
 pub(crate) fn load_boot_config_from_contract(
     repo_root: &Path,
-    distro_id: &str,
     contract: &ConformanceContract,
 ) -> Result<BootLoadedConfig> {
-    let loaded = load_boot_payload_config_from_contract(repo_root, contract)?;
-    if !loaded.required_services.iter().any(|svc| svc == "sshd") {
-        bail!(
-            "invalid live boot config for '{}': required_services must include 'sshd' (OpenSSH is first-class in live boot)",
-            distro_id
-        );
-    }
-    Ok(loaded)
+    load_boot_payload_config(repo_root, contract, BootPayload::Live)
 }
 
 pub(crate) fn load_installed_boot_payload_config_from_contract(
     repo_root: &Path,
-    _distro_id: &str,
     contract: &ConformanceContract,
 ) -> Result<BootLoadedConfig> {
-    let mut loaded = load_boot_payload_config_from_contract(repo_root, contract)?;
-    loaded.payload_producers =
-        load_boot_payload_producers(contract, BootPayloadProduct::Installed)?;
-    Ok(loaded)
+    load_boot_payload_config(repo_root, contract, BootPayload::Installed)
 }
 
 pub(crate) fn load_live_tools_config_from_contract(
     contract: &ConformanceContract,
-) -> Result<LiveToolsLoadedConfig> {
-    let os_name = contract.identity.os_name.clone();
-    Ok(LiveToolsLoadedConfig {
-        os_name,
-        runtime_actions: contract.product_config.live_tools_actions.clone(),
-        install_ux: contract.product_config.install_ux.clone(),
-    })
-}
-
-fn load_boot_payload_producers(
-    contract: &ConformanceContract,
-    product: BootPayloadProduct,
-) -> Result<Vec<RootfsProducer>> {
-    let producers = match product {
-        BootPayloadProduct::Live => &contract.product_config.boot_live.producers,
-        BootPayloadProduct::Installed => contract
-            .product_config
-            .boot_installed
-            .as_ref()
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "missing canonical boot payload config for '{}'",
-                    product.logical_name()
-                )
-            })?
-            .producers
-            .as_slice(),
-    };
-
-    if producers.is_empty() {
-        bail!(
-            "missing canonical boot payload producers for '{}': populate contract.product_config",
-            product.logical_name()
-        );
+) -> LiveToolsLoadedConfig {
+    LiveToolsLoadedConfig {
+        os_name: contract.identity.os_name.clone(),
+        install_ux: contract.install_ux.clone(),
     }
-
-    producers
-        .iter()
-        .map(rootfs_producer_from_contract)
-        .collect()
-}
-
-/// The contract validates the producer paths as relative paths below the rootfs.
-fn rootfs_producer_from_contract(producer: &PayloadProducerContract) -> Result<RootfsProducer> {
-    use std::path::PathBuf;
-    Ok(match producer {
-        PayloadProducerContract::CopyTree {
-            source,
-            destination,
-        } => RootfsProducer::CopyTree {
-            source: PathBuf::from(source),
-            destination: PathBuf::from(destination),
-        },
-        PayloadProducerContract::CopySymlink {
-            source,
-            destination,
-        } => RootfsProducer::CopySymlink {
-            source: PathBuf::from(source),
-            destination: PathBuf::from(destination),
-        },
-        PayloadProducerContract::CopyFile {
-            source,
-            destination,
-            optional,
-        } => RootfsProducer::CopyFile {
-            source: PathBuf::from(source),
-            destination: PathBuf::from(destination),
-            optional: *optional,
-        },
-        PayloadProducerContract::WriteText {
-            path,
-            content,
-            mode,
-        } => RootfsProducer::WriteText {
-            path: PathBuf::from(path),
-            content: content.clone(),
-            mode: *mode,
-        },
-    })
 }

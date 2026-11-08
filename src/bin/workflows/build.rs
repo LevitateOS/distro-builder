@@ -2,47 +2,45 @@ use anyhow::{Context, Result};
 use std::path::Path;
 use time::OffsetDateTime;
 
-use crate::{BuildOutputLayout, BuildProduct};
+use distro_builder::product::{ProductId, ReleaseProduct};
 
+use crate::BuildOutputLayout;
+
+/// Build the releases `product` is built on that have no rootfs yet.
 pub(crate) fn ensure_release_prerequisites(
     repo_root: &Path,
     distro_id: &str,
-    product: BuildProduct,
+    product: ProductId,
 ) -> Result<()> {
     let variant = distro_contract::load(repo_root, distro_id)?;
-    let prerequisite_plan = distro_builder::plan_release_prerequisite_realization(
-        repo_root,
-        distro_id,
-        &variant.contract,
-        product.canonical,
-    )?;
-    for prerequisite in prerequisite_plan.missing_products() {
-        let prerequisite = crate::workflows::parse_product(Some(prerequisite))?;
+    let missing =
+        distro_builder::missing_parent_releases(repo_root, distro_id, &variant.contract, product)?;
+    for parent in missing {
+        let release = ReleaseProduct::new(parent)
+            .with_context(|| format!("{product} is built on {parent}, which has no release"))?;
         println!(
-            "[release:iso:{}:{distro_id}] materializing missing parent release '{}'...",
-            product.canonical, prerequisite.canonical
+            "[release:iso:{product}:{distro_id}] materializing missing parent release '{parent}'..."
         );
-        build_one(distro_id, prerequisite)?;
+        build_one(distro_id, release)?;
     }
 
     Ok(())
 }
 
-pub(crate) fn build_all(product: BuildProduct) -> Result<()> {
+pub(crate) fn build_all(release: ReleaseProduct) -> Result<()> {
+    let product = release.product;
     let repo_root = crate::workflows::repo_root()?;
     let distro_ids = crate::workflows::parse::discover_distro_ids(&repo_root)?;
     for distro_id in &distro_ids {
-        println!(
-            "[release:iso:{}] building {}...",
-            product.canonical, distro_id
-        );
+        println!("[release:iso:{product}] building {distro_id}...");
         ensure_release_prerequisites(&repo_root, distro_id, product)?;
-        build_one(distro_id, product)?;
+        build_one(distro_id, release)?;
     }
     Ok(())
 }
 
-pub(crate) fn build_one(distro_id: &str, product: BuildProduct) -> Result<()> {
+pub(crate) fn build_one(distro_id: &str, release: ReleaseProduct) -> Result<()> {
+    let product = release.product;
     let repo_root = crate::workflows::repo_root()?;
     let bundle = distro_contract::load(&repo_root, distro_id)?;
 
@@ -57,10 +55,8 @@ pub(crate) fn build_one(distro_id: &str, product: BuildProduct) -> Result<()> {
     let build_layout = product_release_output_layout_for(&bundle.repo_root, distro_id, product)?;
 
     let output_dir = build_layout.output_dir.clone();
-    let base_iso_filename = crate::workflows::canonical_iso_filename(&bundle.contract)
-        .with_context(|| format!("resolving canonical Ring 0 ISO output for '{}'", distro_id))?;
     let created_at_utc = now_utc_compact()?;
-    let iso_path = output_dir.join(iso_filename_for_product(&base_iso_filename, product));
+    let iso_path = output_dir.join(bundle.contract.artifacts.iso(product));
 
     if let Some(run_id) = build_layout.run_id.as_deref() {
         let metadata_path = distro_builder::run_history::run_manifest_path(&output_dir);
@@ -70,7 +66,7 @@ pub(crate) fn build_one(distro_id: &str, product: BuildProduct) -> Result<()> {
                 run_id: run_id.to_string(),
                 distro_id: distro_id.to_string(),
                 target_kind: distro_builder::run_history::TARGET_KIND_RELEASE_PRODUCT.to_string(),
-                target_name: product.canonical.to_string(),
+                target_name: product.name().to_string(),
                 status: distro_builder::run_history::STATUS_BUILDING.to_string(),
                 created_at_utc: created_at_utc.clone(),
                 finished_at_utc: None,
@@ -84,24 +80,18 @@ pub(crate) fn build_one(distro_id: &str, product: BuildProduct) -> Result<()> {
     let build_result = (|| -> Result<()> {
         distro_builder::kernel::ensure_kernel_preinstalled(&bundle, &kernel_output_dir)
             .with_context(|| format!("ensuring kernel artifacts for '{distro_id}'"))?;
-        println!(
-            "[release:iso:{}:{distro_id}] kernel already installed",
-            product.canonical
-        );
+        println!("[release:iso:{product}:{distro_id}] kernel already installed");
         crate::workflows::ensure_release_iso_via_variant_hook(
             &bundle,
             distro_id,
             &kernel_output_dir,
             &build_layout,
-            product,
+            release,
         )?;
 
         println!(
-            "[release:iso:{}:{distro_id}] built at {}",
-            product.canonical,
-            output_dir
-                .join(iso_filename_for_product(&base_iso_filename, product))
-                .display()
+            "[release:iso:{product}:{distro_id}] built at {}",
+            iso_path.display()
         );
         Ok(())
     })();
@@ -120,7 +110,7 @@ pub(crate) fn build_one(distro_id: &str, product: BuildProduct) -> Result<()> {
                 run_id: run_id.to_string(),
                 distro_id: distro_id.to_string(),
                 target_kind: distro_builder::run_history::TARGET_KIND_RELEASE_PRODUCT.to_string(),
-                target_name: product.canonical.to_string(),
+                target_name: product.name().to_string(),
                 status,
                 created_at_utc,
                 finished_at_utc,
@@ -134,8 +124,7 @@ pub(crate) fn build_one(distro_id: &str, product: BuildProduct) -> Result<()> {
                 return Err(err);
             }
             eprintln!(
-                "[release:iso:{}:{distro_id}] warning: failed to persist release run metadata: {err:#}",
-                product.canonical
+                "[release:iso:{product}:{distro_id}] warning: failed to persist release run metadata: {err:#}"
             );
         }
 
@@ -150,33 +139,12 @@ pub(crate) fn build_one(distro_id: &str, product: BuildProduct) -> Result<()> {
     build_result
 }
 
-pub(crate) fn iso_filename_for_product(base_iso_filename: &str, product: BuildProduct) -> String {
-    match product.canonical {
-        crate::PRODUCT_BASE_ROOTFS => base_iso_filename.to_string(),
-        crate::PRODUCT_LIVE_BOOT | crate::PRODUCT_LIVE_TOOLS => {
-            derive_product_iso_filename(base_iso_filename, product.iso_suffix)
-        }
-        _ => unreachable!("validated in parse_product"),
-    }
-}
-
-pub(crate) fn derive_product_iso_filename(base_iso_filename: &str, product_suffix: &str) -> String {
-    if let Some(base) = base_iso_filename.strip_suffix(".iso") {
-        return format!("{base}-{product_suffix}.iso");
-    }
-    format!("{base_iso_filename}-{product_suffix}.iso")
-}
-
 pub(crate) fn product_release_output_layout_for(
     repo_root: &Path,
     distro_id: &str,
-    product: BuildProduct,
+    product: ProductId,
 ) -> Result<BuildOutputLayout> {
-    let root_dir = distro_builder::run_history::release_product_dir(
-        repo_root,
-        distro_id,
-        product.release_dir_name,
-    );
+    let root_dir = distro_builder::run_history::release_product_dir(repo_root, distro_id, product);
     std::fs::create_dir_all(&root_dir).with_context(|| {
         format!(
             "creating product release root directory '{}'",

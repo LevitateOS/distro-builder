@@ -3,6 +3,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use distro_contract::ProductId;
+
 pub(crate) fn create_unique_output_dir(output_dir: &Path, logical_name: &Path) -> Result<PathBuf> {
     let stem = logical_name
         .file_name()
@@ -41,46 +43,38 @@ pub(crate) fn create_empty_overlay_dir(output_dir: &Path, dir_name: &str) -> Res
     Ok(overlay_dir)
 }
 
+/// The rootfs image of the latest successful release of `product`.
 pub fn resolve_release_product_rootfs_image_for_distro(
     repo_root: &Path,
     distro_id: &str,
-    product_dir_name: &str,
-    parent_product_label: &str,
+    product: ProductId,
     rootfs_filename: &str,
 ) -> Result<PathBuf> {
-    let product_root =
-        crate::run_history::release_product_dir(repo_root, distro_id, product_dir_name);
-
+    let product_root = crate::run_history::release_product_dir(repo_root, distro_id, product);
     let run_id = crate::run_history::latest_successful_run_id(&product_root)?.ok_or_else(|| {
         anyhow::anyhow!(
-            "missing successful canonical parent release '{}' under '{}'\nRemediation: realize the parent release through a planner-owned higher-ring entrypoint, or build it explicitly with `distro-builder release build iso {} {}`",
-            parent_product_label,
+            "{distro_id} has no successful {product} release under '{}'; build that release first",
             product_root.display(),
-            distro_id,
-            parent_product_label,
         )
     })?;
     let path = product_root.join(run_id).join(rootfs_filename);
     if !path.is_file() {
         bail!(
-            "missing canonical parent release rootfs image '{}'\nRemediation: rerun a planner-backed product/release entrypoint or rebuild the parent release explicitly with `distro-builder release build iso {} {}`",
+            "the latest {distro_id} {product} release has no rootfs image '{}'; build that release again",
             path.display(),
-            distro_id,
-            parent_product_label,
         );
     }
     Ok(path)
 }
 
+/// Whether the latest successful release of `product` has its rootfs image.
 pub fn release_product_rootfs_exists_for_distro(
     repo_root: &Path,
     distro_id: &str,
-    product_dir_name: &str,
+    product: ProductId,
     rootfs_filename: &str,
 ) -> Result<bool> {
-    let product_root =
-        crate::run_history::release_product_dir(repo_root, distro_id, product_dir_name);
-
+    let product_root = crate::run_history::release_product_dir(repo_root, distro_id, product);
     let Some(run_id) = crate::run_history::latest_successful_run_id(&product_root)? else {
         return Ok(false);
     };

@@ -1,4 +1,5 @@
 use anyhow::{bail, Context, Result};
+use distro_builder::product::ProductId;
 use std::path::Path;
 
 pub(crate) fn is_release_build_invocation(args: &[String]) -> bool {
@@ -31,12 +32,12 @@ pub(crate) fn run_release_build_command(args: &[String]) -> Result<()> {
         [iso, build] if iso == "iso" && build == "build" => vec![],
         [iso, build, arg1] if iso == "iso" && build == "build" => vec![arg1],
         [iso, build, arg1, arg2] if iso == "iso" && build == "build" => vec![arg1, arg2],
-        _ => bail!(crate::usage()),
+        _ => bail!("{}", crate::usage()),
     };
 
     let (distro_id, product) =
         crate::workflows::parse_release_build_command(build_args, &repo_root)?;
-    crate::workflows::ensure_release_prerequisites(&repo_root, &distro_id, product)?;
+    crate::workflows::ensure_release_prerequisites(&repo_root, &distro_id, product.product)?;
     crate::workflows::build_one(&distro_id, product)
 }
 
@@ -45,18 +46,22 @@ pub(crate) fn dispatch_non_release_command(args: &[String]) -> Result<()> {
         [release, build_all_cmd, iso]
             if release == "release" && build_all_cmd == "build-all" && iso == "iso" =>
         {
-            crate::workflows::build_all(crate::workflows::parse_release_product(None)?)
+            crate::workflows::build_all(crate::workflows::parse_release_product(
+                ProductId::BaseRootfs.name(),
+            )?)
         }
         [release, build_all_cmd, iso, product]
             if release == "release" && build_all_cmd == "build-all" && iso == "iso" =>
         {
-            crate::workflows::build_all(crate::workflows::parse_release_product(Some(product))?)
+            crate::workflows::build_all(crate::workflows::parse_release_product(product)?)
         }
         [iso, build_all_cmd] if iso == "iso" && build_all_cmd == "build-all" => {
-            crate::workflows::build_all(crate::workflows::parse_release_product(None)?)
+            crate::workflows::build_all(crate::workflows::parse_release_product(
+                ProductId::BaseRootfs.name(),
+            )?)
         }
         [iso, build_all_cmd, product] if iso == "iso" && build_all_cmd == "build-all" => {
-            crate::workflows::build_all(crate::workflows::parse_release_product(Some(product))?)
+            crate::workflows::build_all(crate::workflows::parse_release_product(product)?)
         }
         [product, prepare, product_name, distro, output_dir]
             if product == "product" && prepare == "prepare" =>
@@ -120,7 +125,7 @@ pub(crate) fn dispatch_non_release_command(args: &[String]) -> Result<()> {
         {
             crate::workflows::materialize_rootfs_source_cmd(distro)
         }
-        _ => bail!(crate::usage()),
+        _ => bail!("{}", crate::usage()),
     };
     command.with_context(|| format!("dispatching workflow for '{}'", args.join(" ")))
 }

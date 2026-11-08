@@ -2,6 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
+use distro_builder::product::ProductId;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug)]
@@ -28,44 +29,24 @@ pub(crate) struct PreparedOutputNames {
     pub(crate) overlay_erofs_filename: String,
 }
 
-pub(crate) fn canonical_rootfs_erofs_filename(
+/// The prepared product's file names: the table's pointer file, the
+/// contract's image names.
+pub(crate) fn prepared_output_names(
     contract: &distro_contract::ConformanceContract,
-) -> Result<String> {
-    Ok(contract.transforms.rootfs_image.output().to_string())
-}
-
-pub(crate) fn canonical_overlay_erofs_filename(
-    contract: &distro_contract::ConformanceContract,
-) -> Result<String> {
-    Ok(contract.transforms.overlay_image.output().to_string())
-}
-
-pub(crate) fn canonical_initramfs_live_filename(
-    contract: &distro_contract::ConformanceContract,
-) -> Result<String> {
-    Ok(contract.transforms.initramfs_live.output().to_string())
-}
-
-pub(crate) fn canonical_iso_filename(
-    contract: &distro_contract::ConformanceContract,
-) -> Result<String> {
-    Ok(contract.transforms.iso.output().to_string())
-}
-
-pub(crate) fn canonical_prepared_output_names(
-    contract: &distro_contract::ConformanceContract,
-    product: crate::BuildProduct,
-) -> Result<PreparedOutputNames> {
-    Ok(PreparedOutputNames {
-        rootfs_source_pointer_filename: product.rootfs_source_pointer_filename.to_string(),
-        rootfs_erofs_filename: canonical_rootfs_erofs_filename(contract)?,
-        overlay_erofs_filename: canonical_overlay_erofs_filename(contract)?,
-    })
+    product: ProductId,
+) -> PreparedOutputNames {
+    PreparedOutputNames {
+        rootfs_source_pointer_filename: distro_builder::product::build(product)
+            .rootfs_source_pointer
+            .to_string(),
+        rootfs_erofs_filename: contract.artifacts.rootfs.clone(),
+        overlay_erofs_filename: contract.artifacts.overlay.clone(),
+    }
 }
 
 pub(crate) fn write_prepared_product_outputs(
     output_dir: &Path,
-    product: crate::BuildProduct,
+    product: ProductId,
     distro_id: &str,
     prepared: &PreparedProductInputs,
     output_names: &PreparedOutputNames,
@@ -75,14 +56,14 @@ pub(crate) fn write_prepared_product_outputs(
     fs::write(&source_path_file, &rootfs_source).with_context(|| {
         format!(
             "writing product '{}' rootfs source path file '{}'",
-            product.canonical,
+            product,
             source_path_file.display()
         )
     })?;
     write_prepared_product_manifest(
         output_dir,
         &PreparedProductManifest {
-            product: product.canonical.to_string(),
+            product: product.name().to_string(),
             distro_id: distro_id.to_string(),
             rootfs_source_dir: relative_prepared_product_path(
                 output_dir,

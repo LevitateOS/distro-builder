@@ -24,8 +24,14 @@ pub fn distro_output_dir(repo_root: &Path, distro_id: &str) -> PathBuf {
 }
 
 /// The runs of one release product, `<distro output>/releases/<product>`.
-pub fn release_product_dir(repo_root: &Path, distro_id: &str, product: &str) -> PathBuf {
-    distro_output_dir(repo_root, distro_id).join("releases").join(product)
+pub fn release_product_dir(
+    repo_root: &Path,
+    distro_id: &str,
+    product: distro_contract::ProductId,
+) -> PathBuf {
+    distro_output_dir(repo_root, distro_id)
+        .join("releases")
+        .join(product.name())
 }
 
 /// The current kernel build of a variant.

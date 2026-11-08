@@ -12,7 +12,7 @@
 //! installed system has no use for the install screen. Paths are relative to a layer's root.
 
 use anyhow::{bail, Context, Result};
-use distro_contract::{InstallUxContract, Profile, RuntimeActionContract};
+use distro_contract::{InstallUxContract, Profile};
 use std::path::Path;
 
 use crate::artifact::filesystem::write_file;
@@ -45,12 +45,11 @@ pub(crate) fn write_payload(
     os_name: &str,
     profile: &Profile,
     install_ux: &InstallUxContract,
-    runtime_actions: &[RuntimeActionContract],
 ) -> Result<()> {
     if !overlay.join(SPLIT).is_file() {
         bail!(
-            "the install screen needs /{SPLIT}: declare a tool_payload_workspace_binary action for \
-             install-split-pane's install-split"
+            "the install screen needs /{SPLIT}: the builder's live tools \
+             (pipeline/live_tools.rs) must carry install-split-pane's install-split"
         );
     }
 
@@ -67,11 +66,11 @@ pub(crate) fn write_payload(
         .collect::<Result<Vec<_>>>()?;
     for app in &apps {
         for tool in &app.tools {
-            if !runtime_actions.iter().any(|action| ships(action, tool)) {
+            if !crate::pipeline::live_tools::ships(tool) {
                 bail!(
-                    "the install screen's app '{}' runs {tool}, but the variant's live tools \
-                     don't ship it: add a tool_payload_workspace_binary or \
-                     rootfs_workspace_binary action for the '{tool}' package",
+                    "the install screen's app '{}' runs {tool}, but the live tools don't ship \
+                     it: add the '{tool}' package to the builder's live tools \
+                     (pipeline/live_tools.rs)",
                     app.name
                 );
             }
@@ -122,14 +121,6 @@ pub(crate) fn write_payload(
         ],
     )?;
     write_file(&overlay.join(LAUNCHER), launcher, 0o755)
-}
-
-/// Whether `action` puts a binary of the Cargo `package` on the live ISO.
-fn ships(action: &RuntimeActionContract, package: &str) -> bool {
-    match action {
-        RuntimeActionContract::ToolPayloadWorkspaceBinary { package: p, .. }
-        | RuntimeActionContract::RootfsWorkspaceBinary { package: p, .. } => p == package,
-    }
 }
 
 /// `argv` as one POSIX shell command line, each word single-quoted where needed.

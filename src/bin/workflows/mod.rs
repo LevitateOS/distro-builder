@@ -19,10 +19,5 @@ pub(crate) use commands::{
 pub(crate) use layout::repo_root;
 pub(crate) use parse::{
     discover_distro_ids, parse_product, parse_release_build_command, parse_release_product,
-    product_for_logical_name,
-};
-pub(crate) use prepared_products::{
-    canonical_initramfs_live_filename, canonical_iso_filename, canonical_overlay_erofs_filename,
-    canonical_rootfs_erofs_filename,
 };
 pub(crate) use release_hook::ensure_release_iso_via_variant_hook;

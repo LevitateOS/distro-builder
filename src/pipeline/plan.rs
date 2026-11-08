@@ -1,7 +1,5 @@
 use anyhow::{bail, Context, Result};
 use std::fs;
-use std::os::unix::fs::symlink;
-use std::os::unix::fs::PermissionsExt;
 use std::path::Component;
 use std::path::{Path, PathBuf};
 
@@ -22,19 +20,9 @@ pub(crate) enum RootfsProducer {
         source: PathBuf,
         destination: PathBuf,
     },
-    CopySymlink {
-        source: PathBuf,
-        destination: PathBuf,
-    },
-    CopyFile {
-        source: PathBuf,
-        destination: PathBuf,
-        optional: bool,
-    },
     WriteText {
         path: PathBuf,
         content: String,
-        mode: Option<u32>,
     },
 }
 
@@ -61,12 +49,10 @@ pub(crate) fn build_baseline_producers(
         RootfsProducer::WriteText {
             path: PathBuf::from("usr/lib/product-manifest.json"),
             content: product_manifest,
-            mode: None,
         },
         RootfsProducer::WriteText {
             path: PathBuf::from("etc/os-release"),
             content: os_release,
-            mode: None,
         },
     ]
 }
@@ -79,14 +65,11 @@ pub(crate) fn apply_producer_plan(plan: &ProducerPlan, destination_root: &Path) 
                 source_root.display()
             )
         })?;
-    } else if plan.producers.iter().any(|producer| {
-        matches!(
-            producer,
-            RootfsProducer::CopyTree { .. }
-                | RootfsProducer::CopySymlink { .. }
-                | RootfsProducer::CopyFile { .. }
-        )
-    }) {
+    } else if plan
+        .producers
+        .iter()
+        .any(|producer| matches!(producer, RootfsProducer::CopyTree { .. }))
+    {
         bail!(
             "live-boot product preparation requires copy-based rootfs sourcing, but no non-legacy source_rootfs_dir is configured.\n\
              Legacy */downloads/rootfs mappings are intentionally forbidden.\n\
@@ -119,103 +102,7 @@ pub(crate) fn apply_producer_plan(plan: &ProducerPlan, destination_root: &Path) 
                 })?;
                 levitate_recipe::target::merge_tree(&source_path, &target_path)?;
             }
-            RootfsProducer::CopySymlink {
-                source,
-                destination,
-            } => {
-                let source_root = plan.source_rootfs_dir.as_ref().ok_or_else(|| {
-                    anyhow::anyhow!("copy_symlink producer requires source_rootfs_dir to be set")
-                })?;
-                let source_path = source_root.join(source);
-                let source_meta = fs::symlink_metadata(&source_path).with_context(|| {
-                    format!("reading symlink metadata for '{}'", source_path.display())
-                })?;
-                if !source_meta.file_type().is_symlink() {
-                    bail!(
-                        "copy_symlink source '{}' is not a symlink",
-                        source_path.display()
-                    );
-                }
-                let link_target = fs::read_link(&source_path).with_context(|| {
-                    format!("reading link target for '{}'", source_path.display())
-                })?;
-                let target_path = destination_root.join(destination);
-                if let Some(parent) = target_path.parent() {
-                    fs::create_dir_all(parent).with_context(|| {
-                        format!(
-                            "creating destination parent for copy_symlink '{}'",
-                            parent.display()
-                        )
-                    })?;
-                }
-                if target_path.exists() {
-                    let meta = fs::symlink_metadata(&target_path).with_context(|| {
-                        format!(
-                            "reading destination metadata for '{}'",
-                            target_path.display()
-                        )
-                    })?;
-                    if meta.file_type().is_dir() && !meta.file_type().is_symlink() {
-                        fs::remove_dir_all(&target_path).with_context(|| {
-                            format!(
-                                "removing existing directory destination '{}'",
-                                target_path.display()
-                            )
-                        })?;
-                    } else {
-                        fs::remove_file(&target_path).with_context(|| {
-                            format!(
-                                "removing existing file/symlink destination '{}'",
-                                target_path.display()
-                            )
-                        })?;
-                    }
-                }
-                symlink(&link_target, &target_path).with_context(|| {
-                    format!(
-                        "creating symlink '{}' -> '{}'",
-                        target_path.display(),
-                        link_target.display()
-                    )
-                })?;
-            }
-            RootfsProducer::CopyFile {
-                source,
-                destination,
-                optional,
-            } => {
-                let source_root = plan.source_rootfs_dir.as_ref().ok_or_else(|| {
-                    anyhow::anyhow!("copy_file producer requires source_rootfs_dir to be set")
-                })?;
-                let source_path = source_root.join(source);
-                if !source_path.is_file() {
-                    if *optional {
-                        continue;
-                    }
-                    bail!("copy_file source '{}' not found", source_path.display());
-                }
-                let target_path = destination_root.join(destination);
-                if let Some(parent) = target_path.parent() {
-                    fs::create_dir_all(parent).with_context(|| {
-                        format!(
-                            "creating destination parent for copy_file '{}'",
-                            parent.display()
-                        )
-                    })?;
-                }
-                fs::copy(&source_path, &target_path).with_context(|| {
-                    format!(
-                        "copying file from '{}' to '{}'",
-                        source_path.display(),
-                        target_path.display()
-                    )
-                })?;
-            }
-            RootfsProducer::WriteText {
-                path,
-                content,
-                mode,
-            } => {
+            RootfsProducer::WriteText { path, content } => {
                 let target = destination_root.join(path);
                 if let Some(parent) = target.parent() {
                     fs::create_dir_all(parent).with_context(|| {
@@ -228,15 +115,6 @@ pub(crate) fn apply_producer_plan(plan: &ProducerPlan, destination_root: &Path) 
                 fs::write(&target, content).with_context(|| {
                     format!("writing product rootfs file '{}'", target.display())
                 })?;
-                if let Some(mode) = mode {
-                    let mut perms = fs::metadata(&target)
-                        .with_context(|| format!("reading file metadata '{}'", target.display()))?
-                        .permissions();
-                    perms.set_mode(*mode);
-                    fs::set_permissions(&target, perms).with_context(|| {
-                        format!("setting file permissions on '{}'", target.display())
-                    })?;
-                }
             }
         }
     }

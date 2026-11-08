@@ -282,12 +282,12 @@ fn collect_local_dependencies(
 }
 
 /// Compile `package`'s `binary` (its default when `None`) through its recipe
-/// for the image `profile` describes, and return the published package tree.
+/// for the image `profile` describes, and return the published package tree,
+/// which holds it at `usr/bin/<binary>`.
 pub(crate) fn build_tool_tree(
     repo: &Path,
     package: &str,
     binary: Option<&str>,
-    destination: Option<&str>,
     profile: &Profile,
 ) -> Result<PathBuf> {
     let (_, _, binaries) = tool(package)?;
@@ -308,9 +308,7 @@ pub(crate) fn build_tool_tree(
         .join(binary)
         .join(target)
         .join(init);
-    let install_path = destination
-        .map(str::to_string)
-        .unwrap_or_else(|| format!("usr/bin/{binary}"));
+    let install_path = format!("usr/bin/{binary}");
     let ctx = super::run_recipe_phase_json_with_inputs(
         &recipe_bin.path,
         "install",

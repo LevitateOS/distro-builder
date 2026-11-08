@@ -5,74 +5,45 @@ use anyhow::{bail, Context, Result};
 use distro_builder::kernel::{KERNEL_IMAGE_PATH, KERNEL_RELEASE_PATH};
 use distro_contract::Variant;
 
-use crate::{BuildOutputLayout, BuildProduct};
+use distro_builder::product::ReleaseProduct;
+
+use crate::BuildOutputLayout;
+
+/// The default live UKI's extra kernel command line (its emergency and debug
+/// siblings boot in text mode).
+const LIVE_UKI_CMDLINE: &str = "video=1920x1080";
 
 pub(crate) fn ensure_release_iso_via_variant_hook(
     bundle: &Variant,
     distro_id: &str,
     kernel_output_dir: &Path,
     build_layout: &BuildOutputLayout,
-    product: BuildProduct,
+    release: ReleaseProduct,
 ) -> Result<()> {
+    let product = release.product;
+    let build = distro_builder::product::build(product);
+    let artifacts = &bundle.contract.artifacts;
     let output_dir = &build_layout.output_dir;
-    let live_uki = &bundle.contract.transforms.live_uki;
-    // The contract validates exactly three outputs: live, emergency, debug.
-    let [live_uki_filename, emergency_uki_filename, debug_uki_filename] =
-        live_uki.output_names.as_slice()
-    else {
-        unreachable!("the contract validates three live UKI outputs")
-    };
-    let live_cmdline = live_uki.extra_cmdline.clone().unwrap_or_default();
-    let initramfs_live_filename = crate::workflows::canonical_initramfs_live_filename(
-        &bundle.contract,
-    )
-    .with_context(|| {
-        format!(
-            "resolving canonical Ring 1 live initramfs output for '{}'",
-            distro_id
-        )
-    })?;
-    let rootfs_filename = crate::workflows::canonical_rootfs_erofs_filename(&bundle.contract)
-        .with_context(|| {
-            format!(
-                "resolving canonical Ring 1 rootfs output for '{}'",
-                distro_id
-            )
-        })?;
-    let overlay_filename = crate::workflows::canonical_overlay_erofs_filename(&bundle.contract)
-        .with_context(|| {
-            format!(
-                "resolving canonical Ring 1 overlay output for '{}'",
-                distro_id
-            )
-        })?;
-    let base_iso_filename = crate::workflows::canonical_iso_filename(&bundle.contract)
-        .with_context(|| format!("resolving canonical Ring 0 ISO output for '{}'", distro_id))?;
-    let iso_filename =
-        crate::workflows::build::iso_filename_for_product(&base_iso_filename, product);
+    let iso_filename = artifacts.iso(product);
     let iso_path = output_dir.join(&iso_filename);
-    let release_hook_script = product.release_hook_script_name.ok_or_else(|| {
-        anyhow::anyhow!(
-            "missing canonical release hook for product '{}': this product is not a release ISO target",
-            product.canonical
-        )
-    })?;
-    let native_build = bundle.path("hooks").join(release_hook_script);
+    let native_build = bundle.path("hooks").join(release.hook);
     if !native_build.is_file() {
         bail!(
-            "missing variant release build hook for product '{}' on '{}': {}",
-            product.canonical,
-            distro_id,
+            "missing variant release build hook for product '{product}' on '{distro_id}': {}",
             native_build.display(),
         );
     }
+    let required_kernel_cmdline = if build.live_session {
+        bundle.contract.live_kernel_cmdline().join(" ")
+    } else {
+        String::new()
+    };
 
     let kernel_release_path = kernel_output_dir.join(KERNEL_RELEASE_PATH);
     let kernel_image_path = kernel_output_dir.join(KERNEL_IMAGE_PATH);
 
     println!(
-        "[release:iso:{}:{distro_id}] building release run {} via variant release hook {} (output: {})",
-        product.canonical,
+        "[release:iso:{product}:{distro_id}] building release run {} via variant release hook {} (output: {})",
         build_layout.run_id.as_deref().unwrap_or("adhoc"),
         native_build.display(),
         iso_path.display()
@@ -89,53 +60,43 @@ pub(crate) fn ensure_release_iso_via_variant_hook(
         .env("IDENTITY_OS_ID", &bundle.contract.identity.os_id)
         .env("IDENTITY_OS_VERSION", &bundle.contract.identity.os_version)
         .env("IDENTITY_ISO_LABEL", &bundle.contract.identity.iso_label)
-        .env("LIVE_UKI_FILENAME", live_uki_filename)
-        .env("EMERGENCY_UKI_FILENAME", emergency_uki_filename)
-        .env("DEBUG_UKI_FILENAME", debug_uki_filename)
-        .env("LIVE_UKI_CMDLINE", &live_cmdline)
+        .env("LIVE_UKI_FILENAME", &artifacts.live_uki.live)
+        .env("EMERGENCY_UKI_FILENAME", &artifacts.live_uki.emergency)
+        .env("DEBUG_UKI_FILENAME", &artifacts.live_uki.debug)
+        .env("LIVE_UKI_CMDLINE", LIVE_UKI_CMDLINE)
         .env("KERNEL_RELEASE_PATH", &kernel_release_path)
         .env("KERNEL_IMAGE_PATH", &kernel_image_path)
         .env("ISO_PATH", &iso_path)
         .env("ISO_FILENAME", &iso_filename)
-        .env("PRODUCT_NAME", product.canonical)
-        .env("PRODUCT_DIRNAME", product.release_dir_name)
-        .env("PRODUCT_ARTIFACT_TAG", product.release_dir_name)
-        .env("PRODUCT_BOOT_LABEL", product.issue_banner_label)
-        .env("ROOTFS_FILENAME", &rootfs_filename)
-        .env("INITRAMFS_LIVE_FILENAME", &initramfs_live_filename)
+        .env("PRODUCT_NAME", product.name())
+        .env("PRODUCT_DIRNAME", product.name())
+        .env("PRODUCT_ARTIFACT_TAG", product.name())
+        .env("PRODUCT_BOOT_LABEL", product.title())
+        .env("ROOTFS_FILENAME", &artifacts.rootfs)
+        .env("INITRAMFS_LIVE_FILENAME", &artifacts.initramfs_live)
         .env(
             "INITRAMFS_INSTALLED_FILENAME",
-            bundle
-                .contract
-                .artifacts
-                .initramfs_installed_output
+            artifacts
+                .initramfs_installed
                 .as_deref()
-                .filter(|_| product.carries_installed_system)
+                .filter(|_| build.carries_installed_system)
                 .unwrap_or(""),
         )
-        .env("LIVE_OVERLAY_DIRNAME", product.live_overlay_dir_name)
-        .env("LIVE_OVERLAY_IMAGE_FILENAME", &overlay_filename)
-        .env(
-            "ROOTFS_SOURCE_POINTER_FILENAME",
-            product.rootfs_source_pointer_filename,
-        )
+        .env("LIVE_OVERLAY_DIRNAME", build.overlay_dir)
+        .env("LIVE_OVERLAY_IMAGE_FILENAME", &artifacts.overlay)
+        .env("ROOTFS_SOURCE_POINTER_FILENAME", build.rootfs_source_pointer)
         .env("RELEASE_ROOT_DIR", &build_layout.root_dir)
         .env("RELEASE_RUN_DIR", output_dir)
         .env("RELEASE_OUTPUT_DIR", output_dir)
         .env("BUILD_RUN_ID", build_layout.run_id.as_deref().unwrap_or(""))
         .env("DISTRO_BUILDER_BIN", &distro_builder_bin)
         .env("KERNEL_OUTPUT_DIR", kernel_output_dir)
-        .env(
-            "PRODUCT_REQUIRED_KERNEL_CMDLINE",
-            product_required_kernel_cmdline(bundle, product),
-        )
+        .env("PRODUCT_REQUIRED_KERNEL_CMDLINE", &required_kernel_cmdline)
         .status()
         .with_context(|| {
             format!(
-                "running variant release build hook '{}' for product '{}' on '{}'",
+                "running variant release build hook '{}' for product '{product}' on '{distro_id}'",
                 native_build.display(),
-                product.canonical,
-                distro_id
             )
         })?;
 
@@ -152,19 +113,4 @@ pub(crate) fn ensure_release_iso_via_variant_hook(
     }
 
     Ok(())
-}
-
-fn product_required_kernel_cmdline(
-    bundle: &Variant,
-    product: BuildProduct,
-) -> String {
-    match product.canonical {
-        crate::PRODUCT_LIVE_BOOT | crate::PRODUCT_LIVE_TOOLS => bundle
-            .contract
-            .scenarios
-            .live_boot
-            .required_kernel_cmdline
-            .join(" "),
-        _ => String::new(),
-    }
 }

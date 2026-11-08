@@ -8,8 +8,9 @@
 //! the screen only when the boot-injection payload sets [`SERIAL_KEY`]`=1`; otherwise
 //! it gets the shell straight away.
 //!
-//! Everything goes into the live overlay: the rootfs is what `recstrap` installs, and an
-//! installed system has no use for the install screen. Paths are relative to a layer's root.
+//! Everything goes into the live-tools overlay (the layer `pipeline/products.rs` adds
+//! for a product with `install_screen`), never into the system rootfs below it, which
+//! has no use for the install screen. Paths are relative to a layer's root.
 
 use anyhow::{bail, Context, Result};
 use distro_contract::{InstallUxContract, Profile};
@@ -31,9 +32,10 @@ pub const SMOKE_ENV: &str = "INSTALL_UX_SMOKE";
 /// Printed by `install-split --smoke`.
 pub const SPLIT_SMOKE_OK: &str = "split-smoke:ok";
 
-/// The live `/etc/issue` login hint; the install tests treat it as the live
-/// serial console being ready.
-pub const LIVE_LOGIN_HINT: &str = "Login as 'root' (no password)";
+/// The line under the live `/etc/issue` banner. Every live console logs root
+/// in without a password (the install screen's too), so the hint says so;
+/// the install tests treat it as the live serial console being ready.
+pub const LIVE_LOGIN_HINT: &str = "root is logged in on every console (no password)";
 
 /// Writes the install screen into `overlay`: the TUI apps (the docs app among them)
 /// and the launcher. The split pane must already be
@@ -102,45 +104,29 @@ pub(crate) fn write_payload(
     // The hub is told which distro it installs and its shell; it reads neither from the
     // running system.
     let left = match &install_ux.hub {
-        Some(hub) => shell_words(&[
+        Some(hub) => vec![
             format!("/{}/{hub}", crate::tui_binary::BIN_DIR),
             "--os-name".to_string(),
             os_name.to_string(),
             "--shell".to_string(),
             install_ux.shell.clone(),
-        ]),
-        None => "\"$SHELL\" -l".to_string(),
+        ],
+        None => vec![install_ux.shell.clone(), "-l".to_string()],
     };
+    use crate::guest::Value::{Argv, Word};
+    let split = format!("/{SPLIT}");
     let launcher = crate::guest::render(
-        crate::guest::INSTALL_UX,
+        &crate::guest::INSTALL_UX,
         &[
-            ("SHELL", &install_ux.shell),
-            ("LEFT", &left),
-            ("SPLIT", &format!("/{SPLIT}")),
-            ("DOCS_ARGV", &shell_words(&docs_argv)),
-            ("SERIAL_KEY", SERIAL_KEY),
-            ("BOOT_INJECTION_ENV", recinit::live::BOOT_INJECTION_ENV),
-            ("PROBE", PROBE_PREFIX),
-            ("SMOKE", SMOKE_ENV),
+            ("SHELL", Word(&install_ux.shell)),
+            ("LEFT", Argv(&left)),
+            ("SPLIT", Word(&split)),
+            ("DOCS_ARGV", Argv(&docs_argv)),
+            ("SERIAL_KEY", Word(SERIAL_KEY)),
+            ("BOOT_INJECTION_ENV", Word(recinit::live::BOOT_INJECTION_ENV)),
+            ("PROBE", Word(PROBE_PREFIX)),
+            ("SMOKE", Word(SMOKE_ENV)),
         ],
     )?;
     write_file(&overlay.join(LAUNCHER), launcher, 0o755)
-}
-
-/// `argv` as one POSIX shell command line, each word single-quoted where needed.
-fn shell_words(argv: &[String]) -> String {
-    argv.iter()
-        .map(|word| {
-            if !word.is_empty()
-                && word
-                    .chars()
-                    .all(|c| c.is_ascii_alphanumeric() || "/-_.=".contains(c))
-            {
-                word.clone()
-            } else {
-                format!("'{}'", word.replace('\'', r"'\''"))
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
 }

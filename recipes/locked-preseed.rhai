@@ -22,15 +22,20 @@ fn is_acquired(ctx) {
     ready(with_outputs(ctx))
 }
 
+// Mirrors drop superseded builds, so a failed download usually means the lock
+// is out of date. (A separate function keeps the nesting under Rhai's
+// expression-depth limit, which is lower in a debug build.)
+fn fetch(row, file) {
+    try { download(row[2], file, row[3]); }
+    catch (err) { throw "downloading " + row[1] + " failed (" + err + "); the lock may need refreshing"; }
+}
+
 fn acquire(ctx) {
     mkdir(dir_of(ctx));
     for row in ctx.files {
         let file = file_of(ctx, row);
         if ctx.runtime.options.force_acquire || !is_file(file) {
-            // Mirrors drop superseded builds, so a failed download usually
-            // means the lock is out of date.
-            try { download(row[2], file, row[3]); }
-            catch (err) { throw "downloading " + row[1] + " failed (" + err + "); the lock may need refreshing"; }
+            fetch(row, file);
         } else {
             verify_sha256(file, row[3]);
         }

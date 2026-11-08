@@ -1,551 +1,203 @@
-use anyhow::{Context, Result};
-use distro_contract::ConformanceContract;
+//! Product preparation. Every product is the installable system rootfs plus
+//! a layer: base-rootfs builds the system (the rootfs recipe's tree, its
+//! payload role and the rootfs tools), and every other product takes its
+//! parent's rootfs image unchanged and adds only its overlay, as
+//! `crate::product::build` says. So installed-boot boots exactly the rootfs
+//! the live-tools ISO installs. One routine prepares every product and
+//! records it in one manifest.
+use anyhow::{bail, Context, Result};
+use distro_contract::{ConformanceContract, ProductId, Variant};
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::pipeline::config::{
-    load_boot_config_from_contract, load_installed_boot_payload_config_from_contract,
-    load_live_tools_config_from_contract,
-};
-use crate::pipeline::io::{
-    create_empty_overlay_dir, create_unique_output_dir, extract_erofs_rootfs,
-};
-use crate::pipeline::live_tools::add_required_tools;
-use crate::pipeline::overlay::create_live_overlay;
-use distro_contract::{InstallUxContract, ProductId, Profile};
+use crate::pipeline::io::{create_empty_overlay_dir, extract_erofs_rootfs};
+use crate::pipeline::live_tools::{add_tools, ToolLayer};
+use crate::pipeline::overlay::{create_live_overlay, LiveSession};
+use crate::pipeline::source::{materialize_rootfs_source, os_release};
 
-use crate::pipeline::plan::{
-    apply_producer_plan, build_baseline_producers, ProducerPlan, RootfsProducer,
-};
-use crate::pipeline::source::{
-    materialize_source_rootfs, RootfsSourcePolicy,
-};
+/// The prepared product's rootfs tree, beside its overlay tree.
+const ROOTFS_SOURCE_DIR: &str = "rootfs-source";
+/// The manifest in a prepared product's directory.
+const MANIFEST: &str = ".prepared-product.json";
+/// The installed system's setup program (the system recipe installs it).
+const SETUP_PROGRAM: &str = "usr/libexec/recipe-system-setup";
 
-#[derive(Debug, Clone)]
-pub struct BaseRootfsProduct {
-    pub rootfs_source_dir: PathBuf,
-    pub live_overlay_dir: PathBuf,
-}
-
-#[derive(Debug, Clone)]
-pub struct LiveBootProduct {
-    pub rootfs_source_dir: PathBuf,
-    pub live_overlay_dir: PathBuf,
-}
-
-#[derive(Debug, Clone)]
-pub struct LiveToolsProduct {
-    pub rootfs_source_dir: PathBuf,
-    pub live_overlay_dir: PathBuf,
-}
-
-#[derive(Debug, Clone)]
-pub struct InstalledBootProduct {
-    pub rootfs_source_dir: PathBuf,
-    pub live_overlay_dir: PathBuf,
-}
-
-#[derive(Debug, Clone)]
-pub struct BaseRootfsProductSpec {
+/// A prepared product: its rootfs and overlay trees in its directory, and the
+/// images they are packed into there.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PreparedProduct {
+    pub product: String,
     pub distro_id: String,
-    pub os_name: String,
-    pub os_id: String,
-    pub rootfs_source_dir: PathBuf,
-    live_overlay_dir_name: String,
-    plan: ProducerPlan,
+    /// The trees, relative to the product's directory.
+    rootfs_source_dir: PathBuf,
+    overlay_dir: PathBuf,
+    pub rootfs_erofs: String,
+    pub overlay_erofs: String,
 }
 
-#[derive(Debug, Clone)]
-pub struct BaseProductLayout {
-    pub rootfs_source_dir: PathBuf,
-    pub live_overlay_dir_name: String,
-}
-
-#[derive(Debug, Clone)]
-pub struct OverlayLayout {
-    pub issue_banner_label: String,
-    pub dir_name: String,
-}
-
-#[derive(Debug, Clone)]
-pub struct DerivedProductLayout {
-    pub product: ProductId,
-    pub rootfs_source_dir: PathBuf,
-    pub live_overlay: OverlayLayout,
-}
-
-#[derive(Debug, Clone)]
-pub struct LiveBootProductSpec {
-    repo_root: PathBuf,
-    pub distro_id: String,
-    pub os_name: String,
-    pub rootfs_source_dir: PathBuf,
-    product: ProductId,
-    resolved_parent_rootfs_image: Option<PathBuf>,
-    live_overlay: OverlayLayout,
-    add_plan: ProducerPlan,
-    required_services: Vec<String>,
-    rootfs_source_policy: Option<RootfsSourcePolicy>,
-    pub profile: Profile,
-}
-
-impl LiveBootProductSpec {
-    pub fn required_services(&self) -> &[String] {
-        &self.required_services
+impl PreparedProduct {
+    /// The product prepared in `dir`. Refuses a manifest whose trees are not
+    /// inside `dir`, and a missing tree or an empty rootfs.
+    pub fn read(dir: &Path) -> Result<Self> {
+        let path = dir.join(MANIFEST);
+        let bytes = fs::read(&path)
+            .with_context(|| format!("reading the prepared product manifest {}", path.display()))?;
+        let prepared: Self = serde_json::from_slice(&bytes)
+            .with_context(|| format!("parsing the prepared product manifest {}", path.display()))?;
+        for (what, tree) in [
+            ("rootfs", &prepared.rootfs_source_dir),
+            ("overlay", &prepared.overlay_dir),
+        ] {
+            levitate_recipe::target::relative(tree)
+                .with_context(|| format!("{}: the {what} tree must be inside the product's directory", path.display()))?;
+            if !dir.join(tree).is_dir() {
+                bail!("{} has no {what} tree {}", dir.display(), tree.display());
+            }
+        }
+        let rootfs = prepared.rootfs_source(dir);
+        if fs::read_dir(&rootfs)?.next().is_none() {
+            bail!("the prepared rootfs {} is empty", rootfs.display());
+        }
+        Ok(prepared)
     }
 
-    /// Explicit source acquisition declaration, independent of recipe filename.
-    pub fn rootfs_source_preseed(
-        &self,
-    ) -> Option<(
-        &Path,
-        &std::collections::BTreeMap<String, distro_contract::RecipeOutputKind>,
-    )> {
-        let source = self.rootfs_source_policy.as_ref()?;
-        Some((
-            source.preseed_recipe_script.as_deref()?,
-            &source.preseed_outputs,
-        ))
+    /// The rootfs tree of the product prepared in `dir`.
+    pub fn rootfs_source(&self, dir: &Path) -> PathBuf {
+        dir.join(&self.rootfs_source_dir)
     }
 
-    pub fn with_resolved_parent_rootfs_image(mut self, image: PathBuf) -> Self {
-        self.resolved_parent_rootfs_image = Some(image);
-        self
+    /// The overlay tree of the product prepared in `dir`.
+    pub fn overlay(&self, dir: &Path) -> PathBuf {
+        dir.join(&self.overlay_dir)
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct LiveToolsProductSpec {
-    repo_root: PathBuf,
-    pub distro_id: String,
-    pub os_name: String,
-    install_ux: InstallUxContract,
-    pub rootfs_source_dir: PathBuf,
-    product: ProductId,
-    resolved_parent_rootfs_image: Option<PathBuf>,
-    live_overlay: OverlayLayout,
-    profile: Profile,
-    required_services: Vec<String>,
-}
+/// Prepares `product` of `variant` in `dir`: its rootfs tree, its overlay
+/// tree, the rootfs source pointer the release hooks read, and the manifest.
+/// A derived product starts from its parent's latest release.
+pub fn prepare_product(variant: &Variant, product: ProductId, dir: &Path) -> Result<PreparedProduct> {
+    let contract = &variant.contract;
+    let build = crate::product::build(product);
+    fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
 
-impl LiveToolsProductSpec {
-    pub fn with_resolved_parent_rootfs_image(mut self, image: PathBuf) -> Self {
-        self.resolved_parent_rootfs_image = Some(image);
-        self
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct InstalledBootProductSpec {
-    repo_root: PathBuf,
-    pub distro_id: String,
-    pub rootfs_source_dir: PathBuf,
-    product: ProductId,
-    resolved_parent_rootfs_image: Option<PathBuf>,
-    live_overlay_dir_name: String,
-    add_plan: ProducerPlan,
-    rootfs_source_policy: Option<RootfsSourcePolicy>,
-}
-
-impl InstalledBootProductSpec {
-    pub fn with_resolved_parent_rootfs_image(mut self, image: PathBuf) -> Self {
-        self.resolved_parent_rootfs_image = Some(image);
-        self
-    }
-}
-
-pub fn load_base_rootfs_product_spec(
-    distro_id: &str,
-    os_name: &str,
-    os_id: &str,
-    profile: &Profile,
-    layout: BaseProductLayout,
-) -> BaseRootfsProductSpec {
-    BaseRootfsProductSpec {
-        distro_id: distro_id.to_string(),
-        os_name: os_name.to_string(),
-        os_id: os_id.to_string(),
-        rootfs_source_dir: layout.rootfs_source_dir,
-        live_overlay_dir_name: layout.live_overlay_dir_name,
-        plan: ProducerPlan {
-            source_rootfs_dir: None,
-            producers: build_baseline_producers(distro_id, os_name, os_id, profile),
-        },
-    }
-}
-
-pub fn prepare_base_rootfs_product(
-    spec: &BaseRootfsProductSpec,
-    output_dir: &Path,
-) -> Result<BaseRootfsProduct> {
-    fs::create_dir_all(output_dir).with_context(|| {
-        format!(
-            "creating base rootfs product output directory '{}'",
-            output_dir.display()
-        )
-    })?;
-
-    let rootfs_source_dir = create_unique_output_dir(output_dir, &spec.rootfs_source_dir)?;
-    apply_producer_plan(&spec.plan, &rootfs_source_dir)
-        .with_context(|| format!("materializing base rootfs for '{}'", spec.distro_id))?;
-
-    let live_overlay_dir = create_empty_overlay_dir(output_dir, &spec.live_overlay_dir_name)
-        .with_context(|| format!("creating empty overlay for {}", spec.distro_id))?;
-
-    Ok(BaseRootfsProduct {
-        rootfs_source_dir,
-        live_overlay_dir,
-    })
-}
-
-pub fn load_live_boot_product_spec(
-    repo_root: &Path,
-    contract: &ConformanceContract,
-    distro_id: &str,
-    layout: DerivedProductLayout,
-) -> Result<LiveBootProductSpec> {
-    let loaded = load_boot_config_from_contract(repo_root, contract)?;
-
-    let mut add_producers = loaded.payload_producers.clone();
-    if loaded.rootfs_source_policy.is_none() {
-        add_producers.retain(|producer| matches!(producer, RootfsProducer::WriteText { .. }));
-    }
-
-    Ok(LiveBootProductSpec {
-        repo_root: repo_root.to_path_buf(),
-        distro_id: distro_id.to_string(),
-        os_name: loaded.os_name,
-        rootfs_source_dir: layout.rootfs_source_dir,
-        product: layout.product,
-        resolved_parent_rootfs_image: None,
-        live_overlay: layout.live_overlay,
-        add_plan: ProducerPlan {
-            source_rootfs_dir: None,
-            producers: add_producers,
-        },
-        required_services: loaded.required_services,
-        rootfs_source_policy: loaded.rootfs_source_policy,
-        profile: loaded.profile,
-    })
-}
-
-pub fn prepare_live_boot_product(
-    spec: &LiveBootProductSpec,
-    output_dir: &Path,
-) -> Result<LiveBootProduct> {
-    let parent_rootfs = resolved_parent_rootfs_image(
-        spec.product,
-        &spec.distro_id,
-        spec.resolved_parent_rootfs_image.as_deref(),
-    )?;
-    fs::create_dir_all(output_dir).with_context(|| {
-        format!(
-            "creating live boot product output directory '{}'",
-            output_dir.display()
-        )
-    })?;
-
-    let rootfs_source_dir = create_unique_output_dir(output_dir, &spec.rootfs_source_dir)?;
-    extract_erofs_rootfs(parent_rootfs, &rootfs_source_dir).with_context(|| {
-        format!(
-            "extracting parent rootfs for live boot product from '{}'",
-            parent_rootfs.display()
-        )
-    })?;
-
-    let mut add_plan = spec.add_plan.clone();
-    if add_plan.producers.iter().any(|producer| {
-        matches!(
-            producer,
-            RootfsProducer::CopyTree { .. }
-        )
-    }) {
-        let source_rootfs_dir = materialize_source_rootfs(
-            &spec.repo_root,
-            &spec.distro_id,
-            &spec.rootfs_source_policy,
-        )?;
-        add_plan.source_rootfs_dir = Some(source_rootfs_dir);
-    }
-
-    apply_system_payload(&add_plan, &rootfs_source_dir).with_context(|| {
-        format!(
-            "applying live boot product additive producers for '{}'",
-            spec.distro_id
-        )
-    })?;
-    validate_installed_rootfs(&rootfs_source_dir)?;
-    let live_overlay_dir = create_live_overlay(
-        &spec.repo_root,
-        output_dir,
-        &rootfs_source_dir,
-        &spec.distro_id,
-        &spec.os_name,
-        &spec.live_overlay.issue_banner_label,
-        &spec.live_overlay.dir_name,
-        spec.profile.init,
-        &[],
-        &spec.required_services,
-    )?;
-
-    Ok(LiveBootProduct {
-        rootfs_source_dir,
-        live_overlay_dir,
-    })
-}
-
-pub fn materialize_live_boot_source_rootfs(spec: &LiveBootProductSpec) -> Result<PathBuf> {
-    materialize_source_rootfs(&spec.repo_root, &spec.distro_id, &spec.rootfs_source_policy)
-}
-
-pub fn load_live_tools_product_spec(
-    repo_root: &Path,
-    contract: &ConformanceContract,
-    distro_id: &str,
-    layout: DerivedProductLayout,
-) -> Result<LiveToolsProductSpec> {
-    let loaded = load_live_tools_config_from_contract(contract);
-
-    let live_boot_spec =
-        load_live_boot_product_spec(repo_root, contract, distro_id, layout.clone())
-            .with_context(|| {
-                format!(
-                    "loading live boot baseline while preparing live tools for '{}'",
-                    distro_id
-                )
+    let rootfs = create_empty_overlay_dir(dir, ROOTFS_SOURCE_DIR)?;
+    match product.parent() {
+        None => prepare_system(variant, &rootfs)
+            .with_context(|| format!("preparing the {} system rootfs", variant.id))?,
+        Some(parent) => {
+            let image = crate::parent_rootfs_image(&variant.repo_root, &variant.id, contract, product)?
+                .with_context(|| format!("{product} has no parent rootfs image"))?;
+            extract_erofs_rootfs(&image, &rootfs)
+                .with_context(|| format!("extracting the {parent} rootfs {}", image.display()))?;
+            check_installable(&rootfs, contract).with_context(|| {
+                format!("the {parent} rootfs {} is not the current system; rebuild {parent}", image.display())
             })?;
-
-    Ok(LiveToolsProductSpec {
-        repo_root: repo_root.to_path_buf(),
-        distro_id: distro_id.to_string(),
-        os_name: loaded.os_name,
-        install_ux: loaded.install_ux,
-        rootfs_source_dir: layout.rootfs_source_dir,
-        product: layout.product,
-        resolved_parent_rootfs_image: None,
-        live_overlay: layout.live_overlay,
-        profile: live_boot_spec.profile,
-        required_services: live_boot_spec.required_services().to_vec(),
-    })
-}
-
-pub fn load_installed_boot_product_spec(
-    repo_root: &Path,
-    contract: &ConformanceContract,
-    distro_id: &str,
-    layout: DerivedProductLayout,
-) -> Result<InstalledBootProductSpec> {
-    let loaded = load_installed_boot_payload_config_from_contract(repo_root, contract)?;
-
-    let mut add_producers = loaded.payload_producers.clone();
-    if loaded.rootfs_source_policy.is_none() {
-        add_producers.retain(|producer| matches!(producer, RootfsProducer::WriteText { .. }));
-    }
-
-    Ok(InstalledBootProductSpec {
-        repo_root: repo_root.to_path_buf(),
-        distro_id: distro_id.to_string(),
-        rootfs_source_dir: layout.rootfs_source_dir,
-        product: layout.product,
-        resolved_parent_rootfs_image: None,
-        live_overlay_dir_name: layout.live_overlay.dir_name,
-        add_plan: ProducerPlan {
-            source_rootfs_dir: None,
-            producers: add_producers,
-        },
-        rootfs_source_policy: loaded.rootfs_source_policy,
-    })
-}
-
-pub fn prepare_live_tools_product(
-    spec: &LiveToolsProductSpec,
-    output_dir: &Path,
-) -> Result<LiveToolsProduct> {
-    let parent_rootfs = resolved_parent_rootfs_image(
-        spec.product,
-        &spec.distro_id,
-        spec.resolved_parent_rootfs_image.as_deref(),
-    )?;
-    fs::create_dir_all(output_dir).with_context(|| {
-        format!(
-            "creating live tools product output directory '{}'",
-            output_dir.display()
-        )
-    })?;
-
-    let rootfs_source_dir = create_unique_output_dir(output_dir, &spec.rootfs_source_dir)?;
-    extract_erofs_rootfs(parent_rootfs, &rootfs_source_dir).with_context(|| {
-        format!(
-            "extracting parent rootfs for live tools product from '{}'",
-            parent_rootfs.display()
-        )
-    })?;
-
-    validate_installed_rootfs(&rootfs_source_dir)?;
-    let live_overlay_dir = create_live_overlay(
-        &spec.repo_root,
-        output_dir,
-        &rootfs_source_dir,
-        &spec.distro_id,
-        &spec.os_name,
-        &spec.live_overlay.issue_banner_label,
-        &spec.live_overlay.dir_name,
-        spec.profile.init,
-        &spec.install_ux.consoles,
-        &spec.required_services,
-    )?;
-
-    add_required_tools(
-        &spec.repo_root,
-        &rootfs_source_dir,
-        &live_overlay_dir,
-        &spec.distro_id,
-        &spec.profile,
-    )
-    .with_context(|| format!("adding required live tools for '{}'", spec.distro_id))?;
-    crate::install_ux::write_payload(
-        &spec.repo_root,
-        &rootfs_source_dir,
-        &live_overlay_dir,
-        &spec.os_name,
-        &spec.profile,
-        &spec.install_ux,
-    )
-    .with_context(|| format!("writing the install screen for '{}'", spec.distro_id))?;
-
-    Ok(LiveToolsProduct {
-        rootfs_source_dir,
-        live_overlay_dir,
-    })
-}
-
-pub fn prepare_installed_boot_product(
-    spec: &InstalledBootProductSpec,
-    output_dir: &Path,
-) -> Result<InstalledBootProduct> {
-    let parent_rootfs = resolved_parent_rootfs_image(
-        spec.product,
-        &spec.distro_id,
-        spec.resolved_parent_rootfs_image.as_deref(),
-    )?;
-    fs::create_dir_all(output_dir).with_context(|| {
-        format!(
-            "creating installed boot product output directory '{}'",
-            output_dir.display()
-        )
-    })?;
-
-    let rootfs_source_dir = create_unique_output_dir(output_dir, &spec.rootfs_source_dir)?;
-    extract_erofs_rootfs(parent_rootfs, &rootfs_source_dir).with_context(|| {
-        format!(
-            "extracting parent rootfs for installed boot product from '{}'",
-            parent_rootfs.display()
-        )
-    })?;
-
-    let mut add_plan = spec.add_plan.clone();
-    if add_plan.producers.iter().any(|producer| {
-        matches!(
-            producer,
-            RootfsProducer::CopyTree { .. }
-        )
-    }) {
-        let source_rootfs_dir = materialize_source_rootfs(
-            &spec.repo_root,
-            &spec.distro_id,
-            &spec.rootfs_source_policy,
-        )?;
-        add_plan.source_rootfs_dir = Some(source_rootfs_dir);
-    }
-
-    apply_system_payload(&add_plan, &rootfs_source_dir).with_context(|| {
-        format!(
-            "applying installed boot product additive producers for '{}'",
-            spec.distro_id
-        )
-    })?;
-
-    validate_installed_rootfs(&rootfs_source_dir)?;
-    let live_overlay_dir = create_empty_overlay_dir(output_dir, &spec.live_overlay_dir_name)
-        .with_context(|| {
-            format!(
-                "creating empty installed boot overlay for {}",
-                spec.distro_id
-            )
-        })?;
-
-    Ok(InstalledBootProduct {
-        rootfs_source_dir,
-        live_overlay_dir,
-    })
-}
-
-fn resolved_parent_rootfs_image<'a>(
-    product: ProductId,
-    distro_id: &str,
-    resolved_parent_rootfs_image: Option<&'a Path>,
-) -> Result<&'a Path> {
-    resolved_parent_rootfs_image.ok_or_else(|| {
-        anyhow::anyhow!(
-            "preparing {distro_id} {product} needs the rootfs image of its parent product \
-             ({}), and none was given",
-            product.parent().map_or("none", ProductId::name),
-        )
-    })
-}
-
-/// Consumer boundary: a live payload must be safe to deploy as an installed
-/// system. Refuse stale parent products instead of carrying their live overrides.
-fn validate_installed_rootfs(root: &Path) -> Result<()> {
-    if !root.join("usr/libexec/recipe-system-setup").is_file() {
-        anyhow::bail!("{} lacks Recipe's installed-system setup program; rebuild the source and parent product with the current recipes", root.display());
-    }
-    for path in [
-        "usr/local/bin/serial-autologin",
-        "usr/local/bin/live-help",
-        "etc/profile.d/20-live-shell.sh",
-        "etc/profile.d/99-serial-test.sh",
-        "etc/systemd/system/getty@.service.d/zz-autologin.conf",
-        "etc/systemd/system/serial-getty@.service.d/zz-autologin.conf",
-        "usr/local/lib/scenario-tests",
-        "usr/local/bin/live-boot.sh",
-    ] {
-        if root.join(path).symlink_metadata().is_ok() {
-            anyhow::bail!("live-only path {path} leaked into {}; rebuild the parent product with the current system recipes", root.display());
         }
     }
-    let inittab = fs::read_to_string(root.join("etc/inittab")).unwrap_or_default();
-    if inittab.contains("serial-autologin")
-        || inittab.contains("-n -l")
-        || inittab.contains("--autologin")
-    {
-        anyhow::bail!(
-            "live autologin leaked into the installed inittab in {}",
-            root.display()
-        );
+
+    let overlay = create_empty_overlay_dir(dir, build.overlay_dir)?;
+    if build.live_session {
+        create_live_overlay(variant, &LiveSession::new(variant, product), &rootfs, &overlay)?;
+    }
+    if build.install_screen {
+        add_tools(&variant.repo_root, &overlay, ToolLayer::Overlay, &variant.id, &contract.profile)
+            .with_context(|| format!("adding the live tools for {}", variant.id))?;
+        crate::install_ux::write_payload(
+            &variant.repo_root,
+            &rootfs,
+            &overlay,
+            &contract.identity.os_name,
+            &contract.profile,
+            &contract.install_ux,
+        )
+        .with_context(|| format!("writing the install screen for {}", variant.id))?;
+    }
+    check_live_only(&overlay, &rootfs)?;
+
+    let pointer = dir.join(build.rootfs_source_pointer);
+    fs::write(&pointer, format!("{}\n", rootfs.display()))
+        .with_context(|| format!("writing {}", pointer.display()))?;
+    let prepared = PreparedProduct {
+        product: product.name().to_string(),
+        distro_id: variant.id.clone(),
+        rootfs_source_dir: PathBuf::from(ROOTFS_SOURCE_DIR),
+        overlay_dir: PathBuf::from(build.overlay_dir),
+        rootfs_erofs: contract.artifacts.rootfs.clone(),
+        overlay_erofs: contract.artifacts.overlay.clone(),
+    };
+    let manifest = dir.join(MANIFEST);
+    distro_contract::runs::write_atomic(&manifest, &serde_json::to_vec_pretty(&prepared)?)
+        .with_context(|| format!("writing {}", manifest.display()))?;
+    Ok(prepared)
+}
+
+/// The installable system in `rootfs`: the rootfs recipe's tree, marked as
+/// the live init's rootfs layer (recinit's payload-role protocol), with the
+/// rootfs tools.
+fn prepare_system(variant: &Variant, rootfs: &Path) -> Result<()> {
+    let source = materialize_rootfs_source(variant)?;
+    levitate_recipe::target::merge_tree(&source, rootfs)?;
+    let role = rootfs.join(recinit::live::PAYLOAD_ROLE_FILE);
+    fs::write(&role, format!("{}\n", recinit::live::ROLE_ROOTFS))
+        .with_context(|| format!("writing {}", role.display()))?;
+    add_tools(&variant.repo_root, rootfs, ToolLayer::Rootfs, &variant.id, &variant.contract.profile)?;
+    check_installable(rootfs, &variant.contract).with_context(|| {
+        format!(
+            "the rootfs recipe's tree {} predates the current system recipe; remove it to rebuild it",
+            source.display()
+        )
+    })
+}
+
+/// Refuses a rootfs that is not the current installable system: one without
+/// the setup program, or whose `/etc/os-release` is not the contract's.
+fn check_installable(root: &Path, contract: &ConformanceContract) -> Result<()> {
+    if !root.join(SETUP_PROGRAM).is_file() {
+        bail!("{} has no setup program /{SETUP_PROGRAM}", root.display());
+    }
+    let path = root.join("etc/os-release");
+    let found = fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+    if found != os_release(contract) {
+        bail!("{} is not the contract's identity and profile", path.display());
     }
     Ok(())
 }
 
-/// The variant contract owns identity. A full vendor tree can contain its own
-/// os-release (including a symlink); keep the identity of the parent product.
-fn apply_system_payload(plan: &ProducerPlan, root: &Path) -> Result<()> {
-    let path = root.join("etc/os-release");
-    if !fs::symlink_metadata(&path)?.is_file() {
-        anyhow::bail!(
-            "parent product {} must supply a regular contract-owned etc/os-release; rebuild it",
-            root.display()
-        );
+/// The overlay is the only place of what it writes: refuses a non-empty
+/// regular file of `overlay` that `rootfs`, the system below it, also has
+/// with the same content (a rootfs that already carries the live session).
+fn check_live_only(overlay: &Path, rootfs: &Path) -> Result<()> {
+    for entry in walkdir::WalkDir::new(overlay).follow_links(false) {
+        let entry = entry?;
+        let len = entry.metadata()?.len();
+        if !entry.file_type().is_file() || len == 0 {
+            continue;
+        }
+        let relative = entry.path().strip_prefix(overlay)?;
+        let below = rootfs.join(relative);
+        let same = match fs::symlink_metadata(&below) {
+            Ok(meta) if meta.is_file() && meta.len() == len => {
+                fs::read(&below)? == fs::read(entry.path())?
+            }
+            Ok(_) => false,
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+                ) =>
+            {
+                false
+            }
+            Err(error) => return Err(error).with_context(|| format!("reading {}", below.display())),
+        };
+        if same {
+            bail!(
+                "the live layer's {} is also in the rootfs {}; rebuild the rootfs",
+                relative.display(),
+                rootfs.display()
+            );
+        }
     }
-    let identity = fs::read(&path)?;
-    apply_producer_plan(plan, root)?;
-    if fs::symlink_metadata(&path)?.file_type().is_symlink() {
-        fs::remove_file(&path)?;
-    }
-    fs::write(&path, identity)?;
-    // The contract replaces the vendor identity; discard its content binding.
-    let mut metadata = levitate_recipe::target::load(root)?;
-    metadata.entries.remove("etc/os-release");
-    levitate_recipe::target::save(root, &metadata)?;
     Ok(())
 }

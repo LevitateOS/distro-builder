@@ -3,7 +3,6 @@ mod build;
 mod commands;
 mod layout;
 mod parse;
-mod prepared_products;
 mod release_hook;
 
 pub(crate) use artifacts::{

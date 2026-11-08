@@ -225,8 +225,18 @@ fn shutdown_hook(root, init, name, script, mount) {
 // Every console the system has: six virtual consoles and the serial console.
 fn all_consoles() { ["tty1", "tty2", "tty3", "tty4", "tty5", "tty6", "ttyS0"] }
 
-// The setup program reads the distro profile from the image's /etc/os-release
-// (the REC_* fields the builder writes), so it is installed as it is.
+// The system's identity and distro profile (the REC_* fields the install
+// tools read), from the contract: the builder's `os_release` input. A packaged
+// /etc/os-release keeps its packaged form and mode (Fedora's is a symlink to
+// usr/lib/os-release, which then holds this text).
+fn identity(root, inputs) {
+    let text = read_file(join_path(inputs, "os_release"));
+    let path = join_path(root, "etc/os-release");
+    if exists(path) { write_file(path, text); } else { put(root, "etc/os-release", text, 0o644); }
+}
+
+// The setup program reads the distro profile from /etc/os-release, so it is
+// installed as the builder rendered it (its `system_setup` input).
 fn setup_program(root, inputs) {
     put(root, "usr/libexec/recipe-system-setup", read_file(join_path(inputs, "system_setup")), 0o755);
 }
@@ -264,6 +274,7 @@ fn lock_root(root) {
 // Apply the installed-system policy to the tree at `root`, whose init is `init`.
 fn apply(root, inputs, init) {
     check_init(init);
+    identity(root, inputs);
     put(root, "etc/issue", "Linux \\l\n", 0o644);
     put(root, "etc/locale.conf", "LANG=C.UTF-8\n", 0o644);
     locale_env(root, init);

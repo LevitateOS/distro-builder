@@ -3,7 +3,9 @@
 
 pub use distro_contract::ProductId;
 
-/// How the builder lays out and assembles a product.
+/// How the builder lays out and assembles a product. Every product's rootfs
+/// is the installable system: base-rootfs builds it, and every other product
+/// takes its parent's rootfs image unchanged and adds only its overlay.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ProductBuild {
     /// The overlay directory beside the product's rootfs.
@@ -13,9 +15,9 @@ pub struct ProductBuild {
     /// The overlay sets up the live session (services, serial test shell), so
     /// the product's ISO boots with the live kernel command line.
     pub live_session: bool,
-    /// The product's rootfs is the whole installable system, so its ISO
-    /// carries the installed initramfs built from it. base-rootfs is not.
-    pub carries_installed_system: bool,
+    /// The overlay also carries the install tools and the install screen,
+    /// which runs on the variant's install consoles.
+    pub install_screen: bool,
 }
 
 pub fn build(product: ProductId) -> ProductBuild {
@@ -23,20 +25,23 @@ pub fn build(product: ProductId) -> ProductBuild {
         overlay_dir: "live-overlay",
         rootfs_source_pointer: ".live-rootfs-source.path",
         live_session: true,
-        carries_installed_system: true,
+        install_screen: false,
     };
     match product {
         ProductId::BaseRootfs => ProductBuild {
             live_session: false,
-            carries_installed_system: false,
             ..LIVE
         },
-        ProductId::LiveBoot | ProductId::LiveTools => LIVE,
+        ProductId::LiveBoot => LIVE,
+        ProductId::LiveTools => ProductBuild {
+            install_screen: true,
+            ..LIVE
+        },
         ProductId::InstalledBoot => ProductBuild {
             overlay_dir: "boot-overlay",
             rootfs_source_pointer: ".rootfs-source.path",
             live_session: false,
-            carries_installed_system: true,
+            install_screen: false,
         },
     }
 }

@@ -1,5 +1,5 @@
-//! The workspace tools the live-tools product carries, built for the
-//! variant's libc by Recipe, each at `usr/bin/<binary>`.
+//! The workspace tools the products carry, built for the variant's libc by
+//! Recipe, each at `usr/bin/<binary>`.
 use anyhow::{Context, Result};
 use distro_contract::Profile;
 use std::path::Path;
@@ -7,9 +7,10 @@ use std::path::Path;
 /// Where a live tool goes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ToolLayer {
-    /// The live overlay: on the live ISO only.
+    /// The live-tools overlay: on the live-tools ISO only.
     Overlay,
-    /// The rootfs: also on every system the ISO installs.
+    /// The system rootfs (base-rootfs): on every product and every system
+    /// an ISO installs.
     Rootfs,
 }
 
@@ -32,7 +33,7 @@ const fn tool(package: &'static str, binary: Option<&'static str>, layer: ToolLa
 
 /// The install tools; recab and recstrap also go into the rootfs, since
 /// recab stages A/B updates with recstrap on the installed system; and the
-/// install screen's split pane, which is live only.
+/// install screen's split pane, which is live-tools only.
 pub(crate) const LIVE_TOOLS: &[LiveTool] = &[
     tool("recpart", None, ToolLayer::Overlay),
     tool("recstrap", None, ToolLayer::Overlay),
@@ -44,27 +45,25 @@ pub(crate) const LIVE_TOOLS: &[LiveTool] = &[
     tool("install-split-pane", Some("install-split"), ToolLayer::Overlay),
 ];
 
-/// Whether the live-tools product puts a binary of the Cargo `package` on
-/// the live ISO.
+/// Whether the live-tools ISO has a binary of the Cargo `package` (in its
+/// overlay or in the rootfs below it).
 pub(crate) fn ships(package: &str) -> bool {
     LIVE_TOOLS.iter().any(|tool| tool.package == package)
 }
 
-pub(crate) fn add_required_tools(
+/// Builds the tools of `layer` into `root`, the layer's tree: base-rootfs
+/// takes the rootfs tools, live-tools' overlay the others.
+pub(crate) fn add_tools(
     repo: &Path,
-    rootfs: &Path,
-    overlay: &Path,
+    root: &Path,
+    layer: ToolLayer,
     distro_id: &str,
     profile: &Profile,
 ) -> Result<()> {
-    for tool in LIVE_TOOLS {
+    for tool in LIVE_TOOLS.iter().filter(|tool| tool.layer == layer) {
         let tree = crate::recipe::tools::build_tool_tree(repo, tool.package, tool.binary, profile)
             .with_context(|| format!("preparing {} for {distro_id}", tool.package))?;
-        let layer = match tool.layer {
-            ToolLayer::Overlay => overlay,
-            ToolLayer::Rootfs => rootfs,
-        };
-        levitate_recipe::target::merge_tree(&tree, layer)?;
+        levitate_recipe::target::merge_tree(&tree, root)?;
     }
     Ok(())
 }

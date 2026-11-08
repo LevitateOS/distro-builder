@@ -7,25 +7,6 @@ use crate::process::Cmd;
 
 use distro_contract::ProductId;
 
-pub(crate) fn create_unique_output_dir(output_dir: &Path, logical_name: &Path) -> Result<PathBuf> {
-    let stem = logical_name
-        .file_name()
-        .and_then(|part| part.to_str())
-        .unwrap_or("rootfs-source");
-    let path = output_dir.join(stem);
-    if path.exists() {
-        fs::remove_dir_all(&path).with_context(|| {
-            format!(
-                "removing existing product rootfs directory before recreation '{}'",
-                path.display()
-            )
-        })?;
-    }
-    fs::create_dir_all(&path)
-        .with_context(|| format!("creating product rootfs directory '{}'", path.display()))?;
-    Ok(path)
-}
-
 pub(crate) fn create_empty_overlay_dir(output_dir: &Path, dir_name: &str) -> Result<PathBuf> {
     let overlay_dir = output_dir.join(dir_name);
     if overlay_dir.exists() {

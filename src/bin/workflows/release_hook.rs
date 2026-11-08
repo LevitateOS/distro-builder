@@ -76,11 +76,7 @@ pub(crate) fn ensure_release_iso_via_variant_hook(
         .env("INITRAMFS_LIVE_FILENAME", &artifacts.initramfs_live)
         .env(
             "INITRAMFS_INSTALLED_FILENAME",
-            artifacts
-                .initramfs_installed
-                .as_deref()
-                .filter(|_| build.carries_installed_system)
-                .unwrap_or(""),
+            artifacts.initramfs_installed.as_deref().unwrap_or(""),
         )
         .env("LIVE_OVERLAY_DIRNAME", build.overlay_dir)
         .env("LIVE_OVERLAY_IMAGE_FILENAME", &artifacts.overlay)

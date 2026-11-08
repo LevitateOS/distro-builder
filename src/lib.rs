@@ -15,9 +15,5 @@ pub use artifact::overlayfs::{build_overlayfs_default, create_overlayfs_erofs};
 pub use artifact::rootfs::{build_erofs_default, create_erofs};
 pub use pipeline::io::latest_release_rootfs;
 pub use pipeline::planner::{missing_parent_releases, parent_rootfs_image};
-pub use pipeline::products::{
-    load_base_rootfs_product_spec, load_installed_boot_product_spec, load_live_boot_product_spec,
-    load_live_tools_product_spec, materialize_live_boot_source_rootfs, prepare_base_rootfs_product,
-    prepare_installed_boot_product, prepare_live_boot_product, prepare_live_tools_product,
-    BaseProductLayout, DerivedProductLayout, LiveBootProductSpec, OverlayLayout,
-};
+pub use pipeline::products::{prepare_product, PreparedProduct};
+pub use pipeline::source::materialize_rootfs_source;

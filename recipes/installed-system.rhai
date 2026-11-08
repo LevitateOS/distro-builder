@@ -93,6 +93,15 @@ fn network_services(init) {
     if init == "systemd" { ["NetworkManager"] } else { ["networking", "dhcpcd"] }
 }
 
+// What every system runs, by its service names: time sync (chrony), the
+// audit daemon and the D-Bus system bus. systemd starts D-Bus from its socket,
+// which the RPM backend links. sshd is installed but starts only when the
+// user enables it.
+fn capability_services(init) {
+    check_init(init);
+    if init == "systemd" { ["chronyd", "auditd"] } else { ["chronyd", "auditd", "dbus"] }
+}
+
 // The boot target: systemd's default.target. Busybox init's inittab (written
 // by `consoles`) names OpenRC's runlevels itself.
 fn boot_target(root, init) {
@@ -104,9 +113,9 @@ fn boot_target(root, init) {
 
 // The login on each console. `gettys` is a list of [console, login]: login ""
 // is a login prompt, "root" logs root in without asking, and a path runs that
-// program as root in place of login. A serial login prompt is the kernel
-// console's: systemd's getty generator starts it when the boot names ttyS0
-// as a console; busybox init has no generator, so its inittab always has it.
+// program as root in place of login. A serial login prompt runs only when
+// the boot names the port as a console: systemd's getty generator starts it
+// then; busybox init's line runs `serial-login`, which checks the same.
 fn consoles(root, init, gettys) {
     check_init(init);
     if init == "systemd" {
@@ -133,10 +142,15 @@ fn systemd_getty(root, console, login) {
 fn openrc_inittab(root, gettys) {
     let inittab = "::sysinit:/sbin/openrc sysinit\n::sysinit:/sbin/openrc boot\n";
     let root_login = "usr/local/libexec/root-login";
+    let serial_login = "usr/local/libexec/serial-login";
     for getty in gettys {
         let console = getty[0];
         let program = getty[1];
         if program == "root" { program = "/" + root_login; }
+        if console.starts_with("ttyS") && program == "" {
+            inittab += console + "::respawn:/" + serial_login + " " + console + "\n";
+            continue;
+        }
         let line = console + "::respawn:/sbin/getty ";
         if console.starts_with("ttyS") { line += "-L "; }
         if program != "" { line += "-n -l " + program + " "; }
@@ -150,6 +164,13 @@ fn openrc_inittab(root, gettys) {
         put(root, root_login,
             "#!/bin/sh\n# getty runs this in place of login where root logs in without asking.\nexec /bin/login -f root\n",
             0o755);
+    }
+    if inittab.contains("/" + serial_login + " ") {
+        let script = "#!/bin/sh\n# A login prompt on serial port $1 when the boot names it as a console.\n";
+        script += "for arg in $(cat /proc/cmdline); do\n";
+        script += "    case \"$arg\" in console=\"$1\"|console=\"$1\",*) exec /sbin/getty -L 115200 \"$1\" vt100 ;; esac\n";
+        script += "done\nexec sleep 2147483647\n";
+        put(root, serial_login, script, 0o755);
     }
 }
 
@@ -210,6 +231,29 @@ fn setup_program(root, inputs) {
     put(root, "usr/libexec/recipe-system-setup", read_file(join_path(inputs, "system_setup")), 0o755);
 }
 
+// Root's login shell is bash, which recsetup also gives new users, and
+// /etc/shells lists it (package scripts that would add it do not run).
+fn bash_login(root) {
+    let passwd = "";
+    for line in read_file(join_path(root, "etc/passwd")).split("\n") {
+        if line == "" { continue; }
+        if line.starts_with("root:") {
+            let fields = line.split(":");
+            if fields.len() != 7 { throw "malformed root passwd entry: " + line; }
+            fields[6] = "/bin/bash";
+            line = fields[0];
+            for i in 1..7 { line += ":" + fields[i]; }
+        }
+        passwd += line + "\n";
+    }
+    put(root, "etc/passwd", passwd, 0o644);
+    let shells = read_file_or_empty(join_path(root, "etc/shells"));
+    if !shells.split("\n").contains("/bin/bash") {
+        if shells != "" && !shells.ends_with("\n") { shells += "\n"; }
+        put(root, "etc/shells", shells + "/bin/bash\n", 0o644);
+    }
+}
+
 // Release images have no machine password (personalization supplies it) and
 // no machine identity (the first boot or recsetup makes one).
 fn lock_root(root) {
@@ -229,12 +273,13 @@ fn apply(root, inputs, init) {
     for console in all_consoles() { gettys.push([console, ""]); }
     consoles(root, init, gettys);
     boot_target(root, init);
-    for service in base_services(init) + network_services(init) {
+    for service in base_services(init) + network_services(init) + capability_services(init) {
         if !is_file(join_path(root, service_file(init, service))) {
             throw "installed system lacks the " + init + " service " + service;
         }
         enable(root, init, service);
     }
+    bash_login(root);
     lock_root(root);
     setup_program(root, inputs);
 }

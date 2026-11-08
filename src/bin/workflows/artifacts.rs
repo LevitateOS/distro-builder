@@ -2,6 +2,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use distro_builder::product::ProductId;
+use distro_contract::profile::Flavour;
 use distro_builder::recipe::rootfs_source::preseed_rootfs_source;
 use distro_builder::{build_erofs_default, build_overlayfs_default, PreparedProduct};
 
@@ -54,19 +55,14 @@ pub(crate) fn prepare_product_cmd(
 pub(crate) fn preseed_rootfs_source_cmd(
     repo_root: &Path,
     distro_id: &str,
+    flavour: Flavour,
     refresh: bool,
 ) -> Result<()> {
     let bundle = distro_contract::load(repo_root, distro_id)?;
-    let source = &bundle.contract.sources.rootfs_source;
-    let recipe_script = &source.preseed_recipe_script;
-    let paths = preseed_rootfs_source(
-        &bundle.repo_root,
-        distro_id,
-        Path::new(recipe_script),
-        refresh,
-    )
-    .with_context(|| format!("preseeding rootfs source for '{distro_id}'"))?;
-    println!("rootfs source preseed ready for {distro_id}:");
+    let recipe_script = distro_builder::preseed_recipe(&bundle, flavour);
+    let paths = preseed_rootfs_source(&bundle.repo_root, distro_id, &recipe_script, flavour, refresh)
+        .with_context(|| format!("preseeding the {flavour} rootfs source for '{distro_id}'"))?;
+    println!("{flavour} rootfs source preseed ready for {distro_id}:");
     for (name, path) in paths {
         println!("  {name}: {}", path.display());
     }

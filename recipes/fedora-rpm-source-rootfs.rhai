@@ -2,34 +2,48 @@
 // The RPM backend of the rootfs producer: the locked Fedora RPM set (the
 // `rpms` input), unpacked without a package manager. Their install scripts
 // do not run, so `package_effects` does what they would have done, from the
-// packages' own data where they ship it.
+// packages' own data where they ship it. The desktop system (REC_FLAVOUR=
+// desktop in the `os_release` input) also unpacks the desktop lock (the
+// `desktop_rpms` input) into the same tree, so every step below and the
+// installed-system policy run over base and desktop packages alike.
 const RECIPE_API = 2;
-const NEEDS = #{ inputs: #{ rpms: "directory", capabilities: "file", system_setup: "file", os_release: "file", admin_rule_file: "file", admin_rule: "file" }, outputs: #{ rootfs: "directory" }, memory_mib: 8192, storage_max_objects: 131072 };
+const NEEDS = #{ inputs: #{ rpms: "directory", desktop_rpms: "directory?", capabilities: "file", system_setup: "file", os_release: "file", admin_rule_file: "file", admin_rule: "file", display_manager: "file?" }, outputs: #{ rootfs: "directory" }, memory_mib: 8192, storage_max_objects: 196608 };
 import "sources/levitate-rpm-lock.rhai" as lock;
+import "sources/levitate-rpm-desktop-lock.rhai" as desktop_lock;
 import "installed-system.rhai" as system;
 let ctx = #{
     name: "fedora-rpm-source-rootfs",
     description: "The system rootfs from the locked Fedora " + lock::release() + " RPM set",
     init: "systemd",
-    rpms_path: join_path(RUNTIME.paths.inputs, "rpms"),
-    packages: lock::packages(),
+    // [input, lock rows]: the base lock, and the desktop lock on the desktop system.
+    sets: [["rpms", lock::packages()]],
 };
+if system::flavour(RUNTIME.paths.inputs) == "desktop" {
+    ctx.sets.push(["desktop_rpms", desktop_lock::packages()]);
+}
 
-fn rpm_file(ctx, rpm) { join_path(ctx.rpms_path, basename(rpm[2])) }
+// Each locked RPM's file, with its lock row: [file, row].
+fn rpm_files(ctx) {
+    let files = [];
+    for set in ctx.sets {
+        for rpm in set[1] { files.push([join_path(join_path(ctx.runtime.paths.inputs, set[0]), basename(rpm[2])), rpm]); }
+    }
+    files
+}
 
 fn verify_inputs(ctx) {
-    for rpm in ctx.packages {
-        let file = rpm_file(ctx, rpm);
-        if !is_file(file) { throw "the rpms input lacks " + basename(file) + "; run the rootfs source preseed"; }
-        verify_sha256(file, rpm[3]);
+    for entry in rpm_files(ctx) {
+        let file = entry[0];
+        if !is_file(file) { throw "the rpm inputs lack " + basename(file) + "; run the rootfs source preseed"; }
+        verify_sha256(file, entry[1][3]);
     }
 }
 
 fn unpack(ctx, root) {
     log("Extracting the locked Fedora " + lock::release() + " RPM set into the rootfs...");
-    for rpm in ctx.packages {
-        log("  Extracting " + rpm[1]);
-        target_extract_rpm(rpm_file(ctx, rpm), root);
+    for entry in rpm_files(ctx) {
+        log("  Extracting " + entry[1][1]);
+        target_extract_rpm(entry[0], root);
     }
 }
 

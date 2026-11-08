@@ -6,6 +6,7 @@
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
+use distro_contract::profile::Flavour;
 use distro_contract::ProductId;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -22,8 +23,13 @@ pub enum Command {
     ProductErofs { prepared: PathBuf },
     /// Write a tool package's offline source tree to `output`.
     PrepareToolSource { package: String, output: PathBuf },
-    /// Run `distro`'s rootfs-source acquisition; `refresh` acquires again.
-    PreseedRootfsSource { distro: String, refresh: bool },
+    /// Run `distro`'s rootfs-source acquisition of `flavour`'s lock (the
+    /// desktop system needs the base lock's too); `refresh` acquires again.
+    PreseedRootfsSource {
+        distro: String,
+        flavour: Flavour,
+        refresh: bool,
+    },
 }
 
 /// A usage error: the message to show above [`usage`]. The binary exits 2.
@@ -39,7 +45,7 @@ pub fn usage() -> String {
          product prepare <product> <distro> <dir>           prepare a product's rootfs and overlay ({products})\n  \
          transform build product-erofs <prepared_dir>       write a prepared product's EROFS images\n  \
          artifact prepare-tool-source <package> <dir>       write a tool's offline source tree\n  \
-         artifact preseed-rootfs-source <distro> [--refresh]  acquire a distro's rootfs source",
+         artifact preseed-rootfs-source <distro> [--desktop] [--refresh]  acquire a distro's base (or desktop) lock",
         releases = ProductId::list(ProductId::releases()),
         products = ProductId::list(ProductId::ALL),
     )
@@ -67,8 +73,15 @@ impl Command {
             Self::PrepareToolSource { package, output } => {
                 push(&[&"artifact", &"prepare-tool-source", package, output])
             }
-            Self::PreseedRootfsSource { distro, refresh } => {
+            Self::PreseedRootfsSource {
+                distro,
+                flavour,
+                refresh,
+            } => {
                 push(&[&"artifact", &"preseed-rootfs-source", distro]);
+                if *flavour == Flavour::Desktop {
+                    push(&[&"--desktop"]);
+                }
                 if *refresh {
                     push(&[&"--refresh"]);
                 }
@@ -139,14 +152,15 @@ pub fn parse(args: &[String]) -> Result<(PathBuf, Command), Usage> {
             package: package.to_string(),
             output: output.into(),
         },
-        ["artifact", "preseed-rootfs-source", id] => Command::PreseedRootfsSource {
-            distro: distro(id)?,
-            refresh: false,
-        },
-        ["artifact", "preseed-rootfs-source", id, "--refresh"] => Command::PreseedRootfsSource {
-            distro: distro(id)?,
-            refresh: true,
-        },
+        ["artifact", "preseed-rootfs-source", id, flags @ ..]
+            if flags.iter().all(|flag| ["--desktop", "--refresh"].contains(flag)) =>
+        {
+            Command::PreseedRootfsSource {
+                distro: distro(id)?,
+                flavour: if flags.contains(&"--desktop") { Flavour::Desktop } else { Flavour::Base },
+                refresh: flags.contains(&"--refresh"),
+            }
+        }
         _ => return usage(format!("unknown command '{}'", words.join(" "))),
     };
     Ok((repo, command))

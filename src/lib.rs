@@ -19,4 +19,4 @@ pub use artifact::rootfs::{build_erofs_default, create_erofs};
 pub use pipeline::io::latest_release_rootfs;
 pub use pipeline::planner::{missing_parent_releases, parent_rootfs_image};
 pub use pipeline::products::{prepare_product, PreparedProduct};
-pub use pipeline::source::materialize_rootfs_source;
+pub use pipeline::source::{materialize_rootfs_source, preseed_recipe};

@@ -1,27 +1,44 @@
 //! extends: rootfs-producer.rhai
 // The APK backend of the rootfs producer: the locked Alpine APK set (the
 // `apks` input), installed by the locked apk.static without the packages'
-// scripts, so `package_effects` does what those scripts would have done.
+// scripts, so `package_effects` does what those scripts would have done. The
+// desktop system (REC_FLAVOUR=desktop in the `os_release` input) also installs
+// the desktop lock (the `desktop_apks` input) in the same apk run, so every
+// step below and the installed-system policy run over base and desktop
+// packages alike.
 const RECIPE_API = 2;
-const NEEDS = #{ inputs: #{ apks: "directory", capabilities: "file", system_setup: "file", os_release: "file", admin_rule_file: "file", admin_rule: "file" }, outputs: #{ rootfs: "directory" }, memory_mib: 4096, storage_max_objects: 131072 };
+const NEEDS = #{ inputs: #{ apks: "directory", desktop_apks: "directory?", capabilities: "file", system_setup: "file", os_release: "file", admin_rule_file: "file", admin_rule: "file", display_manager: "file?" }, outputs: #{ rootfs: "directory" }, memory_mib: 4096, storage_max_objects: 131072 };
 import "sources/acorn-apk-lock.rhai" as lock;
+import "sources/acorn-apk-desktop-lock.rhai" as desktop_lock;
 import "installed-system.rhai" as system;
 let ctx = #{
     name: "alpine-live-source-rootfs",
     description: "The system rootfs from the locked Alpine " + lock::release() + " APK set",
     init: "openrc",
-    apks_path: join_path(RUNTIME.paths.inputs, "apks"),
-    packages: lock::packages(),
+    // [input, lock rows]: the base lock, and the desktop lock on the desktop system.
+    sets: [["apks", lock::packages()]],
     apk_tools: lock::apk_tools(),
 };
+if system::flavour(RUNTIME.paths.inputs) == "desktop" {
+    ctx.sets.push(["desktop_apks", desktop_lock::packages()]);
+}
 
-fn apk_file(ctx, row) { join_path(ctx.apks_path, basename(row[2])) }
+fn set_dir(ctx, set) { join_path(ctx.runtime.paths.inputs, set[0]) }
+fn apk_file(ctx, set, row) { join_path(set_dir(ctx, set), basename(row[2])) }
+// The names of the packages this tree installs.
+fn installed_names(ctx) {
+    let names = [];
+    for set in ctx.sets { for row in set[1] { names.push(row[0]); } }
+    names
+}
 
 fn verify_inputs(ctx) {
-    for row in ctx.packages + [ctx.apk_tools] {
-        let file = apk_file(ctx, row);
-        if !is_file(file) { throw "the apks input lacks " + basename(file) + "; run the rootfs source preseed"; }
-        verify_sha256(file, row[3]);
+    let files = [[apk_file(ctx, ctx.sets[0], ctx.apk_tools), ctx.apk_tools]];
+    for set in ctx.sets { for row in set[1] { files.push([apk_file(ctx, set, row), row]); } }
+    for entry in files {
+        let file = entry[0];
+        if !is_file(file) { throw "the apk inputs lack " + basename(file) + "; run the rootfs source preseed"; }
+        verify_sha256(file, entry[1][3]);
     }
 }
 
@@ -30,7 +47,7 @@ fn unpack(ctx, root) {
     let tools = join_path(build, "apk-tools");
     if is_dir(tools) { rm(tools); }
     mkdir(tools);
-    extract_with_format(apk_file(ctx, ctx.apk_tools), tools, "apk");
+    extract_with_format(apk_file(ctx, ctx.sets[0], ctx.apk_tools), tools, "apk");
     let apk = join_path(tools, "sbin/apk.static");
     if !is_file(apk) { throw "the locked apk-tools-static has no sbin/apk.static"; }
     chmod(apk, 0o755);
@@ -44,11 +61,15 @@ fn unpack(ctx, root) {
     log("Installing the locked Alpine " + lock::release() + " APK set...");
     let args = ["--root", root, "--usermode", "--initdb", "--no-progress", "--no-scripts",
         "--force-non-repository", "--no-network", "--cache-dir", cache, "add"];
-    for row in ctx.packages { args.push(apk_file(ctx, row)); }
+    let dirs = [];
+    for set in ctx.sets {
+        dirs.push(set_dir(ctx, set));
+        for row in set[1] { args.push(apk_file(ctx, set, row)); }
+    }
     // APK 3 installs as a non-root user in usermode; the packages' owners come
     // from their metadata.
     exec_checked(apk, args, #{uid: 1000, gid: 1000});
-    target_capture_apks(root, [ctx.apks_path, cache]);
+    target_capture_apks(root, dirs + [cache]);
 }
 
 fn package_effects(ctx, root) {
@@ -59,6 +80,16 @@ fn package_effects(ctx, root) {
         system_account(root, account[0], account[1]);
     }
     system_group(root, "plugdev");
+    // The desktop packages' accounts, where the tree has the package:
+    // polkit's polkitd, sddm's sddm (in the video group, as its script makes
+    // it) and pipewire's group.
+    let names = installed_names(ctx);
+    if names.contains("polkit-common") { system_account(root, "polkitd", "/var/empty"); }
+    if names.contains("sddm") {
+        system_group(root, "sddm");
+        system_user(root, "sddm", "video", "/var/lib/sddm");
+    }
+    if names.contains("pipewire") { system_group(root, "pipewire"); }
 }
 
 // The lowest free system id (adduser -S/addgroup -S: from 100).
@@ -90,19 +121,31 @@ fn system_group(root, name) {
     append(root, "etc/group", name + ":x:" + free_id(root) + ":", 0o644);
 }
 
+fn group_id(root, name) {
+    for line in read_file(join_path(root, "etc/group")).split("\n") {
+        if line.starts_with(name + ":") { return parse_int(line.split(":")[2]); }
+    }
+    throw "the rootfs has no group " + name;
+}
+
 // A system user with its own group (the same id where both are new), a home
 // and no login.
 fn system_account(root, name, home) {
     if has_entry(root, "etc/passwd", name) { return; }
     system_group(root, name);
-    let gid = 0;
-    for line in read_file(join_path(root, "etc/group")).split("\n") {
-        if line.starts_with(name + ":") { gid = parse_int(line.split(":")[2]); }
-    }
+    let gid = group_id(root, name);
     let gid_is_free_uid = !read_file(join_path(root, "etc/passwd")).split("\n")
         .some(|line| line.split(":").len() >= 3 && parse_int(line.split(":")[2]) == gid);
     let uid = if gid_is_free_uid { gid } else { free_id(root) };
     append(root, "etc/passwd", name + ":x:" + uid + ":" + gid + ":" + name + ":" + home + ":/sbin/nologin", 0o644);
+    append(root, "etc/shadow", trim(system::shadow_line(name, "!")), 0o640);
+}
+
+// A system user in an existing group (adduser -S -G), a home and no login.
+fn system_user(root, name, group, home) {
+    if has_entry(root, "etc/passwd", name) { return; }
+    let uid = free_id(root);
+    append(root, "etc/passwd", name + ":x:" + uid + ":" + group_id(root, group) + "::" + home + ":/sbin/nologin", 0o644);
     append(root, "etc/shadow", trim(system::shadow_line(name, "!")), 0o640);
 }
 

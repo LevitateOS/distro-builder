@@ -2,9 +2,10 @@
 // (the rootfs below this overlay, which it never modifies). Each feature is
 // stated once; the init backend in installed-system.rhai supplies the on-disk
 // mechanism. The network is the installed system's: its own stack brings up
-// every interface.
+// every interface. On the desktop system, which already boots into its
+// display manager, the session also logs the live user into the desktop.
 const RECIPE_API = 2;
-const NEEDS = #{ inputs: #{ config: "file", shadow: "file", shell_ux: "file", live_help: "file", shutdown_cleanup: "file", serial_profile: "file" }, outputs: #{ overlay: "directory" } };
+const NEEDS = #{ inputs: #{ config: "file", passwd: "file", group: "file", shadow: "file", shell_ux: "file", live_help: "file", shutdown_cleanup: "file", serial_profile: "file" }, outputs: #{ overlay: "directory" } };
 import "installed-system.rhai" as system;
 // The `config` input is distro_builder's `LiveSession` (pipeline/overlay.rs),
 // serialized; the builder's types guarantee its values (init is "systemd" or
@@ -17,6 +18,43 @@ let ctx = #{name: "live-overlay", config: config,
 
 // The rendered guest file the builder passed as input `name`.
 fn input(c, name) { read_file(join_path(c.inputs, name)) }
+
+// The groups of the devices a desktop session uses, besides wheel (the
+// privilege tool's admin group); the live user joins those the system has.
+fn session_groups() { ["wheel", "video", "input", "audio", "netdev", "plugdev"] }
+
+// The live desktop's user (`c.desktop`): the desktop does not run as root,
+// so the display manager logs this account in without asking, through its
+// autologin (the same /etc/sddm.conf.d drop-in on every init). It is in
+// wheel, so the privilege tool takes its password in the session's terminal.
+// Its home is made at boot, since a layer cannot own a directory.
+fn live_user(root, c) {
+    let d = c.desktop;
+    let user = d.user;
+    let id = "1000";
+    let passwd = input(c, "passwd");
+    for line in passwd.split("\n") {
+        if line.starts_with(user + ":") || line.split(":").len() > 2 && line.split(":")[2] == id {
+            throw "the rootfs already has the live user's name or id: " + line;
+        }
+    }
+    if passwd != "" && !passwd.ends_with("\n") { passwd += "\n"; }
+    system::put(root, "etc/passwd", passwd + user + ":x:" + id + ":" + id + ":Live User:/home/" + user + ":/bin/bash\n", 0o644);
+    let group = "";
+    for line in input(c, "group").split("\n") {
+        if line == "" { continue; }
+        let fields = line.split(":");
+        if fields.len() == 4 && session_groups().contains(fields[0]) {
+            line += if fields[3] == "" { user } else { "," + user };
+        }
+        group += line + "\n";
+    }
+    system::put(root, "etc/group", group + user + ":x:" + id + ":\n", 0o644);
+    system::boot_directory(root, c.init, "live-home", "/var/home/" + user, "0700", user);
+    if d.display_manager != "sddm" { throw "no autologin for the display manager " + d.display_manager; }
+    system::put(root, "etc/sddm.conf.d/live-autologin.conf",
+        "[Autologin]\nUser=" + user + "\nSession=" + d.session + "\n", 0o644);
+}
 
 fn is_built(ctx) { ready(ctx) }
 fn is_installed(ctx) {
@@ -35,8 +73,10 @@ fn install(ctx) {
     for console in c.consoles {
         if !system::all_consoles().contains(console) { throw "unsupported install console " + console; }
     }
+    // The display manager keeps its console on the desktop system.
+    let desktop = c.desktop != ();
     let gettys = [];
-    for console in system::all_consoles() {
+    for console in system::login_consoles(desktop) {
         let login = if c.consoles.contains(console) { c.launcher } else { "root" };
         gettys.push([console, login]);
     }
@@ -44,8 +84,12 @@ fn install(ctx) {
     // Root has no password; the issue text says so under its banner.
     system::put(root, "etc/issue",
         "\n" + c.os_name + " " + c.label + " - \\l\n\n" + c.hint + "\n\n", 0o644);
-    system::put(root, "etc/shadow",
-        system::root_password(input(c, "shadow"), ""), 0o600);
+    let shadow = system::root_password(input(c, "shadow"), "");
+    if desktop {
+        live_user(root, c);
+        shadow += system::shadow_line(c.desktop.user, c.desktop.password_hash);
+    }
+    system::put(root, "etc/shadow", shadow, 0o600);
     system::put(root, c.role_file, c.role + "\n", 0o644);
     // The shell and its help.
     system::put(root, "etc/profile.d/20-live-shell.sh", input(c, "shell_ux"), 0o644);
@@ -62,7 +106,6 @@ fn install(ctx) {
     // Services, and what they need.
     system::sshd_runtime_dir(root, c.init);
     for service in c.services { system::enable(root, c.init, service); }
-    if c.display_manager != () { system::graphical(root, c.init, c.display_manager); }
     // Release the boot medium and its loop devices at shutdown.
     system::shutdown_hook(root, c.init, "live-shutdown-cleanup",
         input(c, "shutdown_cleanup"), c.live_media_dir);

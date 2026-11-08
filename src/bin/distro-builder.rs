@@ -60,8 +60,8 @@ fn run(repo: &Path, command: Command) -> Result<()> {
             println!("{}", output.display());
             Ok(())
         }
-        Command::PreseedRootfsSource { distro, refresh } => {
-            artifacts::preseed_rootfs_source_cmd(repo, &distro, refresh)
+        Command::PreseedRootfsSource { distro, flavour, refresh } => {
+            artifacts::preseed_rootfs_source_cmd(repo, &distro, flavour, refresh)
         }
     }
 }

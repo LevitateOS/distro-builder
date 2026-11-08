@@ -4,7 +4,8 @@ use anyhow::{Context, Result};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use distro_contract::profile::InitSystem;
+use distro_contract::install_ux::{LIVE_DESKTOP_PASSWORD_HASH, LIVE_DESKTOP_USER};
+use distro_contract::profile::{Flavour, InitSystem};
 use distro_contract::{ProductId, Variant};
 use serde::Serialize;
 
@@ -26,14 +27,23 @@ pub(crate) struct LiveSession {
     /// Units (systemd) or services (OpenRC) the session starts besides the
     /// installed system's.
     services: Vec<String>,
-    /// The display manager a desktop product starts; the session then boots
-    /// to the graphical target.
-    display_manager: Option<String>,
+    /// On the desktop system: whom its display manager logs in.
+    desktop: Option<LiveDesktop>,
     /// Where recinit's live init keeps the boot medium mounted.
     live_media_dir: &'static str,
     /// The overlay's payload role file (recinit's payload-role protocol).
     role_file: &'static str,
     role: &'static str,
+}
+
+/// The live desktop's autologin: the user the display manager logs into
+/// `session` without asking, and the user's password for the privilege tool.
+#[derive(Debug, Serialize)]
+struct LiveDesktop {
+    user: &'static str,
+    password_hash: &'static str,
+    session: &'static str,
+    display_manager: String,
 }
 
 impl LiveSession {
@@ -54,7 +64,12 @@ impl LiveSession {
             },
             launcher: install_screen.then(|| format!("/{}", crate::install_ux::LAUNCHER)),
             services: contract.live_service_units(),
-            display_manager: build.desktop.then(|| contract.desktop.display_manager.clone()),
+            desktop: (product.flavour() == Flavour::Desktop).then(|| LiveDesktop {
+                user: LIVE_DESKTOP_USER,
+                password_hash: LIVE_DESKTOP_PASSWORD_HASH,
+                session: contract.profile.desktop.session(),
+                display_manager: contract.desktop.display_manager.clone(),
+            }),
             live_media_dir: recinit::live::LIVE_MEDIA_DIR,
             role_file: recinit::live::PAYLOAD_ROLE_FILE,
             role: recinit::live::ROLE_OVERLAY,
@@ -91,6 +106,8 @@ pub(crate) fn create_live_overlay(
         crate::recipe::recipe_work_dir(repo, &variant.id)?.join("live-overlay"),
     )
     .input("config", &config)
+    .input("passwd", &rootfs.join("etc/passwd"))
+    .input("group", &rootfs.join("etc/group"))
     .input("shadow", &rootfs.join("etc/shadow"));
     for (input, file) in [
         ("shell_ux", &guest::LIVE_SHELL),

@@ -1,4 +1,5 @@
 use anyhow::{bail, Context, Result};
+use distro_contract::profile::Flavour;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -50,12 +51,23 @@ pub fn materialize_rootfs_from_recipe(
     })
 }
 
-/// Run an explicitly declared acquisition recipe and validate selected products.
-/// Materialization never calls this implicitly.
+/// Where the outputs of `flavour`'s preseed are recorded in the variant's
+/// Recipe work directory: the base lock's, and the desktop lock's.
+fn preseed_record(flavour: Flavour) -> &'static str {
+    match flavour {
+        Flavour::Base => "rootfs-source-inputs.json",
+        Flavour::Desktop => "desktop-source-inputs.json",
+    }
+}
+
+/// Run an explicitly declared acquisition recipe (the preseed of `flavour`'s
+/// lock) and validate selected products. Materialization never calls this
+/// implicitly.
 pub fn preseed_rootfs_source(
     repo_root: &Path,
     distro_id: &str,
     recipe_script: &Path,
+    flavour: Flavour,
     refresh: bool,
 ) -> Result<BTreeMap<String, PathBuf>> {
     let recipe_path = resolve_recipe_path(repo_root, recipe_script);
@@ -96,7 +108,7 @@ pub fn preseed_rootfs_source(
         })
         .collect::<Result<_>>()
         .with_context(|| format!("preseed recipe '{}' output contract", recipe_path.display()))?;
-    save_preseed_outputs(&build_dir, &recipe_path, &outputs)?;
+    save_preseed_outputs(&build_dir.join(preseed_record(flavour)), &recipe_path, &outputs)?;
     Ok(outputs)
 }
 
@@ -107,10 +119,11 @@ struct PreseedOutputs {
 }
 
 fn save_preseed_outputs(
-    work: &Path,
+    path: &Path,
     recipe: &Path,
     outputs: &BTreeMap<String, PathBuf>,
 ) -> Result<()> {
+    let work = path.parent().context("the preseed record has no directory")?;
     let record = PreseedOutputs {
         recipe: recipe.canonicalize()?,
         outputs: outputs.clone(),
@@ -118,15 +131,18 @@ fn save_preseed_outputs(
     let mut file = tempfile::NamedTempFile::new_in(work)?;
     serde_json::to_writer(file.as_file_mut(), &record)?;
     file.as_file().sync_all()?;
-    file.persist(work.join("rootfs-source-inputs.json"))?;
+    file.persist(path)?;
     std::fs::File::open(work)?.sync_all()?;
     Ok(())
 }
 
+/// The recorded outputs of `flavour`'s preseed (`recipe`), which the rootfs
+/// recipe takes as inputs.
 pub(crate) fn preseed_inputs(
     repo: &Path,
     distro: &str,
     recipe: &Path,
+    flavour: Flavour,
 ) -> Result<BTreeMap<String, PathBuf>> {
     let required = levitate_recipe::needs::declaration(
         recipe,
@@ -134,10 +150,10 @@ pub(crate) fn preseed_inputs(
     )?
     .needs
     .outputs;
-    let record_path = recipe_work_dir(repo, distro)?.join("rootfs-source-inputs.json");
+    let record_path = recipe_work_dir(repo, distro)?.join(preseed_record(flavour));
     let bytes = std::fs::read(&record_path).with_context(|| {
         format!(
-            "no declared rootfs source inputs at {}; run explicit preseed acquisition",
+            "no declared {flavour} rootfs source inputs at {}; run explicit preseed acquisition for the {flavour} lock",
             record_path.display()
         )
     })?;

@@ -115,13 +115,83 @@ fn boot_target(root, init) {
     }
 }
 
-// Boot to the graphical desktop: start the display manager and, on systemd,
-// make graphical.target the default. OpenRC has no target; its display manager
-// starts in the default runlevel after dbus and elogind.
+// The services a desktop seat needs besides the display manager. systemd's
+// logind is part of systemd and polkit starts on D-Bus demand; OpenRC runs
+// elogind (seats and sessions) and polkit as services.
+fn seat_services(init) {
+    check_init(init);
+    if init == "systemd" { [] } else { ["elogind", "polkit"] }
+}
+
+// Boot to the graphical desktop: start the display manager and the seat's
+// services. systemd starts the display manager through its
+// display-manager.service alias, which graphical.target (made the default)
+// wants. OpenRC has no target: the display manager starts in the default
+// runlevel after dbus and elogind. Alpine's sddm service waits in start_post
+// for the greeter's runtime directory, which a boot that logs a user in by
+// itself (autologin, as the live desktop does) never makes, so OpenRC would
+// mark the running display manager failed; the service's conf.d, which
+// OpenRC sources before the service script, makes that wait succeed (its
+// shell function shadows the ewaitfile helper for this service only).
 fn graphical(root, init, display_manager) {
-    enable(root, init, display_manager);
+    check_init(init);
+    for service in seat_services(init) + [display_manager] {
+        if !is_file(join_path(root, service_file(init, service))) {
+            throw "the desktop system lacks the " + init + " service " + service;
+        }
+    }
     if init == "systemd" {
+        link(root, "etc/systemd/system/display-manager.service", "/" + service_file(init, display_manager));
         link(root, "etc/systemd/system/default.target", "/usr/lib/systemd/system/graphical.target");
+    } else {
+        for service in seat_services(init) + [display_manager] { enable(root, init, service); }
+        let conf = "etc/conf.d/" + display_manager;
+        let text = read_file_or_empty(join_path(root, conf));
+        if text != "" && !text.ends_with("\n") { text += "\n"; }
+        text += "# The desktop system (installed-system.rhai): start_post's wait for the\n";
+        text += "# greeter's runtime directory succeeds, since an autologin starts no greeter.\n";
+        text += "ewaitfile() { return 0; }\n";
+        put(root, conf, text, 0o644);
+    }
+}
+
+// The user session's own services: the session bus and PipeWire's audio.
+// systemd starts them as user units, enabled for every user as the packages'
+// user presets would (`systemctl --global enable`), with the Unity GTK module
+// masked (nothing provides it). OpenRC has no user services: the session bus
+// comes with the session (dbus-x11) and PipeWire from its XDG autostart entry.
+fn session_services(root, init) {
+    check_init(init);
+    if init != "systemd" { return; }
+    let units = "/usr/lib/systemd/user/";
+    for unit in ["dbus-broker.service", "dbus.socket", "pipewire.socket", "pipewire-pulse.socket", "wireplumber.service"] {
+        if !is_file(join_path(root, units.sub_string(1) + unit)) {
+            throw "the desktop system lacks the systemd user unit " + unit;
+        }
+    }
+    let user = "etc/systemd/user/";
+    link(root, user + "dbus.service", units + "dbus-broker.service");
+    link(root, user + "sockets.target.wants/dbus.socket", units + "dbus.socket");
+    link(root, user + "sockets.target.wants/pipewire.socket", units + "pipewire.socket");
+    link(root, user + "sockets.target.wants/pipewire-pulse.socket", units + "pipewire-pulse.socket");
+    link(root, user + "pipewire.service.wants/wireplumber.service", units + "wireplumber.service");
+    link(root, user + "pipewire-session-manager.service", units + "wireplumber.service");
+    link(root, user + "unity-gtk-module.service", "/dev/null");
+}
+
+// Make `path` at every boot, with `mode` and owned by the account `owner`
+// (for a directory a layer cannot own: the live desktop's home). systemd's
+// tmpfiles makes it; OpenRC runs a service named `name` in the boot runlevel,
+// before every default service.
+fn boot_directory(root, init, name, path, mode, owner) {
+    check_init(init);
+    if init == "systemd" {
+        put(root, "etc/tmpfiles.d/" + name + ".conf", "d " + path + " " + mode + " " + owner + " " + owner + " -\n", 0o644);
+    } else {
+        put(root, "etc/init.d/" + name,
+            "#!/sbin/openrc-run\ndescription=\"Make " + path + "\"\n\ndepend() {\n    need localmount\n}\n\nstart() {\n    checkpath -d -m " + mode + " -o " + owner + ":" + owner + " " + path + "\n}\n",
+            0o755);
+        link(root, "etc/runlevels/boot/" + name, "/etc/init.d/" + name);
     }
 }
 
@@ -238,6 +308,27 @@ fn shutdown_hook(root, init, name, script, mount) {
 
 // Every console the system has: six virtual consoles and the serial console.
 fn all_consoles() { ["tty1", "tty2", "tty3", "tty4", "tty5", "tty6", "ttyS0"] }
+// The consoles with a login: on a desktop system the display manager takes
+// the first virtual console, so every console but that one.
+fn login_consoles(desktop) {
+    let consoles = [];
+    for console in all_consoles() {
+        if !(desktop && console == "tty1") { consoles.push(console); }
+    }
+    consoles
+}
+
+// The value of `field` in the builder's `os_release` input (the REC_* fields
+// are unquoted words).
+fn os_release_field(inputs, field) {
+    for line in read_file(join_path(inputs, "os_release")).split("\n") {
+        if line.starts_with(field + "=") { return trim(line.sub_string(field.len() + 1)); }
+    }
+    throw "the os_release input has no " + field;
+}
+// Which system the tree is (REC_FLAVOUR): "base", or "desktop", the base
+// system with the variant's desktop packages.
+fn flavour(inputs) { os_release_field(inputs, "REC_FLAVOUR") }
 
 // The system's identity and distro profile (the REC_* fields the install
 // tools read), from the contract: the builder's `os_release` input. A packaged
@@ -327,8 +418,9 @@ fn apply(root, inputs, init) {
     locale_env(root, init);
     // sshd's privilege-separation directories.
     for path in ["var/empty/sshd", "usr/share/empty.sshd"] { directory(root, path, 0o755); }
+    let desktop = flavour(inputs) == "desktop";
     let gettys = [];
-    for console in all_consoles() { gettys.push([console, ""]); }
+    for console in login_consoles(desktop) { gettys.push([console, ""]); }
     consoles(root, init, gettys);
     boot_target(root, init);
     for service in base_services(init) + network_services(init) + capability_services(init) {
@@ -342,6 +434,9 @@ fn apply(root, inputs, init) {
     lock_root(root);
     setup_program(root, inputs);
     admin_rule(root, inputs);
+    if desktop {
+        desktop_system(root, inputs, init, trim(read_file(join_path(inputs, "display_manager"))));
+    }
     if init == "openrc" {
         // D-Bus cannot initialize an existing empty machine-id, and /var/log
         // may be a fresh live tmpfs or the installed system's shared state.
@@ -349,4 +444,108 @@ fn apply(root, inputs, init) {
             "#!/sbin/openrc-run\ndescription=\"Initialize machine identity and runtime directories\"\n\ndepend() {\n    need localmount\n    before dbus auditd\n}\n\nstart() {\n    /usr/libexec/recipe-system-setup machine-id || return 1\n    checkpath -d -m 0700 -o root:root /var/log/audit\n}\n", 0o755);
         enable(root, init, "recipe-system-setup");
     }
+}
+
+// ---------------------------------------------------------------------------
+// Desktop-system policy: what the desktop system adds over the base system.
+// ---------------------------------------------------------------------------
+
+// The desktop system: what the desktop packages' install scripts and triggers
+// would have done (their caches; their accounts are the backend's
+// package_effects), the user session's services, and the boot into the
+// display manager, which takes the first virtual console (`login_consoles`).
+fn desktop_system(root, inputs, init, display_manager) {
+    desktop_caches(root, os_release_field(inputs, "REC_LIBC"));
+    session_services(root, init);
+    graphical(root, init, display_manager);
+}
+
+// The first of `programs` (paths relative to the root) the tree has, or "".
+fn tree_program(root, programs) {
+    for program in programs { if is_file(join_path(root, program)) { return program; } }
+    ""
+}
+
+// Runs the tree's `program` (relative to the root) with `args` and returns
+// its output. The build has no chroot, so it runs through the tree's own
+// dynamic loader with the tree's libraries first: the libc (REC_LIBC) names
+// the loader and the library directories.
+fn tree_run(root, libc, program, args) {
+    let loader = "";
+    let libs = [];
+    if libc == "glibc" { loader = "usr/lib64/ld-linux-x86-64.so.2"; libs = ["usr/lib64"]; }
+    else if libc == "musl" { loader = "lib/ld-musl-x86_64.so.1"; libs = ["lib", "usr/lib"]; }
+    else { throw "unsupported libc " + libc; }
+    let loader_path = join_path(root, loader);
+    if !is_file(loader_path) { throw "the tree has no " + libc + " loader /" + loader; }
+    chmod(loader_path, 0o755);
+    let path = "";
+    for dir in libs { path += (if path == "" { "" } else { ":" }) + join_path(root, dir); }
+    exec_output(loader_path, ["--library-path", path, join_path(root, program)] + args)
+}
+
+// The files of directory `dir` (relative to the root) whose names end in
+// `suffix`, as absolute paths.
+fn tree_files(root, dir, suffix) {
+    let files = [];
+    let path = join_path(root, dir);
+    if !is_dir(path) { return files; }
+    for name in shell_output("ls '" + path + "'").split("\n") {
+        if trim(name) != "" && name.ends_with(suffix) { files.push(join_path(path, trim(name))); }
+    }
+    files
+}
+
+// Runs the first of the tree's programs `names` (under usr/bin) with `args`
+// and returns its output; () when the tree has none of them.
+fn cache_program(root, libc, names, args) {
+    let candidates = [];
+    for name in names { candidates.push("usr/bin/" + name); }
+    let program = tree_program(root, candidates);
+    if program == "" { return (); }
+    log("  " + basename(program));
+    tree_run(root, libc, program, args)
+}
+
+// What the desktop packages' install scripts and triggers would have done:
+// the caches their programs build from the tree's own files (GSettings
+// schemas, GIO modules, GdkPixbuf loaders, GTK input methods, MIME types,
+// fonts, icon themes, desktop entries). Each runs where the tree has its
+// program and its files. A program that prints its cache (the loaders, the
+// input methods) prints the tree's paths, which are written without the
+// root. ldconfig is not among them: systemd's ldconfig.service makes
+// /etc/ld.so.cache at the first boot, and musl has no cache.
+fn desktop_caches(root, libc) {
+    log("Building the desktop packages' caches...");
+    let lib = if libc == "glibc" { "usr/lib64" } else { "usr/lib" };
+    let schemas = join_path(root, "usr/share/glib-2.0/schemas");
+    if is_dir(schemas) { cache_program(root, libc, ["glib-compile-schemas"], [schemas]); }
+    let gio = join_path(root, lib + "/gio/modules");
+    if is_dir(gio) { cache_program(root, libc, ["gio-querymodules-64", "gio-querymodules"], [gio]); }
+    for cache in [
+        [["gdk-pixbuf-query-loaders-64", "gdk-pixbuf-query-loaders"], lib + "/gdk-pixbuf-2.0/2.10.0/loaders", lib + "/gdk-pixbuf-2.0/2.10.0/loaders.cache"],
+        [["gtk-query-immodules-3.0-64", "gtk-query-immodules-3.0"], lib + "/gtk-3.0/3.0.0/immodules", lib + "/gtk-3.0/3.0.0/immodules.cache"],
+    ] {
+        let modules = tree_files(root, cache[1], ".so");
+        if modules.is_empty() { continue; }
+        let text = cache_program(root, libc, cache[0], modules);
+        if type_of(text) == "()" { continue; }
+        put(root, cache[2], replace(text, root, ""), 0o644);
+    }
+    let mime = join_path(root, "usr/share/mime");
+    if is_dir(mime) { cache_program(root, libc, ["update-mime-database"], [mime]); }
+    if is_dir(join_path(root, "usr/share/fonts")) {
+        cache_program(root, libc, ["fc-cache-64", "fc-cache"], ["--sysroot=" + root, "--system-only"]);
+    }
+    let icons = join_path(root, "usr/share/icons");
+    if is_dir(icons) {
+        for theme in shell_output("ls '" + icons + "'").split("\n") {
+            let dir = join_path(icons, trim(theme));
+            if trim(theme) != "" && is_file(join_path(dir, "index.theme")) {
+                cache_program(root, libc, ["gtk-update-icon-cache"], ["-q", "-t", "-f", dir]);
+            }
+        }
+    }
+    let applications = join_path(root, "usr/share/applications");
+    if is_dir(applications) { cache_program(root, libc, ["update-desktop-database"], ["-q", applications]); }
 }

@@ -1,11 +1,14 @@
-//! Product preparation. Every product is the installable system rootfs plus
-//! a layer: base-rootfs builds the system (the rootfs recipe's tree, its
-//! payload role and the rootfs tools), and every other product takes its
-//! parent's rootfs image unchanged and adds only its overlay, as
-//! `crate::product::build` says. So installed-boot boots exactly the rootfs
-//! the live-tools ISO installs. One routine prepares every product and
-//! records it in one manifest.
+//! Product preparation. Every product is the installable system rootfs of
+//! its flavour (`ProductId::flavour`) plus a layer: a product without a
+//! parent builds the system (the rootfs recipe's tree, its payload role and
+//! the rootfs tools): base-rootfs the base system, live-desktop the desktop
+//! system. Every other product takes its parent's rootfs image unchanged and
+//! adds only its overlay, as `crate::product::build` says. So installed-boot
+//! boots exactly the rootfs the live-tools ISO installs, and a desktop
+//! install gets exactly the live-desktop ISO's rootfs. One routine prepares
+//! every product and records it in one manifest.
 use anyhow::{bail, Context, Result};
+use distro_contract::profile::Flavour;
 use distro_contract::{ConformanceContract, ProductId, Variant};
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -86,15 +89,16 @@ pub fn prepare_product(variant: &Variant, product: ProductId, dir: &Path) -> Res
     fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
 
     let rootfs = create_empty_overlay_dir(dir, ROOTFS_SOURCE_DIR)?;
+    let flavour = product.flavour();
     match product.parent() {
-        None => prepare_system(variant, &rootfs)
-            .with_context(|| format!("preparing the {} system rootfs", variant.id))?,
+        None => prepare_system(variant, flavour, &rootfs)
+            .with_context(|| format!("preparing the {} {flavour} system rootfs", variant.id))?,
         Some(parent) => {
             let image = crate::parent_rootfs_image(&variant.repo_root, &variant.id, contract, product)?
                 .with_context(|| format!("{product} has no parent rootfs image"))?;
             extract_erofs_rootfs(&image, &rootfs)
                 .with_context(|| format!("extracting the {parent} rootfs {}", image.display()))?;
-            check_installable(&rootfs, contract).with_context(|| {
+            check_installable(&rootfs, contract, flavour).with_context(|| {
                 format!("the {parent} rootfs {} is not the current system; rebuild {parent}", image.display())
             })?;
         }
@@ -132,11 +136,11 @@ pub fn prepare_product(variant: &Variant, product: ProductId, dir: &Path) -> Res
     Ok(prepared)
 }
 
-/// The installable system in `rootfs`: the rootfs recipe's tree, marked as
-/// the live init's rootfs layer (recinit's payload-role protocol), with the
-/// rootfs tools.
-fn prepare_system(variant: &Variant, rootfs: &Path) -> Result<()> {
-    let source = materialize_rootfs_source(variant)?;
+/// The installable `flavour` system in `rootfs`: the rootfs recipe's tree,
+/// marked as the live init's rootfs layer (recinit's payload-role protocol),
+/// with the rootfs tools.
+fn prepare_system(variant: &Variant, flavour: Flavour, rootfs: &Path) -> Result<()> {
+    let source = materialize_rootfs_source(variant, flavour)?;
     levitate_recipe::target::merge_tree(&source, rootfs)?;
     let role = rootfs.join(recinit::live::PAYLOAD_ROLE_FILE);
     fs::write(&role, format!("{}\n", recinit::live::ROLE_ROOTFS))
@@ -144,7 +148,7 @@ fn prepare_system(variant: &Variant, rootfs: &Path) -> Result<()> {
     add_tools(&variant.repo_root, rootfs, ToolLayer::Rootfs, &variant.id, &variant.contract.profile)?;
     crate::tui_binary::install_system(&variant.repo_root, rootfs, &variant.contract.profile)
         .with_context(|| format!("adding the installed system's TUI apps for {}", variant.id))?;
-    check_installable(rootfs, &variant.contract).with_context(|| {
+    check_installable(rootfs, &variant.contract, flavour).with_context(|| {
         format!(
             "the rootfs recipe's tree {} predates the current system recipe; remove it to rebuild it",
             source.display()
@@ -152,16 +156,17 @@ fn prepare_system(variant: &Variant, rootfs: &Path) -> Result<()> {
     })
 }
 
-/// Refuses a rootfs that is not the current installable system: one without
-/// the setup program, or whose `/etc/os-release` is not the contract's.
-fn check_installable(root: &Path, contract: &ConformanceContract) -> Result<()> {
+/// Refuses a rootfs that is not the current installable `flavour` system:
+/// one without the setup program, or whose `/etc/os-release` is not the
+/// contract's for that flavour.
+fn check_installable(root: &Path, contract: &ConformanceContract, flavour: Flavour) -> Result<()> {
     if !root.join(SETUP_PROGRAM).is_file() {
         bail!("{} has no setup program /{SETUP_PROGRAM}", root.display());
     }
     let path = root.join("etc/os-release");
     let found = fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
-    if found != os_release(contract) {
-        bail!("{} is not the contract's identity and profile", path.display());
+    if found != os_release(contract, flavour) {
+        bail!("{} is not the contract's identity and profile of the {flavour} system", path.display());
     }
     Ok(())
 }

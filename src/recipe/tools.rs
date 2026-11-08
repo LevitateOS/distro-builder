@@ -287,21 +287,18 @@ pub(crate) fn build_tool_tree(
     if !binaries.contains(&binary) {
         bail!("package {package} does not build binary {binary}");
     }
-    let target = profile.libc.rust_target();
     let init = profile.init.as_str();
     let source = prepare_tool_source(repo, package)?;
     let recipe = repo
         .join("distro/builder/recipes")
         .join("install-tools.rhai");
-    // The tree depends on the target (libc) and, for recab's trial service, the init system.
+    // The tree depends on the init system (recab's trial service).
     let work = repo
         .join(".artifacts/work/recipe-tools")
         .join(binary)
-        .join(target)
         .join(init);
     let install_path = format!("usr/bin/{binary}");
     super::Invocation::new(repo, "install", &recipe, &work)
-        .define("RUST_TARGET", target)
         .define("BIN", binary)
         .define("INSTALL_PATH", &install_path)
         .define("INIT_SYSTEM", init)

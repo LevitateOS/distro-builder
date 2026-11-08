@@ -14,6 +14,8 @@ distro-profile = { path = "../profile" }
 recinit = { path = "../../tools/recinit" }
 libc = "0.2"
 levitate-recipe = { path = "../../tools/recipe" }
+# The kernel pins in recipes/kernel/metadata.rhai, read by src/pipeline/kernel.rs.
+rhai = "=1.19.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 toml = "0.8"

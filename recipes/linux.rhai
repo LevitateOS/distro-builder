@@ -1,4 +1,7 @@
-// Kernel products use the owned target tree; imports select configuration explicitly.
+// The variant's kernel built from the kernel.org source of the pin in
+// kernel/metadata.rhai, with the `kconfig` input (distro-builder gives the
+// shared kconfig followed by the variant's). Kernel products use the owned
+// target tree.
 const RECIPE_API = 2;
 import "kernel/metadata.rhai" as kernel;
 
@@ -8,13 +11,10 @@ let ctx = #{
     outputs: #{},
     target: KERNEL_TARGET,
     kconfig_path: join_path(RUNTIME.paths.inputs, "kconfig"),
-    kconfig_fragments: join_path(RUNTIME.paths.inputs, "kconfig_fragments"),
     build_dir: "",
     description: "Linux kernel",
-    kernel_version: "?",
+    kernel_version: "",
     name: "linux",
-    kernel_localversion: "",
-    module_install_path: "/usr/lib/modules",
     source_dir_name: "",
     source_path: "",
     tarball_filename: "",
@@ -89,134 +89,97 @@ fn _kernel_make_env_prefix() {
     env
 }
 
-/// Apply kconfig: start from defconfig, apply CONFIG_* lines, enforce localversion, then olddefconfig.
-///
-/// This supports both:
-/// - a single <distro>/kconfig file
-/// - optional fragments in <distro>/kconfig.d/*.config (applied after kconfig)
-fn _kconfig_identity(kconfig, frag_dir) {
-    let files = [kconfig];
-    if is_dir(frag_dir) {
-        for file in glob_list(join_path(frag_dir, "*.config")) { files.push(file); }
-    }
-    trim(exec_output("sha256sum", files))
+// The identity of the kconfig a build was configured from.
+fn _kconfig_identity(kconfig) {
+    trim(exec_output("sha256sum", [kconfig]))
 }
 
-fn _apply_kconfig(src, build_dir, kconfig, frag_dir, kernel_localversion) {
-    let config_file = join_path(build_dir, ".config");
-    let hash_file = join_path(build_dir, ".config.kconfig-hash");
-
-    // Hash kconfig + fragments so we can avoid re-seeding defconfig on every run.
-    let fragments = if is_dir(frag_dir) { glob_list(join_path(frag_dir, "*.config")) } else { [] };
-
-    let kconfig_hash = _kconfig_identity(kconfig, frag_dir);
-    let cached_hash = trim(read_file_or_empty(hash_file));
-
-    if cached_hash != kconfig_hash || !is_file(config_file) {
-        log("Generating kernel config...");
-        shell(_kernel_make_env_prefix() + "make -C " + src + " O=" + build_dir + " x86_64_defconfig");
-
-        log("Applying kconfig options...");
-        let apply_one = |cfg| {
-            // Apply CONFIG_* lines only; ignore comments/blank lines.
-            let cmd = "grep -E '^CONFIG_' " + cfg;
-            cmd += " | while read line; do ";
-            cmd += src + "/scripts/config --file " + config_file + " --set-val $(echo $line | sed 's/=/ /'); ";
-            cmd += "done";
-            shell(cmd);
-        };
-
-        apply_one.call(kconfig);
-        for f in fragments {
-            apply_one.call(f);
+/// Configure `build_dir`: x86_64_defconfig, then the kconfig and the pinned
+/// localversion appended (a later assignment wins), then olddefconfig. Every
+/// value the kconfig sets must survive olddefconfig.
+fn _apply_kconfig(src, build_dir, kconfig, spec) {
+    for line in read_file(kconfig).split("\n") {
+        if trim(line).starts_with("CONFIG_LOCALVERSION=") {
+            throw "kconfig sets CONFIG_LOCALVERSION; the kernel recipe derives it from KERNEL_TARGET ('" + spec.localversion + "')";
         }
-
-        // Enforce localversion from the canonical recipe spec. Kconfig may also
-        // set CONFIG_LOCALVERSION, but this wins.
-        shell(src + "/scripts/config --file " + config_file + " --set-str CONFIG_LOCALVERSION " + kernel_localversion);
-
-        log("Resolving config dependencies...");
-        shell(_kernel_make_env_prefix() + "make -C " + src + " O=" + build_dir + " olddefconfig");
-        write_file(hash_file, kconfig_hash);
-    } else {
-        log("Config unchanged, running olddefconfig...");
-        shell(_kernel_make_env_prefix() + "make -C " + src + " O=" + build_dir + " olddefconfig");
     }
+    let config = join_path(build_dir, ".config");
+    log("Generating kernel config...");
+    shell(_kernel_make_env_prefix() + "make -C " + src + " O=" + build_dir + " x86_64_defconfig");
+    append_file(config, "\n" + read_file(kconfig) + "\nCONFIG_LOCALVERSION=\"" + spec.localversion + "\"\n");
+    log("Resolving config dependencies...");
+    shell(_kernel_make_env_prefix() + "make -C " + src + " O=" + build_dir + " olddefconfig");
+    let dropped = kernel::kconfig_dropped(kconfig, config);
+    if dropped != "" {
+        throw "olddefconfig dropped kconfig values (an unmet dependency, or not in Linux " + spec.version + "):" + dropped;
+    }
+    write_file(join_path(build_dir, ".config.kconfig-hash"), _kconfig_identity(kconfig));
 }
 
-/// Install modules to staging, then normalize module dir layout.
-///
-/// The kernel build system always installs under <staging>/lib/modules when using
-/// INSTALL_MOD_PATH. LevitateOS is UsrMerge so we relocate to /usr/lib/modules.
-fn _install_modules(staging, source_path, build_dir, module_install_path) {
+/// Install the modules into `staging`: the kernel installs them under
+/// lib/modules, and both distros keep them in /usr/lib/modules.
+fn _install_modules(staging, source_path, build_dir, release) {
     shell(_kernel_make_env_prefix() + "make -C " + source_path + " O=" + build_dir + " INSTALL_MOD_PATH=" + staging + " modules_install");
-
-    if module_install_path == "/usr/lib/modules" {
-        let lib_modules = join_path(staging, "lib/modules");
-        let usr_lib_modules = join_path(staging, "usr/lib/modules");
-
-        if is_dir(lib_modules) {
-            mkdir(usr_lib_modules);
-            log("  UsrMerge: moving modules to usr/lib/modules...");
-            shell("mv " + lib_modules + "/* " + usr_lib_modules + "/ 2>/dev/null || true");
-            shell("rm -rf " + join_path(staging, "lib"));
-        }
-    }
+    mkdir(join_path(staging, "usr/lib"));
+    mv(join_path(staging, "lib/modules"), join_path(staging, "usr/lib/modules"));
+    rm(join_path(staging, "lib"));
+    // The build and source links point into this build; drop the links only.
+    let modules_dir = join_path(staging, "usr/lib/modules/" + release);
+    shell("rm -f '" + join_path(modules_dir, "build") + "' '" + join_path(modules_dir, "source") + "'");
 }
 
-/// Remove build/source symlinks after install.
-fn _cleanup_modules(staging, version, module_install_path) {
-    let base = if module_install_path == "/usr/lib/modules" { "usr/lib/modules/" } else { "lib/modules/" };
-    let modules_dir = join_path(staging, base + version);
-    if is_dir(modules_dir) {
-        shell("rm -f " + join_path(modules_dir, "build") + " " + join_path(modules_dir, "source"));
-    }
+// Replace `path` with the complete tree `incoming` by rename: the old tree is
+// moved aside only once the new one is complete beside it.
+fn _swap_in(incoming, path) {
+    let old = path + ".old";
+    rm(old);
+    if exists(path) { mv(path, old); }
+    mv(incoming, path);
+    rm(old);
 }
 
 // === ACQUIRE ===
 
+// The source tree is renamed into place only once it is completely extracted
+// from a tarball whose sha256 matched the pin.
 fn is_acquired(ctx) {
     ctx = kernel::apply_source_spec(ctx);
-    let tarball_source = join_path(ctx.runtime.paths.build, ctx.source_dir_name);
-    if is_file(join_path(tarball_source, "Makefile")) {
-        ctx.source_path = tarball_source;
+    if is_file(join_path(ctx.source_path, "Makefile")) {
         return ready(ctx);
     }
-    return needs_work(ctx, "linux source not acquired");
+    needs_work(ctx, "linux source not acquired")
 }
 
 fn acquire(ctx) {
     ctx = kernel::apply_source_spec(ctx);
-    mkdir(ctx.runtime.paths.build);
     let spec = kernel::source_spec(ctx.target);
+    mkdir(ctx.runtime.paths.build);
 
     let tarball_path = join_path(ctx.runtime.paths.build, ctx.tarball_filename);
     let supplied_archive = join_path(ctx.runtime.paths.inputs, "kernel_archive");
     if is_file(supplied_archive) {
         verify_sha256(supplied_archive, spec.sha256);
         copy_file(supplied_archive, tarball_path);
-    }
-    let tarball_source = join_path(ctx.runtime.paths.build, ctx.source_dir_name);
-
-    if !is_file(join_path(tarball_source, "Makefile")) {
-        if !is_file(tarball_path) {
-            log("Downloading kernel " + ctx.kernel_version + " from cdn.kernel.org...");
-            download(ctx.tarball_url, tarball_path, spec.sha256);
-        } else {
-            verify_sha256(tarball_path, spec.sha256);
-        }
-
-        log("Extracting kernel source...");
-        extract(tarball_path, ctx.runtime.paths.build);
+    } else if is_file(tarball_path) {
+        verify_sha256(tarball_path, spec.sha256);
+    } else {
+        log("Downloading kernel " + spec.version + " from cdn.kernel.org...");
+        download(ctx.tarball_url, tarball_path, spec.sha256);
     }
 
-    if is_file(join_path(tarball_source, "Makefile")) {
-        ctx.source_path = tarball_source;
-        log("Kernel source ready at " + tarball_source);
-        return ctx;
+    log("Extracting kernel source...");
+    let extract_tmp = ctx.source_path + ".extract";
+    rm(extract_tmp);
+    mkdir(extract_tmp);
+    extract(tarball_path, extract_tmp);
+    let extracted = join_path(extract_tmp, ctx.source_dir_name);
+    if !is_file(join_path(extracted, "Makefile")) {
+        throw "the kernel tarball " + ctx.tarball_filename + " has no " + ctx.source_dir_name + "/Makefile";
     }
-
-    throw "Failed to acquire linux source from cdn.kernel.org";
+    _swap_in(extracted, ctx.source_path);
+    rm(extract_tmp);
+    log("Kernel source ready at " + ctx.source_path);
+    ctx
 }
 
 // === BUILD / INSTALL ===
@@ -226,68 +189,61 @@ fn is_built(ctx) {
     let spec = kernel::source_spec(ctx.target);
     let kernel_root = kernel::artifact_root(ctx.runtime.paths.target);
     let build_dir = join_path(kernel_root, "kernel-build");
-    let bzimage = join_path(build_dir, "arch/x86/boot/bzImage");
-
-    if !is_file(bzimage) {
+    if !is_file(join_path(build_dir, "arch/x86/boot/bzImage")) {
         return needs_work(ctx, "kernel not built");
     }
-
-    if !is_file(join_path(build_dir, "include/config/kernel.release")) {
-        return needs_work(ctx, "kernel release metadata is missing");
-    }
-    if !is_file(ctx.kconfig_path) { throw "kconfig input is missing"; }
-    let identity = _kconfig_identity(ctx.kconfig_path, ctx.kconfig_fragments);
-    if trim(read_file_or_empty(join_path(build_dir, ".config.kconfig-hash"))) != identity {
-        return needs_work(ctx, "kernel configuration changed");
-    }
-    let mismatch = kernel::release_mismatch(build_dir, spec.version, spec.localversion);
+    let mismatch = _configured_mismatch(ctx, kernel_root, spec);
     if mismatch != "" { return needs_work(ctx, mismatch); }
-    let rel = kernel::release(build_dir, spec.version, spec.localversion);
-    ctx.kernel_version = rel;
+    ctx.kernel_version = spec.release;
     ctx.build_dir = build_dir;
     ready(ctx)
+}
+
+// Why kernel-build is not the pinned kernel configured from the kconfig input,
+// or "" when it is.
+fn _configured_mismatch(ctx, kernel_root, spec) {
+    let mismatch = kernel::release_mismatch(kernel_root, spec);
+    if mismatch != "" { return mismatch; }
+    if !is_file(ctx.kconfig_path) { throw "kconfig input is missing"; }
+    let configured = trim(read_file_or_empty(join_path(kernel_root, "kernel-build/.config.kconfig-hash")));
+    if configured != _kconfig_identity(ctx.kconfig_path) {
+        return "kernel configuration changed";
+    }
+    ""
 }
 
 fn build(ctx) {
     ctx = kernel::apply_source_spec(ctx);
     let spec = kernel::source_spec(ctx.target);
-    let kconfig = if ctx.kconfig_path == "" {
-        throw "kconfig input is required";
-    } else {
-        ctx.kconfig_path
-    };
+    if !is_file(ctx.kconfig_path) { throw "kconfig input is missing"; }
     let kernel_root = kernel::artifact_root(ctx.runtime.paths.target);
     let build_dir = join_path(kernel_root, "kernel-build");
     let build_dir_tmp = join_path(kernel_root, "kernel-build.tmp");
 
-    if !is_file(kconfig) {
-        throw "kconfig not found at " + kconfig;
-    }
-
-    // Build into a temp dir and swap on success so failures don't leave partial artifacts.
-    shell("rm -rf '" + build_dir_tmp + "'");
+    // Build into a temp dir and swap it in on success.
+    rm(build_dir_tmp);
     mkdir(build_dir_tmp);
 
-    log("Building Linux kernel...");
+    log("Building Linux kernel " + spec.release + "...");
     log("  Source: " + ctx.source_path);
-    log("  Config: " + kconfig);
+    log("  Config: " + ctx.kconfig_path);
     log("  Output: " + build_dir);
 
     try {
-        _apply_kconfig(ctx.source_path, build_dir_tmp, kconfig, ctx.kconfig_fragments, spec.localversion);
-
+        _apply_kconfig(ctx.source_path, build_dir_tmp, ctx.kconfig_path, spec);
         let jobs = ctx.runtime.options.jobs.to_string();
         shell(_kernel_make_env_prefix() + "make -C " + ctx.source_path + " O=" + build_dir_tmp + " -j" + jobs);
+        let release = trim(read_file_or_empty(join_path(build_dir_tmp, "include/config/kernel.release")));
+        if release != spec.release {
+            throw "Wrong kernel.release: the build made '" + release + "', pinned '" + spec.release + "'";
+        }
     } catch (e) {
-        // Best-effort cleanup of temp outputs.
-        shell("rm -rf '" + build_dir_tmp + "'");
+        rm(build_dir_tmp);
         throw e;
     }
+    _swap_in(build_dir_tmp, build_dir);
 
-    // Swap into place atomically-ish.
-    shell("rm -rf '" + build_dir + "'");
-    shell("mv '" + build_dir_tmp + "' '" + build_dir + "'");
-
+    ctx.kernel_version = spec.release;
     ctx.build_dir = build_dir;
     log("Kernel build complete");
     ctx
@@ -297,40 +253,14 @@ fn is_installed(ctx) {
     ctx = kernel::apply_source_spec(ctx);
     let spec = kernel::source_spec(ctx.target);
     let kernel_root = kernel::artifact_root(ctx.runtime.paths.target);
-    let staging = join_path(kernel_root, "staging");
-    let vmlinuz = join_path(staging, "boot/vmlinuz");
-    let build_dir = join_path(kernel_root, "kernel-build");
-    if !is_file(join_path(build_dir, "include/config/kernel.release")) {
-        return needs_work(ctx, "kernel release metadata is missing");
-    }
-    if !is_file(ctx.kconfig_path) { throw "kconfig input is missing"; }
-    let identity = _kconfig_identity(ctx.kconfig_path, ctx.kconfig_fragments);
-    if trim(read_file_or_empty(join_path(build_dir, ".config.kconfig-hash"))) != identity {
-        return needs_work(ctx, "kernel configuration changed");
-    }
-    let mismatch = kernel::release_mismatch(build_dir, spec.version, spec.localversion);
+    let mismatch = _configured_mismatch(ctx, kernel_root, spec);
+    if mismatch == "" { mismatch = kernel::bundle_mismatch(kernel_root, spec); }
     if mismatch != "" { return needs_work(ctx, mismatch); }
-    let rel = kernel::release(build_dir, spec.version, spec.localversion);
 
-
-    let modules = if spec.module_install_path == "/usr/lib/modules" {
-        join_path(staging, "usr/lib/modules/" + rel)
-    } else {
-        join_path(staging, "lib/modules/" + rel)
-    };
-
-    if !is_file(vmlinuz) {
-        return needs_work(ctx, "vmlinuz not installed");
-    }
-    if !is_dir(modules) {
-        return needs_work(ctx, "modules not installed");
-    }
-
-    ctx.kernel_version = rel;
-    ctx.build_dir = build_dir;
-    let source = join_path(ctx.runtime.paths.build, ctx.source_dir_name);
-    ctx.source_path = if is_file(join_path(source, "Makefile")) { source } else { "" };
-    ctx.outputs = kernel::output_paths(kernel_root, ctx.kernel_version, spec.module_install_path);
+    ctx.kernel_version = spec.release;
+    ctx.build_dir = join_path(kernel_root, "kernel-build");
+    if !is_file(join_path(ctx.source_path, "Makefile")) { ctx.source_path = ""; }
+    ctx.outputs = kernel::output_paths(kernel_root, spec.release);
     ready(ctx)
 }
 
@@ -338,58 +268,34 @@ fn install(ctx) {
     ctx = kernel::apply_source_spec(ctx);
     let spec = kernel::source_spec(ctx.target);
     let kernel_root = kernel::artifact_root(ctx.runtime.paths.target);
+    let build_dir = join_path(kernel_root, "kernel-build");
     let staging = join_path(kernel_root, "staging");
     let staging_tmp = join_path(kernel_root, "staging.tmp");
-    let build_dir = ctx.build_dir;
-
-    let source_path = ctx.source_path;
-    if source_path == "" {
-        throw "No kernel source path available — cannot install modules";
+    if !is_file(join_path(ctx.source_path, "Makefile")) {
+        throw "No kernel source at " + ctx.source_path + " — cannot install modules";
     }
+    let mismatch = kernel::release_mismatch(kernel_root, spec);
+    if mismatch != "" { throw mismatch; }
 
     log("Installing kernel to staging...");
-
-    // Install into a temp dir and swap on success so failures don't leave partial artifacts.
-    shell("rm -rf '" + staging_tmp + "'");
-    mkdir(staging_tmp);
-
+    // Install into a temp dir and swap it in on success.
+    rm(staging_tmp);
+    mkdir(join_path(staging_tmp, "boot"));
     try {
-        mkdir(join_path(staging_tmp, "boot"));
-
-        // Base install creates lib/modules; the usrmerge override relocates after install.
-        mkdir(join_path(staging_tmp, "lib/modules"));
-
-        // Copy vmlinuz
-        let bzimage = join_path(build_dir, "arch/x86/boot/bzImage");
-        let vmlinuz = join_path(staging_tmp, "boot/vmlinuz");
-        copy_file(bzimage, vmlinuz);
+        copy_file(join_path(build_dir, "arch/x86/boot/bzImage"), join_path(staging_tmp, "boot/vmlinuz"));
         log("  Installed vmlinuz");
-
-        // Install modules via hookable helper
         log("  Installing modules...");
-        _install_modules(staging_tmp, source_path, build_dir, spec.module_install_path);
-
-        // Get kernel version for cleanup
-        let release_file = join_path(build_dir, "include/config/kernel.release");
-        let version = ctx.kernel_version;
-        if is_file(release_file) {
-            version = trim(read_file(release_file));
-        }
-
-        // Post-install cleanup via hookable helper
-        _cleanup_modules(staging_tmp, version, spec.module_install_path);
+        _install_modules(staging_tmp, ctx.source_path, build_dir, spec.release);
         log("  Modules installed");
     } catch (e) {
-        // Best-effort cleanup of temp outputs.
-        shell("rm -rf '" + staging_tmp + "'");
+        rm(staging_tmp);
         throw e;
     }
+    _swap_in(staging_tmp, staging);
 
-    // Swap into place atomically-ish.
-    shell("rm -rf '" + staging + "'");
-    shell("mv '" + staging_tmp + "' '" + staging + "'");
-
-    ctx.outputs = kernel::output_paths(kernel_root, ctx.kernel_version, spec.module_install_path);
+    ctx.kernel_version = spec.release;
+    ctx.build_dir = build_dir;
+    ctx.outputs = kernel::output_paths(kernel_root, spec.release);
     ctx
 }
 
@@ -452,6 +358,10 @@ fn cleanup(ctx, reason) {
         if is_dir(downloaded) {
             rm(downloaded);
         }
+        let extracting = downloaded + ".extract";
+        if is_dir(extracting) {
+            rm(extracting);
+        }
         if is_file(tarball) {
             rm(tarball);
         }
@@ -462,10 +372,9 @@ fn cleanup(ctx, reason) {
     ctx
 }
 
-
 fn remove(ctx) {
     let kernel_root = kernel::artifact_root(ctx.runtime.paths.target);
-    for name in ["kernel-build", "kernel-build.tmp", "staging", "staging.tmp"] {
+    for name in ["kernel-build", "kernel-build.tmp", "kernel-build.old", "staging", "staging.tmp", "staging.old"] {
         let path = join_path(kernel_root, name);
         if exists(path) {
             rm(path);

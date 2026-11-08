@@ -44,20 +44,16 @@ pub(crate) fn build_one(distro_id: &str, release: ReleaseProduct) -> Result<()> 
     let bundle = distro_contract::load(&repo_root, distro_id)?;
 
     let kernel_output_dir = runs::kernel_dir(&bundle.repo_root, distro_id);
-    std::fs::create_dir_all(&kernel_output_dir).with_context(|| {
-        format!(
-            "creating kernel output directory '{}'",
-            kernel_output_dir.display()
-        )
-    })?;
     let mut run = runs::Run::start_release(&bundle.repo_root, distro_id, product)?;
     let iso_path = run.dir.join(bundle.contract.artifacts.iso(product));
     run.manifest.iso_path = Some(iso_path.clone());
     run.save()?;
 
     let build_result = (|| -> Result<()> {
-        distro_builder::kernel::ensure_kernel_preinstalled(&bundle, &kernel_output_dir)
-            .with_context(|| format!("ensuring kernel artifacts for '{distro_id}'"))?;
+        // Release builds never build a kernel.
+        distro_builder::kernel::check_kernel_installed(&bundle, &kernel_output_dir).with_context(|| {
+            format!("install it first: cargo xtask build kernel {distro_id} (--prebuilt downloads it)")
+        })?;
         println!("[release:iso:{product}:{distro_id}] kernel already installed");
         crate::workflows::ensure_release_iso_via_variant_hook(
             &bundle,

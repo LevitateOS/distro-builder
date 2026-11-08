@@ -1,40 +1,46 @@
-// Shared kernel source facts, path guards, and release checks. No lifecycle hooks.
+// The kernel pins and the kernel bundle rules both kernel recipes share. No
+// lifecycle hooks. distro-builder's kernel module (src/pipeline/kernel.rs)
+// also evaluates `source_spec` and `bundle_mismatch` (with `release_mismatch`),
+// with only `join_path`, `is_file`, `is_dir`, `read_file_or_empty` and `trim`
+// defined, so keep those functions to these helpers and plain Rhai.
 
-fn target(value) {
-    if value == "levitate" || value == "acorn" { return value; }
-    throw "KERNEL_TARGET must be levitate or acorn";
-}
-
-fn source_spec(selected_target) {
-    let target = target(selected_target);
-
-    if target == "levitate" {
-        return #{
+// Each variant's kernel (KERNEL_TARGET is the variant id): the kernel line it
+// follows (its distro.toml `[profile] kernel_line`), the exact kernel.org
+// version, and the sha256 of that version's source tarball. A kernel bump
+// edits only this table (and the prebuilt asset digest in linux-prebuilt.rhai).
+fn pins() {
+    #{
+        levitate: #{
+            line: "lts",
             version: "6.12.116",
             sha256: "cb3ed3dfdd47e6ade49dc933db334fd86e24cadee920da612c262b0e9b6a511b",
-            localversion: "-levitate",
-            module_install_path: "/usr/lib/modules",
-        };
-    }
-    if target == "acorn" {
-        return #{
+        },
+        acorn: #{
+            line: "latest",
             version: "7.3.3",
             sha256: "79c66dde66cd96877fcde8f7d36aec946b1f423d2b97b5a7b1751b75c764f3d1",
-            localversion: "-acorn",
-            module_install_path: "/usr/lib/modules",
-        };
+        },
     }
+}
 
-    throw "No kernel recipe spec registered for target '" + target + "'";
+// The pin of `target`, with the localversion (`-<target>`) and the exact
+// kernel.release it builds.
+fn source_spec(target) {
+    let pins = pins();
+    if !pins.contains(target) {
+        throw "no kernel pin for KERNEL_TARGET '" + target + "' in kernel/metadata.rhai";
+    }
+    let spec = pins[target];
+    spec["localversion"] = "-" + target;
+    spec["release"] = spec.version + spec.localversion;
+    spec
 }
 
 fn apply_source_spec(ctx) {
     let spec = source_spec(ctx.target);
     let major = spec.version.split(".")[0];
     ctx.description = "Linux kernel (" + spec.version + ")";
-    ctx.kernel_localversion = spec.localversion;
     ctx.kernel_version = spec.version;
-    ctx.module_install_path = spec.module_install_path;
     ctx.source_dir_name = "linux-" + spec.version;
     ctx.tarball_filename = "linux-" + spec.version + ".tar.xz";
     ctx.tarball_url = "https://cdn.kernel.org/pub/linux/kernel/v" + major + ".x/" + ctx.tarball_filename;
@@ -59,48 +65,70 @@ fn artifact_root(kernel_artifact_root) {
     kernel_artifact_root
 }
 
-// Why the kernel in build_dir is not the pinned one, or "" when it is.
-// Readiness reports this as work to do, so a new pin replaces the old kernel
-// instead of failing on it.
-fn release_mismatch(build_dir, expected_version, expected_localversion) {
-    let rel = trim(read_file_or_empty(join_path(build_dir, "include/config/kernel.release")));
-    if expected_version != "" && !rel.starts_with(expected_version) {
-        return "Wrong kernel version: kernel.release '" + rel + "' does not start with '" + expected_version + "'";
+// The kernel bundle: kernel-build/include/config/kernel.release,
+// staging/boot/vmlinuz and staging/usr/lib/modules/<release>/.
+
+// Why kernel-build under `kernel_root` is not `spec`'s release, or "" when it is.
+fn release_mismatch(kernel_root, spec) {
+    let release_file = join_path(kernel_root, "kernel-build/include/config/kernel.release");
+    if !is_file(release_file) {
+        return "kernel release metadata is missing at " + release_file;
     }
-    if !rel.ends_with(expected_localversion) {
-        return "Wrong kernel localversion: kernel.release '" + rel + "' does not end with '" + expected_localversion + "'";
+    let release = trim(read_file_or_empty(release_file));
+    if release != spec.release {
+        return "Wrong kernel.release: found '" + release + "', pinned '" + spec.release + "'";
     }
     ""
 }
 
-fn release(build_dir, expected_version, expected_localversion) {
-    let rel_file = join_path(build_dir, "include/config/kernel.release");
-    if !is_file(rel_file) {
-        throw "Missing kernel.release at " + rel_file;
+// Why the bundle at `kernel_root` is not `spec`'s kernel, or "" when it is.
+// Readiness reports this as work to do, so a new pin replaces the old kernel
+// instead of failing on it; a fresh payload that fails it is rejected.
+fn bundle_mismatch(kernel_root, spec) {
+    let mismatch = release_mismatch(kernel_root, spec);
+    if mismatch != "" { return mismatch; }
+    let image = join_path(kernel_root, "staging/boot/vmlinuz");
+    if !is_file(image) {
+        return "kernel image is missing at " + image;
     }
-    let rel = trim(read_file(rel_file));
-
-    if expected_version != "" && !rel.starts_with(expected_version) {
-        throw "Wrong kernel version: kernel.release '" + rel + "' does not start with '" + expected_version + "'";
+    let modules = join_path(kernel_root, "staging/usr/lib/modules/" + spec.release);
+    if !is_dir(modules) {
+        return "kernel modules are missing at " + modules;
     }
-    if !rel.ends_with(expected_localversion) {
-        throw "Wrong kernel localversion: kernel.release '" + rel + "' does not end with '" + expected_localversion + "'";
-    }
-
-    rel
+    ""
 }
 
-// Product names are shared by source and prebuilt kernel lifecycles. Rust
-// selects/validates named products; it does not reconstruct package paths.
-fn output_paths(kernel_root, release, module_install_path) {
-    let modules = if module_install_path == "/usr/lib/modules" {
-        "staging/usr/lib/modules/"
-    } else if module_install_path == "/lib/modules" {
-        "staging/lib/modules/"
-    } else {
-        throw "unsupported module installation path: " + module_install_path;
-    };
-    let outputs = #{bundle: kernel_root, kernel: join_path(kernel_root, "staging/boot/vmlinuz"),
-                    modules: join_path(kernel_root, modules + release)};
-    outputs
+// Named products shared by the source and prebuilt kernel lifecycles.
+fn output_paths(kernel_root, release) {
+    #{
+        bundle: kernel_root,
+        kernel: join_path(kernel_root, "staging/boot/vmlinuz"),
+        modules: join_path(kernel_root, "staging/usr/lib/modules/" + release),
+    }
+}
+
+// Every CONFIG_ line of `kconfig` whose value `config` (a kernel .config) does
+// not carry, one "CONFIG_X=want (got ...)" per line; "" when it carries them
+// all. `=n` is satisfied by an unset or unknown symbol.
+fn kconfig_dropped(kconfig, config) {
+    let have = #{};
+    for line in read_file(config).split("\n") {
+        if line.starts_with("CONFIG_") {
+            let eq = line.index_of("=");
+            have[line.sub_string(0, eq)] = line.sub_string(eq + 1);
+        }
+    }
+    let dropped = "";
+    for line in read_file(kconfig).split("\n") {
+        let line = trim(line);
+        if !line.starts_with("CONFIG_") { continue; }
+        let eq = line.index_of("=");
+        if eq < 0 { throw "kconfig line is not CONFIG_X=value: '" + line + "'"; }
+        let name = line.sub_string(0, eq);
+        let want = line.sub_string(eq + 1);
+        let got = if have.contains(name) { have[name] } else { "unset" };
+        let ok = if have.contains(name) { got == want } else { want == "n" };
+        if !ok { dropped += "\n  " + line + " (got " + got + ")"; }
+    }
+    dropped
 }

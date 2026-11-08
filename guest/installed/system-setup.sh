@@ -1,8 +1,8 @@
 #!/bin/sh
-# Installed by the system recipe. recsetup validates choices and invokes this
-# target-side policy; no compiler image or build runtime is needed on the live ISO.
-# What the system is comes from the distro profile the builder writes into
-# /etc/os-release (REC_* fields), not from probing for programs.
+# The target-side setup program (installed-system.rhai installs it as
+# /usr/libexec/recipe-system-setup; recsetup runs it inside the target). It
+# applies one machine choice per call, by the mechanism of the system's init
+# and package backend, which it reads from /etc/os-release (REC_* fields).
 set -eu
 
 missing_profile() {
@@ -40,9 +40,8 @@ case "${1:-}" in
         else echo "time zone is unavailable: $2" >&2; exit 2; fi
         ;;
     locale)
-        # recsetup offers only locales usable as they are (glibc's compiled ones,
-        # musl's), so setting LANG is all there is. systemd reads locale.conf
-        # itself; on OpenRC the recipe's /etc/profile.d/locale.sh exports it.
+        # Setting LANG is all there is: systemd reads locale.conf itself, and
+        # on OpenRC the recipe's /etc/profile.d/locale.sh exports it.
         assignment /etc/locale.conf LANG "$2"
         ;;
     keymap)

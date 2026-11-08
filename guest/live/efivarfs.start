@@ -1,8 +1,0 @@
-#!/bin/sh
-# Ensure efivarfs is mounted for UEFI support
-# Needed for efibootmgr, bootctl, and install tests
-
-if [ -d /sys/firmware/efi ]; then
-    mkdir -p /sys/firmware/efi/efivars 2>/dev/null
-    mount -t efivarfs efivarfs /sys/firmware/efi/efivars 2>/dev/null || true
-fi

@@ -1,5 +1,6 @@
 #!/bin/sh
 # Live shell defaults: editor, pager, colours, prompt and bash history.
+# Sourced from /etc/profile.d by every login shell.
 case "$-" in
     *i*) ;;
     *) return 0 ;;
@@ -23,6 +24,7 @@ if [ -z "${NO_COLOR:-}" ]; then
     alias fgrep='grep -F --color=auto'
 fi
 
+live_prompt='[live \u@\h \W]\$ '
 if [ -n "${BASH_VERSION:-}" ]; then
     export HISTCONTROL="${HISTCONTROL:-ignoredups:erasedups}"
     export HISTSIZE="${HISTSIZE:-10000}"
@@ -38,11 +40,12 @@ if [ -n "${BASH_VERSION:-}" ]; then
     if [ -z "${NO_COLOR:-}" ]; then
         PS1="\[\033[1;32m\]\u@\h\[\033[0m\]:\[\033[1;34m\]\w\[\033[0m\]\\$ "
     else
-        PS1='[live \u@\h \W]\$ '
+        PS1=$live_prompt
     fi
 elif [ -z "${PS1:-}" ]; then
-    PS1='[live \u@\h \W]\$ '
+    PS1=$live_prompt
 fi
+unset live_prompt
 
 if [ "${LIVE_HELP_HINT_SHOWN:-0}" != "1" ]; then
     export LIVE_HELP_HINT_SHOWN=1

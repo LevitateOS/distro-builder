@@ -1,26 +1,22 @@
 #!/bin/sh
-# Live ISO shutdown cleanup:
-# release loop-backed live mounts before systemd reaches umount.target.
-set +e
+# Live shutdown cleanup. The live root's read-only layers are EROFS images on
+# loop devices, backed by files on the boot medium that recinit's live init
+# keeps mounted at @LIVE_MEDIA_DIR@. Nothing can unmount them while the root
+# uses them, so release them before the init unmounts filesystems: detach the
+# medium lazily and detach every loop device that has a backing file (the
+# kernel frees a device that is still in use when its last user goes).
+status=0
+fail() { echo "live-shutdown-cleanup: $*" >&2; status=1; }
 
-for mp in /live-overlay /rootfs /run/live-media; do
-    if mountpoint -q "$mp"; then
-        umount "$mp" >/dev/null 2>&1 || umount -l "$mp" >/dev/null 2>&1
-    fi
-done
-
-if [ -d /run/live-media ]; then
-    rmdir /run/live-media 2>/dev/null || true
+media=@LIVE_MEDIA_DIR@
+if mountpoint -q "$media"; then
+    umount -l "$media" || fail "cannot detach $media"
 fi
 
-for loopdev in /dev/loop1 /dev/loop0; do
-    if [ -b "$loopdev" ]; then
-        losetup -d "$loopdev" >/dev/null 2>&1 || true
-    fi
+for loop in /sys/block/loop*; do
+    [ -r "$loop/loop/backing_file" ] || continue
+    device=/dev/${loop##*/}
+    losetup -d "$device" || fail "cannot detach $device"
 done
 
-if mountpoint -q /media/cdrom; then
-    umount /media/cdrom >/dev/null 2>&1 || umount -l /media/cdrom >/dev/null 2>&1
-fi
-
-exit 0
+exit "$status"

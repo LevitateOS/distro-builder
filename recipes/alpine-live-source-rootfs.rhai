@@ -262,7 +262,7 @@ fn build(ctx) {
         throw "invalid rootfs: missing /bin/sh path after apk install";
     }
 
-    installed::openrc(rootfs, ctx.runtime.paths.inputs);
+    installed::apply(rootfs, ctx.runtime.paths.inputs, "openrc");
     target_finalize(rootfs);
     write_file(_rootfs_marker(rootfs), ctx.rootfs_recipe_version + "\n");
     ctx.rootfs_path = rootfs;

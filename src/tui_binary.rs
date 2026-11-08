@@ -1,5 +1,6 @@
 //! TUI apps on an image: one compiled binary holding every app a layer carries, and a
-//! command per app.
+//! command per app. The live install screen and the installed system each have their
+//! own binary, so one layer never shadows the other's.
 //!
 //! `bun build --compile` embeds the bun runtime, so each binary is tens of megabytes; one
 //! binary per layer keeps that to a single copy. It runs the app named by the command it
@@ -15,14 +16,17 @@
 
 use anyhow::{bail, Context, Result};
 use crate::process::Cmd;
-use crate::tui_apps::TuiApp;
+use crate::tui_apps::{TuiApp, Workspace};
 use distro_contract::install_ux::BIN_DIR;
 use distro_contract::profile::Libc;
+use distro_contract::{Profile, SYSTEM_TUI_APPS};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// The binary the commands link to.
-const BINARY: &str = "usr/local/libexec/install-tui";
+/// The install screen's binary (live-tools overlay).
+pub(crate) const INSTALL_BINARY: &str = "usr/local/libexec/install-tui";
+/// The installed system's binary (system rootfs).
+pub(crate) const SYSTEM_BINARY: &str = "usr/local/libexec/system-tui";
 
 /// The bun that builds the binary, and whose runtime it embeds.
 const BUN_VERSION: &str = "1.4.2";
@@ -35,12 +39,14 @@ const RUNTIMES: &[(&str, &str)] = &[
 
 const LIB_DIRS: &[&str] = &["usr/lib", "usr/lib64", "lib", "lib64"];
 
-/// Compiles `apps` into one binary in `layer` and links `BIN_DIR/<name>` to it for each.
-/// `rootfs` is the root the binary will run on, with C library `libc`.
+/// Compiles `apps` into one binary at `binary_path` (`INSTALL_BINARY` or `SYSTEM_BINARY`)
+/// in `layer` and links `BIN_DIR/<name>` to it for each. `rootfs` is the root the
+/// binary will run on, with C library `libc`.
 pub(crate) fn install(
     repo_root: &Path,
     rootfs: &Path,
     layer: &Path,
+    binary_path: &str,
     libc: Libc,
     apps: &[&TuiApp],
 ) -> Result<()> {
@@ -60,20 +66,25 @@ pub(crate) fn install(
     let runtime = runtime(repo_root, target)?;
 
     // One entry per runtime target, at the same place in every checkout.
-    let entry_dir = repo_root.join(".artifacts/work/install-tui").join(target);
+    let stem = Path::new(binary_path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .context("the TUI binary has a file name")?;
+    let entry_dir = repo_root.join(".artifacts/work").join(stem).join(target);
     fs::create_dir_all(&entry_dir)
         .with_context(|| format!("creating '{}'", entry_dir.display()))?;
-    let entry = entry_dir.join("install-tui.ts");
+    let entry_file = format!("{stem}.ts");
+    let entry = entry_dir.join(&entry_file);
     fs::write(&entry, entry_source(repo_root, &entry_dir, apps)?)
         .with_context(|| format!("writing '{}'", entry.display()))?;
 
-    let binary = layer.join(BINARY);
+    let binary = layer.join(binary_path);
     if let Some(parent) = binary.parent() {
         fs::create_dir_all(parent).with_context(|| format!("creating '{}'", parent.display()))?;
     }
     Cmd::new("bun")
         .arg("build")
-        .arg("install-tui.ts")
+        .arg(&entry_file)
         .args(["--compile", "--minify"])
         .arg(format!("--target={target}"))
         .arg("--compile-executable-path")
@@ -92,7 +103,7 @@ pub(crate) fn install(
 
     let bin_dir = layer.join(BIN_DIR);
     fs::create_dir_all(&bin_dir).with_context(|| format!("creating '{}'", bin_dir.display()))?;
-    let link_target = format!("/{BINARY}");
+    let link_target = format!("/{binary_path}");
     for app in apps {
         let link = bin_dir.join(&app.name);
         if link.symlink_metadata().is_ok() {
@@ -102,6 +113,34 @@ pub(crate) fn install(
             .with_context(|| format!("linking '{}' to {link_target}", link.display()))?;
     }
     Ok(())
+}
+
+/// Puts the installed system's TUI apps (`SYSTEM_TUI_APPS`) into the system `rootfs`,
+/// which every product builds on. Each app's tools must be in the rootfs itself.
+pub(crate) fn install_system(repo_root: &Path, rootfs: &Path, profile: &Profile) -> Result<()> {
+    use crate::pipeline::live_tools::{ToolLayer, LIVE_TOOLS};
+    let workspace = Workspace::load(repo_root)?;
+    let apps = SYSTEM_TUI_APPS
+        .iter()
+        .map(|name| workspace.app(name))
+        .collect::<Result<Vec<_>>>()?;
+    for app in &apps {
+        for tool in &app.tools {
+            let shipped = LIVE_TOOLS.iter().any(|live| {
+                live.layer == ToolLayer::Rootfs && live.binary.unwrap_or(live.package) == tool
+            });
+            if !shipped {
+                bail!(
+                    "the installed system's app '{}' runs {tool}, but the system rootfs doesn't \
+                     ship a binary called that: add it to the builder's rootfs tools \
+                     (pipeline/live_tools.rs)",
+                    app.name
+                );
+            }
+        }
+    }
+    install(repo_root, rootfs, rootfs, SYSTEM_BINARY, profile.libc, &apps)
+        .context("building the installed system's TUI apps")
 }
 
 /// The host's bun is the declared one: it writes the bundle the runtime runs.

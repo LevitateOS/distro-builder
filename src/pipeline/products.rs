@@ -142,6 +142,8 @@ fn prepare_system(variant: &Variant, rootfs: &Path) -> Result<()> {
     fs::write(&role, format!("{}\n", recinit::live::ROLE_ROOTFS))
         .with_context(|| format!("writing {}", role.display()))?;
     add_tools(&variant.repo_root, rootfs, ToolLayer::Rootfs, &variant.id, &variant.contract.profile)?;
+    crate::tui_binary::install_system(&variant.repo_root, rootfs, &variant.contract.profile)
+        .with_context(|| format!("adding the installed system's TUI apps for {}", variant.id))?;
     check_installable(rootfs, &variant.contract).with_context(|| {
         format!(
             "the rootfs recipe's tree {} predates the current system recipe; remove it to rebuild it",

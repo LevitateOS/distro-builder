@@ -126,7 +126,14 @@ pub(crate) fn write_payload(
             }
         }
     }
-    crate::tui_binary::install(repo_root, rootfs, overlay, profile.libc, &apps)
+    crate::tui_binary::install(
+        repo_root,
+        rootfs,
+        overlay,
+        crate::tui_binary::INSTALL_BINARY,
+        profile.libc,
+        &apps,
+    )
         .context("building the install screen's TUI apps")?;
 
     let [hub, docs] = screen.panes(os_name)?;

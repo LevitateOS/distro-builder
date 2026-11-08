@@ -108,7 +108,7 @@ fn install(ctx) {
     mkdir(dirname(installed)); copy_file(ctx.program, installed); chmod(installed, 0o755);
     if ctx.name == "recab" {
         if ctx.init_system == "" { throw "recab packages its trial service for an init system: pass INIT_SYSTEM"; }
-        exec_checked(ctx.program, ["install-unit", "--root", ctx.rootfs, "--package", ctx.init_system]);
+        exec_checked(ctx.program, ["install-unit", "--root", ctx.rootfs, "--init", ctx.init_system, "--bin", "/" + ctx.install_path]);
     }
     if ctx.name == "recipe" { recipe_state(ctx.rootfs); }
     ctx.outputs = #{program: ctx.program, rootfs: ctx.rootfs};

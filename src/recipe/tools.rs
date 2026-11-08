@@ -17,6 +17,7 @@ const TOOLS: &[(&str, &str, &[&str])] = &[
         &["recstrap", "recchroot", "recfstab", "recsetup"],
     ),
     ("recab", "tools/recab", &["recab"]),
+    ("levitate-recipe", "tools/recipe", &["recipe"]),
     (
         "install-split-pane",
         "distro/builder/install-split-pane",

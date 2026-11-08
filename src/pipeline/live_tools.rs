@@ -32,8 +32,9 @@ const fn tool(package: &'static str, binary: Option<&'static str>, layer: ToolLa
 }
 
 /// The install tools; recab and recstrap also go into the rootfs, since
-/// recab stages A/B updates with recstrap on the installed system; and the
-/// install screen's split pane, which is live-tools only.
+/// recab stages A/B updates with recstrap on the installed system; recipe,
+/// the package manager of every system; and the install screen's split pane,
+/// which is live-tools only.
 pub(crate) const LIVE_TOOLS: &[LiveTool] = &[
     tool("recpart", None, ToolLayer::Overlay),
     tool("recstrap", None, ToolLayer::Overlay),
@@ -42,6 +43,7 @@ pub(crate) const LIVE_TOOLS: &[LiveTool] = &[
     tool("recstrap", Some("recsetup"), ToolLayer::Overlay),
     tool("recab", None, ToolLayer::Rootfs),
     tool("recstrap", None, ToolLayer::Rootfs),
+    tool("levitate-recipe", None, ToolLayer::Rootfs),
     tool("install-split-pane", Some("install-split"), ToolLayer::Overlay),
 ];
 

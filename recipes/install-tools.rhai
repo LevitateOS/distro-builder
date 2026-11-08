@@ -5,8 +5,9 @@
 // BIN names the binary (default recstrap); INSTALL_PATH where it goes in the
 // package tree (default usr/bin/<BIN>). recab also packages its trial service,
 // which it writes itself for the image's init system (INIT_SYSTEM, the
-// variant's profile). The named program output is published by Recipe for the
-// consumer to install.
+// variant's profile). recipe, the package manager, also packages the
+// directories its state lives in. The named program output is published by
+// Recipe for the consumer to install.
 const RECIPE_API = 2;
 let bin = if is_def_var("BIN") { BIN } else { "recstrap" };
 let rust_target = "x86_64-unknown-linux-musl";
@@ -38,12 +39,16 @@ fn is_built(ctx) {
 
 fn build(ctx) {
     let work = ctx.runtime.paths.build;
+    let rustflags = "-C linker=/usr/lib/rustlib/x86_64-unknown-linux-gnu/bin/rust-lld -C linker-flavor=ld.lld -C link-arg=--threads=1";
+    if ctx.name == "recipe" { rustflags += " -C link-arg=" + renameat2_object(work); }
     exec_checked("cargo", ["build", "--release", "--locked", "--offline", "--bin", ctx.name,
         "--target", ctx.rust_target,
         "--manifest-path", join_path(ctx.source, "Cargo.toml"), "--target-dir", join_path(work, "target")], #{
         cwd: ctx.source,
+        // The C parts of a dependency (recipe's compression and TLS crates)
+        // compile with the image's gcc; Rust's musl target links them.
         env: #{CARGO_HOME: join_path(work, "cargo"), CARGO_BUILD_JOBS: ctx.runtime.options.jobs.to_string(),
-            RUSTFLAGS: "-C linker=/usr/lib/rustlib/x86_64-unknown-linux-gnu/bin/rust-lld -C linker-flavor=ld.lld -C link-arg=--threads=1",
+            RUSTFLAGS: rustflags, CC_x86_64_unknown_linux_musl: "gcc", AR_x86_64_unknown_linux_musl: "ar",
             LD_LIBRARY_PATH: "/usr/lib"},
     });
     // The program is the tool it is asked for: `<bin> --version` names it.
@@ -52,6 +57,37 @@ fn build(ctx) {
         throw "Unexpected " + ctx.name + " executable: " + version;
     }
     ctx
+}
+
+// recipe calls libc's renameat2, which the musl that Rust's musl target links
+// (1.2.5) lacks; musl 1.2.6 has it. This object is that wrapper, the plain
+// system call. Drop it when recipe makes the call itself or Rust's musl is 1.2.6.
+fn renameat2_object(work) {
+    let source = join_path(work, "renameat2.c");
+    let object = join_path(work, "renameat2.o");
+    write_file(source, "#include <unistd.h>\n#include <sys/syscall.h>\n" +
+        "int renameat2(int olddirfd, const char *oldpath, int newdirfd, const char *newpath, unsigned int flags)\n" +
+        "{ return syscall(SYS_renameat2, olddirfd, oldpath, newdirfd, newpath, flags); }\n");
+    exec_checked("gcc", ["-O2", "-fPIE", "-fno-stack-protector", "-c", source, "-o", object]);
+    object
+}
+
+// Recipe's state, as root runs it: its recipes, retained state and image
+// cache live on /var, which both A/B slots share, so what it installed
+// survives an update. Recipe's defaults are under root's home, which the
+// image replaces, so they point there. Every directory of this tree replaces
+// the rootfs's metadata when merged, so root's home keeps a private mode.
+fn recipe_state(root) {
+    for dir in [["var/lib/recipe", 0o755], ["var/lib/recipe/recipes", 0o755],
+                ["var/lib/recipe/state", 0o700], ["var/cache/recipe", 0o700],
+                ["root", 0o700], ["root/.local", 0o755], ["root/.local/share", 0o755],
+                ["root/.local/state", 0o700], ["root/.cache", 0o700]] {
+        mkdir(join_path(root, dir[0]));
+        target_mode(root, dir[0], dir[1]);
+    }
+    ln_force("/var/lib/recipe", join_path(root, "root/.local/share/recipe"));
+    ln_force("/var/lib/recipe/state", join_path(root, "root/.local/state/recipe"));
+    ln_force("/var/cache/recipe", join_path(root, "root/.cache/recipe"));
 }
 
 fn is_installed(ctx) {
@@ -73,6 +109,7 @@ fn install(ctx) {
         if ctx.init_system == "" { throw "recab packages its trial service for an init system: pass INIT_SYSTEM"; }
         exec_checked(ctx.program, ["install-unit", "--root", ctx.rootfs, "--package", ctx.init_system]);
     }
+    if ctx.name == "recipe" { recipe_state(ctx.rootfs); }
     ctx.outputs = #{program: ctx.program, rootfs: ctx.rootfs};
     ctx
 }

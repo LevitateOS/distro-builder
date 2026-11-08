@@ -283,6 +283,8 @@ fn bash_login(root) {
 // mutable installs (/var on the root) and by recsetup for A/B installs.
 fn homes(root) {
     rm(join_path(root, "home"));
+    // Drop the package's directory metadata before replacing it with a link.
+    target_finalize(root);
     link(root, "home", "var/home");
     directory(root, "var/home", 0o755);
 }

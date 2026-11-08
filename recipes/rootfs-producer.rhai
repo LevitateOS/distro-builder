@@ -59,23 +59,19 @@ fn is_built(ctx) {
 fn build(ctx) {
     let root = root_of(ctx);
     if is_file(stamp_of(ctx)) { rm(stamp_of(ctx)); }
-    if is_dir(root) {
-        shell("chmod -R u+rwX '" + root + "'");
-        rm(root);
-    }
+    if is_dir(root) { rm(root); }
     mkdir(root);
     unpack(ctx, root);
     package_effects(ctx, root);
+    // Resolve the packages' file owners against their accounts and make the
+    // staging tree writable before cleanup; package modes stay in metadata.
+    target_finalize(root);
     // No caches or logs from the build.
     for dir in ["var/cache", "var/log"] {
         let path = join_path(root, dir);
-        if exists(path) { shell("chmod -R u+rwX '" + path + "'"); rm(path); }
+        if exists(path) { rm(path); }
         mkdir(path);
     }
-    // Resolve the packages' file owners against their accounts and make the
-    // tree readable and writable for the policy; the packages' modes stay in
-    // Recipe's target metadata.
-    target_finalize(root);
     // auditd's log directory.
     installed::directory(root, "var/log/audit", 0o700);
     installed::apply(root, ctx.runtime.paths.inputs, ctx.init);

@@ -85,9 +85,8 @@ pub fn kernel_cmdline(init: InitSystem, role: BootRole) -> Vec<String> {
 /// producers require it; recab installs it on the installed ESP).
 const SYSTEMD_BOOT_EFI: &str = "usr/lib/systemd/boot/efi/systemd-bootx64.efi";
 
-/// The busybox recipe and the host it downloads from.
+/// The recipe that produces the release's busybox binary.
 const BUSYBOX_RECIPE: &str = "distro/builder/recipes/busybox-static.rhai";
-const BUSYBOX_HOST: &str = "busybox.net:443";
 
 /// Builds `product`'s release ISO in `dir`, its release run's directory, with
 /// the kernel in `kernel` (`runs::kernel_dir`), and returns the ISO's path.
@@ -233,7 +232,6 @@ fn add_modules(rootfs: &Path, modules: &Path, release: &str) -> Result<()> {
 fn busybox(variant: &Variant) -> Result<PathBuf> {
     let repo = &variant.repo_root;
     Invocation::new(repo, "install", repo.join(BUSYBOX_RECIPE), recipe_work_dir(repo, &variant.id)?)
-        .network_host(BUSYBOX_HOST)
         .run()?
         .file("busybox")
 }

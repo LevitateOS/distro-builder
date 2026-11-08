@@ -4,6 +4,7 @@
 // do not run, so `package_effects` does what they would have done, from the
 // packages' own data where they ship it.
 const RECIPE_API = 2;
+const NEEDS = #{ inputs: #{ rpms: "directory", capabilities: "file", system_setup: "file", os_release: "file" }, outputs: #{ rootfs: "directory" }, memory_mib: 8192, storage_max_objects: 131072 };
 import "sources/levitate-rpm-lock.rhai" as lock;
 import "installed-system.rhai" as system;
 let ctx = #{

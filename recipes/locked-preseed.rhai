@@ -4,6 +4,7 @@
 // (the output's name) and `ctx.files` (its lock's [name, id, URL, SHA256]
 // rows). A file's name is its URL's basename.
 const RECIPE_API = 2;
+const NEEDS = #{};
 
 fn dir_of(ctx) { join_path(ctx.runtime.paths.output, ctx.output) }
 fn file_of(ctx, row) { join_path(dir_of(ctx), basename(row[2])) }

@@ -3,6 +3,7 @@
 // `apks` input), installed by the locked apk.static without the packages'
 // scripts, so `package_effects` does what those scripts would have done.
 const RECIPE_API = 2;
+const NEEDS = #{ inputs: #{ apks: "directory", capabilities: "file", system_setup: "file", os_release: "file" }, outputs: #{ rootfs: "directory" }, memory_mib: 4096, storage_max_objects: 131072 };
 import "sources/acorn-apk-lock.rhai" as lock;
 import "installed-system.rhai" as system;
 let ctx = #{

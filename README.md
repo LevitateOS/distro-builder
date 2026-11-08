@@ -11,7 +11,8 @@ AcornOS over Recipe. It reads each variant through `distro_contract::load`
   layout (`pipeline/kernel.rs`) and Recipe's work directory (`pipeline/paths.rs`).
 - `src/recipe/`: calling Recipe and reading what a recipe reports in
   `ctx.outputs` (`recipe/outputs.rs`). The outputs a rootfs-source preseed must
-  report are the variant's `preseed_outputs`.
+  report are read statically from that recipe's `NEEDS.outputs`. Recipes own
+  network and resource grants; variant TOML selects recipes and binds inputs.
 - `src/artifact/`: EROFS and overlay images and filesystem copies.
 - `src/run_history.rs`: the output directories and release run history.
 - `src/bin/`: the `distro-builder` binary. Its `usage()` in

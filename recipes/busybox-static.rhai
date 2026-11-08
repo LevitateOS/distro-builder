@@ -1,6 +1,7 @@
 // The static busybox the live and the installed initramfs run (recinit): the
 // prebuilt musl binary busybox.net publishes, pinned by its sha256.
 const RECIPE_API = 2;
+const NEEDS = #{ outputs: #{ busybox: "file" }, network: ["busybox.net:443"] };
 let ctx = #{
     name: "busybox-static",
     description: "Static busybox for the initramfs",

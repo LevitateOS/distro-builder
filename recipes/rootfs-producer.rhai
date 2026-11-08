@@ -13,6 +13,7 @@
 // imports and every input, so a change to any of them starts from an empty
 // output; the stamp beside the tree only records that the build finished.
 const RECIPE_API = 2;
+const NEEDS = #{};
 import "installed-system.rhai" as installed;
 
 fn root_of(ctx) { join_path(ctx.runtime.paths.output, "rootfs") }

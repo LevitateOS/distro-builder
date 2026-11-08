@@ -6,12 +6,9 @@ use super::{recipe_work_dir, Invocation};
 
 #[derive(Debug, Clone)]
 pub struct RootfsSourceRecipeSpec {
-    pub storage_max_objects: Option<u64>,
     pub recipe_script: PathBuf,
     pub defines: BTreeMap<String, String>,
     pub inputs: BTreeMap<String, PathBuf>,
-    pub network_hosts: Vec<String>,
-    pub memory_mib: Option<u64>,
 }
 
 fn resolve_recipe_path(repo_root: &Path, recipe_script: &Path) -> PathBuf {
@@ -35,17 +32,12 @@ pub fn materialize_rootfs_from_recipe(
         );
     }
 
-    let mut invocation = Invocation::new(repo_root, "install", &recipe_path, build_dir)
-        .memory_mib(spec.memory_mib)
-        .storage_max_objects(spec.storage_max_objects);
+    let mut invocation = Invocation::new(repo_root, "install", &recipe_path, build_dir);
     for (key, value) in &spec.defines {
         invocation = invocation.define(key, value);
     }
     for (name, path) in &spec.inputs {
         invocation = invocation.input(name, path);
-    }
-    for host in &spec.network_hosts {
-        invocation = invocation.network_host(host);
     }
     let ctx = invocation.run().with_context(|| {
         format!(
@@ -68,14 +60,8 @@ pub fn preseed_rootfs_source(
     repo_root: &Path,
     distro_id: &str,
     recipe_script: &Path,
-    required_outputs: &BTreeMap<String, distro_contract::RecipeOutputKind>,
-    network_hosts: &[String],
-    memory_mib: Option<u64>,
     refresh: bool,
 ) -> Result<BTreeMap<String, PathBuf>> {
-    if required_outputs.is_empty() {
-        bail!("preseed requires explicit named output contracts");
-    }
     let recipe_path = resolve_recipe_path(repo_root, recipe_script);
     if !recipe_path.is_file() {
         bail!(
@@ -90,21 +76,25 @@ pub fn preseed_rootfs_source(
             build_dir.display()
         )
     })?;
-    let mut invocation = Invocation::new(repo_root, "install", &recipe_path, &build_dir)
-        .memory_mib(memory_mib)
-        .force_acquire(refresh);
-    for host in network_hosts {
-        invocation = invocation.network_host(host);
+    let required_outputs = levitate_recipe::needs::declaration(
+        &recipe_path,
+        Some(&repo_root.join("distro/builder/recipes")),
+    )?
+    .needs
+    .outputs;
+    if required_outputs.is_empty() {
+        bail!("preseed NEEDS.outputs must declare its products");
     }
-    let ctx = invocation
+    let ctx = Invocation::new(repo_root, "install", &recipe_path, &build_dir)
+        .force_acquire(refresh)
         .run()
         .with_context(|| format!("preseeding rootfs source via '{}'", recipe_path.display()))?;
     let outputs: BTreeMap<String, PathBuf> = required_outputs
         .iter()
         .map(|(name, kind)| {
             let path = match kind {
-                distro_contract::RecipeOutputKind::File => ctx.file(name),
-                distro_contract::RecipeOutputKind::Directory => ctx.directory(name),
+                levitate_recipe::needs::PathKind::File => ctx.file(name),
+                levitate_recipe::needs::PathKind::Directory => ctx.directory(name),
             }?;
             Ok((name.clone(), path))
         })
@@ -141,8 +131,13 @@ pub(crate) fn preseed_inputs(
     repo: &Path,
     distro: &str,
     recipe: &Path,
-    required: &BTreeMap<String, distro_contract::RecipeOutputKind>,
 ) -> Result<BTreeMap<String, PathBuf>> {
+    let required = levitate_recipe::needs::declaration(
+        recipe,
+        Some(&repo.join("distro/builder/recipes")),
+    )?
+    .needs
+    .outputs;
     let record_path = recipe_work_dir(repo, distro)?.join("rootfs-source-inputs.json");
     let bytes = std::fs::read(&record_path).with_context(|| {
         format!(
@@ -154,14 +149,14 @@ pub(crate) fn preseed_inputs(
     if record.recipe != recipe.canonicalize()? {
         bail!("rootfs preseed inputs belong to a different recipe");
     }
-    for (name, kind) in required {
+    for (name, kind) in &required {
         let path = record
             .outputs
             .get(name)
             .with_context(|| format!("preseed output {name} is missing"))?;
         let valid = match kind {
-            distro_contract::RecipeOutputKind::File => path.is_file(),
-            distro_contract::RecipeOutputKind::Directory => path.is_dir(),
+            levitate_recipe::needs::PathKind::File => path.is_file(),
+            levitate_recipe::needs::PathKind::Directory => path.is_dir(),
         };
         if !valid {
             bail!(

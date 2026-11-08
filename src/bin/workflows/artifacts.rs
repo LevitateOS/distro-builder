@@ -66,9 +66,6 @@ pub(crate) fn preseed_rootfs_source_cmd(
         &bundle.repo_root,
         distro_id,
         Path::new(recipe_script),
-        &source.preseed_outputs,
-        &source.preseed_network_hosts,
-        source.preseed_memory_mib,
         refresh,
     )
     .with_context(|| format!("preseeding rootfs source for '{distro_id}'"))?;

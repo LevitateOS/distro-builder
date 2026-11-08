@@ -3,13 +3,14 @@
 // shared kconfig followed by the variant's). Kernel products use the owned
 // target tree.
 const RECIPE_API = 2;
+const NEEDS = #{ inputs: #{ kconfig: "file", target: "directory?", kconfig_fragments: "directory?", kernel_archive: "file?" }, outputs: #{ bundle: "directory", kernel: "file", modules: "directory" }, network: ["cdn.kernel.org:443"] };
 import "kernel/metadata.rhai" as kernel;
 
 let build_deps = ["linux-deps"];
 
 let ctx = #{
     outputs: #{},
-    target: KERNEL_TARGET,
+    target: if is_def_var("KERNEL_TARGET") { KERNEL_TARGET } else { "levitate" },
     kconfig_path: join_path(RUNTIME.paths.inputs, "kconfig"),
     build_dir: "",
     description: "Linux kernel",

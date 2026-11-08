@@ -9,6 +9,7 @@
 // directories its state lives in. The named program output is published by
 // Recipe for the consumer to install.
 const RECIPE_API = 2;
+const NEEDS = #{ inputs: #{ source: "directory" }, outputs: #{ program: "file", rootfs: "directory" } };
 let bin = if is_def_var("BIN") { BIN } else { "recstrap" };
 let rust_target = "x86_64-unknown-linux-musl";
 let ctx = #{

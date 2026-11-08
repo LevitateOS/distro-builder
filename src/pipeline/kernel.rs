@@ -161,13 +161,13 @@ pub fn install(variant: &Variant, source: &Source, force: bool) -> Result<String
         inputs.push(("target", target));
     }
     let mut args: Vec<String> = Vec::new();
-    let (recipe, hosts) = match source {
+    let recipe = match source {
         Source::Prebuilt => {
             if force {
                 args.extend(["--force-acquire".into(), "--force-install".into()]);
             }
             // GitHub redirects release downloads to its asset host.
-            ("linux-prebuilt.rhai", vec!["github.com:443", "release-assets.githubusercontent.com:443"])
+            "linux-prebuilt.rhai"
         }
         Source::Compile { autofix } => {
             if force {
@@ -184,10 +184,10 @@ pub fn install(variant: &Variant, source: &Source, force: bool) -> Result<String
                     args.extend(["--llm-profile".into(), profile.clone()]);
                 }
             }
-            ("linux.rhai", vec!["cdn.kernel.org:443"])
+            "linux.rhai"
         }
     };
-    let ctx = run(variant, "install", recipe, &inputs, &hosts, &args)?;
+    let ctx = run(variant, "install", recipe, &inputs, &args)?;
     crate::recipe::linux::select_kernel_bundle(&ctx, &current)?;
     Ok(ctx.metadata_string("kernel_version")?.to_owned())
 }
@@ -198,7 +198,7 @@ pub fn check_kernel_installed(variant: &Variant, kernel_output_dir: &Path) -> Re
     let kconfig = merged_kconfig(variant)?;
     let target = bundle_root(kernel_output_dir)?;
     let inputs: Vec<(&str, &Path)> = vec![("kconfig", &kconfig), ("target", &target)];
-    run(variant, "isinstalled", "linux-prebuilt.rhai", &inputs, &[], &[])
+    run(variant, "isinstalled", "linux-prebuilt.rhai", &inputs, &[])
         .with_context(|| format!("the {} kernel is not installed", variant.id))?;
     Ok(())
 }
@@ -208,7 +208,6 @@ fn run(
     phase: &'static str,
     recipe: &str,
     inputs: &[(&str, &Path)],
-    hosts: &[&str],
     args: &[String],
 ) -> Result<RecipeResult> {
     let repo_root = &variant.repo_root;
@@ -222,9 +221,6 @@ fn run(
     .args(args);
     for (name, path) in inputs {
         invocation = invocation.input(name, path);
-    }
-    for host in hosts {
-        invocation = invocation.network_host(host);
     }
     invocation.run()
 }

@@ -4,6 +4,7 @@
 // mechanism. The network is the installed system's: its own stack brings up
 // every interface.
 const RECIPE_API = 2;
+const NEEDS = #{ inputs: #{ config: "file", shadow: "file", shell_ux: "file", live_help: "file", shutdown_cleanup: "file", serial_profile: "file" }, outputs: #{ overlay: "directory" } };
 import "installed-system.rhai" as system;
 // The `config` input is distro_builder's `LiveSession` (pipeline/overlay.rs),
 // serialized; the builder's types guarantee its values (init is "systemd" or

@@ -125,24 +125,6 @@ impl<'a> Invocation<'a> {
         self.flag("--input", value)
     }
 
-    pub fn network_host(self, host: &str) -> Self {
-        self.flag("--network-host", host)
-    }
-
-    pub fn memory_mib(self, mib: Option<u64>) -> Self {
-        match mib {
-            Some(mib) => self.flag("--memory-mib", mib.to_string()),
-            None => self,
-        }
-    }
-
-    pub fn storage_max_objects(self, objects: Option<u64>) -> Self {
-        match objects {
-            Some(objects) => self.flag("--storage-max-objects", objects.to_string()),
-            None => self,
-        }
-    }
-
     /// Acquire the sources again, even when Recipe holds them already.
     pub fn force_acquire(mut self, force: bool) -> Self {
         if force {

@@ -1,4 +1,5 @@
 const RECIPE_API = 2;
+const NEEDS = #{ outputs: #{ tools: "directory" } };
 // Linux kernel build dependencies
 //
 // Bundled dep recipe: downloads and extracts all RPMs needed to build
@@ -31,6 +32,8 @@ fn is_installed(ctx) {
             if !found { return needs_work(ctx, bin + " not available"); }
         }
     }
+    mkdir(tools);
+    ctx.outputs = #{ tools: tools };
     ready(ctx)
 }
 
@@ -71,5 +74,6 @@ fn install(ctx) {
         if is_file(p) { rm(p); }
     }
 
+    ctx.outputs = #{ tools: tools };
     ctx
 }

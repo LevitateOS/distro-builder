@@ -73,7 +73,6 @@ pub fn materialize_rootfs_source(variant: &Variant) -> Result<PathBuf> {
             repo,
             &variant.id,
             &resolve_repo_path(repo, preseed),
-            &source.preseed_outputs,
         )? {
             add_input(&mut inputs, &name, path)?;
         }
@@ -91,11 +90,8 @@ pub fn materialize_rootfs_source(variant: &Variant) -> Result<PathBuf> {
         repo,
         &build_dir,
         &RootfsSourceRecipeSpec {
-            storage_max_objects: source.storage_max_objects,
             recipe_script: recipe,
             defines: source.defines.clone(),
-            network_hosts: source.network_hosts.clone(),
-            memory_mib: source.memory_mib,
             inputs,
         },
     )

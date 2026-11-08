@@ -1,13 +1,14 @@
 // The variant's kernel as a published prebuilt bundle: the release asset of the
 // pin in kernel/metadata.rhai. Kernel products use the owned target tree.
 const RECIPE_API = 2;
+const NEEDS = #{ inputs: #{ kconfig: "file?", kernel_archive: "file?", target: "directory?" }, outputs: #{ bundle: "directory", kernel: "file", modules: "directory" }, network: ["github.com:443", "release-assets.githubusercontent.com:443"] };
 import "kernel/metadata.rhai" as kernel;
 
 let build_deps = [];
 
 let ctx = #{
     outputs: #{},
-    target: KERNEL_TARGET,
+    target: if is_def_var("KERNEL_TARGET") { KERNEL_TARGET } else { "levitate" },
     kconfig_path: join_path(RUNTIME.paths.inputs, "kconfig"),
     build_dir: "",
     description: "Prebuilt Linux kernel artifacts",

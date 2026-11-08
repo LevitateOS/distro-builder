@@ -1,32 +1,36 @@
-// Materialize one rootfs from explicit immutable iso/apk_tools inputs.
+//! extends: rootfs-producer.rhai
+// The APK backend of the rootfs producer: Alpine packages from the pinned ISO
+// and the pinned extra APKs (the `iso`, `apk_tools` and `extra_apks`
+// inputs), installed by apk.static without their scripts, so
+// `package_effects` does what those scripts would have done.
 const RECIPE_API = 2;
 import "sources/alpine.rhai" as source;
-import "installed-system.rhai" as installed;
+import "installed-system.rhai" as system;
 let assets = source::facts();
 let ctx = #{
     name: "alpine-live-source-rootfs",
-    description: "Alpine live rootfs source producer",
-    alpine_version: assets.iso_version,
-    apk_static_path: "",
+    description: "The system rootfs from Alpine " + assets.iso_version + " packages",
+    init: "openrc",
     apk_tools_path: join_path(RUNTIME.paths.inputs, "apk_tools"),
     apk_tools_sha256: assets.apk_tools_sha256,
-    apk_tools_version: assets.apk_tools_version,
     iso_path: join_path(RUNTIME.paths.inputs, "iso"),
+    iso_sha256: assets.iso_sha256,
     extra_apks_path: join_path(RUNTIME.paths.inputs, "extra_apks"),
     extra_apks: assets.extra_apks,
-    iso_sha256: assets.iso_sha256,
-    iso_name: assets.iso_name,
-    apk_tools_name: assets.apk_tools_name,
-    profile: "acorn",
-    release_branch: assets.release_branch,
-    rootfs_path: join_path(RUNTIME.paths.output, "rootfs"),
-    // A new Alpine pin rebuilds the rootfs.
-    rootfs_recipe_version: "alpine-source-v12-runlevels-" + assets.iso_version,
+    mirror: assets.mirror,
 };
 
-fn _verify_inputs(ctx) {
+// The packages the rootfs installs from the ISO; the pinned extra APKs come
+// beside them.
+fn packages() {
+    ["alpine-base", "busybox", "coreutils", "openrc", "doas", "openssh", "openssh-server",
+     "util-linux", "e2fsprogs", "dosfstools", "iproute2", "iputils", "dhcpcd", "curl",
+     "pciutils", "htop", "tzdata", "kbd-bkeymaps", "wpa_supplicant", "wpa_supplicant-openrc", "iw"]
+}
+
+fn verify_inputs(ctx) {
     if !is_file(ctx.iso_path) || !is_file(ctx.apk_tools_path) {
-        throw "Import the named iso and apk_tools outputs from explicit preseed acquisition";
+        throw "the iso and apk_tools inputs are missing; run the rootfs source preseed";
     }
     verify_sha256(ctx.iso_path, ctx.iso_sha256);
     verify_sha256(ctx.apk_tools_path, ctx.apk_tools_sha256);
@@ -37,271 +41,73 @@ fn _verify_inputs(ctx) {
     }
 }
 
-// The pinned packages the ISO lacks, as explicit argv paths.
-fn _extra_apk_files(ctx) {
-    let files = [];
-    for apk in ctx.extra_apks { files.push(join_path(ctx.extra_apks_path, apk[0])); }
-    files
-}
-
-fn _profile_packages(profile) {
-    let normalized = trim(profile).to_lower();
-    if normalized == "acorn" {
-        // From the ISO. The rest (findutils, grep, less, musl-locales,
-        // openrc-init, systemd-boot, hdparm, smartmontools, vim) are the
-        // pinned extra_apks files, which `apk add` takes alongside these names.
-        // Deployment uses GNU cp's explicit xattr preservation; Busybox cp
-        // cannot preserve package file capabilities.
-        // tzdata gives recsetup its time zones; kbd-bkeymaps the console
-        // keymaps busybox's loadkmap (and setup-keymap) load; wpa_supplicant and
-        // iw join WiFi, with dhcpcd addressing the interface.
-        return "alpine-base busybox coreutils openrc doas " +
-               "openssh openssh-server util-linux e2fsprogs dosfstools " +
-               "iproute2 iputils dhcpcd curl pciutils htop " +
-               "tzdata kbd-bkeymaps wpa_supplicant wpa_supplicant-openrc iw";
-    }
-
-    throw "Unsupported Alpine live source profile '" + profile + "'. Use profile 'acorn'.";
-}
-
-fn _network_interfaces() {
-    "# Installed loopback; dhcpcd discovers wired interfaces.\n" +
-    "auto lo\niface lo inet loopback\n"
-}
-
-fn _rootfs_marker(rootfs) {
-    join_path(rootfs, ".source-rootfs.recipe-version")
-}
-
-fn _resolve_apk_static(apk_tools_dir) {
-    let candidates = [
-        join_path(apk_tools_dir, "sbin/apk.static"),
-        join_path(apk_tools_dir, "usr/sbin/apk.static"),
-        join_path(apk_tools_dir, "apk.static"),
-    ];
-    for candidate in candidates {
-        if is_file(candidate) {
-            return candidate;
-        }
-    }
-    ""
-}
-
-fn _extract_apk_tools_static(apk_tools_pkg, apk_tools_dir) {
-    extract_with_format(apk_tools_pkg, apk_tools_dir, "apk");
-    let resolved = _resolve_apk_static(apk_tools_dir);
-    if resolved == "" {
-        throw "apk.static not found after extraction in " + apk_tools_dir;
-    }
-    chmod(resolved, 0o755);
-    resolved
-}
-
-fn _rootfs_valid(rootfs, expected_version) {
-    let marker = _rootfs_marker(rootfs);
-    if !is_dir(rootfs) || !is_dir(join_path(rootfs, "bin")) || !is_file(marker) {
-        return false;
-    }
-    if !is_file(join_path(rootfs, "bin/busybox")) {
-        return false;
-    }
-    if !exists(join_path(rootfs, "sbin/init")) || !exists(join_path(rootfs, "sbin/getty")) {
-        return false;
-    }
-    if !is_file(join_path(rootfs, "usr/bin/doas")) {
-        return false;
-    }
-    let doas_conf = join_path(rootfs, "etc/doas.conf");
-    if !is_file(doas_conf) || trim(read_file(doas_conf)) != "permit persist :wheel" {
-        return false;
-    }
-    let sh_path = join_path(rootfs, "bin/sh");
-    if shell_status("[ -L '" + sh_path + "' ] || [ -f '" + sh_path + "' ]") != 0 {
-        return false;
-    }
-    if !is_dir(join_path(rootfs, "usr/share/empty.sshd")) {
-        return false;
-    }
-    let locale_conf = join_path(rootfs, "etc/locale.conf");
-    if !is_file(locale_conf) {
-        return false;
-    }
-    if shell_status("grep -qx 'LANG=C.UTF-8' '" + locale_conf + "'") != 0 {
-        return false;
-    }
-    if !is_file(join_path(rootfs, "usr/share/i18n/locales/musl/en_US.UTF-8")) {
-        return false;
-    }
-    if !is_file(join_path(rootfs, "etc/network/interfaces")) {
-        return false;
-    }
-    if !is_file(join_path(rootfs, "etc/init.d/networking")) {
-        return false;
-    }
-    if !is_file(join_path(rootfs, "etc/init.d/dhcpcd")) {
-        return false;
-    }
-    let mkfs_fat_ok = shell_status("[ -x '" + join_path(rootfs, "sbin/mkfs.fat") + "' ] || [ -x '" + join_path(rootfs, "usr/sbin/mkfs.fat") + "' ]") == 0;
-    if !mkfs_fat_ok {
-        return false;
-    }
-    if !is_file(join_path(rootfs, "usr/lib/systemd/boot/efi/systemd-bootx64.efi")) {
-        return false;
-    }
-    trim(read_file(marker)) == expected_version
-}
-
-fn _ensure_openrc_live_source_completeness(rootfs) {
-    // Acorn uses password-authenticated doas for wheel administrators.
-    let doas_conf = join_path(rootfs, "etc/doas.conf");
-    write_file(doas_conf, "permit persist :wheel\n");
-    target_mode(rootfs, "etc/doas.conf", 0o600);
-    mkdir(join_path(rootfs, "usr/share/empty.sshd"));
-    shell("chmod 755 '" + join_path(rootfs, "usr/share/empty.sshd") + "'");
-    write_file(join_path(rootfs, "etc/locale.conf"), "LANG=C.UTF-8\n");
-    mkdir(join_path(rootfs, "etc/network"));
-    write_file(join_path(rootfs, "etc/network/interfaces"), _network_interfaces());
-    mkdir(join_path(rootfs, "etc/conf.d"));
-    write_file(join_path(rootfs, "etc/conf.d/dhcpcd"), "dhcpcd_args=\"--quiet\"\n");
-}
-
-fn is_acquired(ctx) {
-    _verify_inputs(ctx);
-    let tools = join_path(ctx.runtime.paths.build, "apk-tools");
-    let apk_static = _resolve_apk_static(tools);
-    if apk_static == "" { return needs_work(ctx, "apk.static has not been extracted"); }
-    ctx.apk_static_path = apk_static;
-    ready(ctx)
-}
-
-fn acquire(ctx) {
-    _verify_inputs(ctx);
-    let tools = join_path(ctx.runtime.paths.build, "apk-tools");
+fn unpack(ctx, root) {
+    let build = ctx.runtime.paths.build;
+    let tools = join_path(build, "apk-tools");
+    if is_dir(tools) { rm(tools); }
     mkdir(tools);
-    ctx.apk_static_path = _extract_apk_tools_static(ctx.apk_tools_path, tools);
-    ctx
+    extract_with_format(ctx.apk_tools_path, tools, "apk");
+    let apk = join_path(tools, "sbin/apk.static");
+    if !is_file(apk) { throw "the pinned apk-tools-static has no sbin/apk.static"; }
+    chmod(apk, 0o755);
+
+    let iso = join_path(build, "iso-contents");
+    if is_dir(iso) { rm(iso); }
+    mkdir(iso);
+    log("Extracting the Alpine ISO...");
+    // An immutable ISO file, not a writable optical drive.
+    exec_checked("xorriso", ["-drive_access", "shared:readonly", "-osirrox", "on",
+        "-indev", "stdio:" + ctx.iso_path, "-extract", "/", iso + "/"]);
+    let apks = join_path(iso, "apks");
+    if !is_dir(apks) { throw "the Alpine ISO has no apks directory"; }
+
+    system::put(root, "etc/apk/repositories", ctx.mirror + "/main\n" + ctx.mirror + "/community\n", 0o644);
+    mkdir(join_path(root, "etc/apk/keys"));
+    let cache = join_path(build, "apk-cache");
+    mkdir(cache);
+    log("Installing the Alpine packages...");
+    let args = ["--root", root, "--usermode", "--initdb", "--no-progress", "--no-scripts",
+        "--allow-untrusted", "--force-non-repository", "--no-network", "--repository", apks,
+        "--cache-dir", cache, "add"];
+    args += packages();
+    for extra in ctx.extra_apks { args.push(join_path(ctx.extra_apks_path, extra[0])); }
+    // APK 3 installs as a non-root user in usermode; the packages' owners come
+    // from their metadata.
+    exec_checked(apk, args, #{uid: 1000, gid: 1000});
+    target_capture_apks(root, [apks, ctx.extra_apks_path, cache]);
 }
 
-fn is_built(ctx) {
-    let rootfs = ctx.rootfs_path;
-    if !_rootfs_valid(rootfs, ctx.rootfs_recipe_version) {
-        return needs_work(ctx, "rootfs not built");
-    }
-    ctx.rootfs_path = rootfs;
-    ready(ctx)
+fn package_effects(ctx, root) {
+    busybox_applets(root);
+    // Password-authenticated doas for wheel administrators.
+    system::put(root, "etc/doas.conf", "permit persist :wheel\n", 0o600);
+    // The network stack ifupdown and dhcpcd bring up (installed-system.rhai
+    // network_services): loopback here, dhcpcd for every other interface.
+    system::put(root, "etc/network/interfaces",
+        "# Installed loopback; dhcpcd discovers wired interfaces.\nauto lo\niface lo inet loopback\n", 0o644);
+    system::put(root, "etc/conf.d/dhcpcd", "dhcpcd_args=\"--quiet\"\n", 0o644);
 }
 
-fn build(ctx) {
-    let iso_contents = join_path(ctx.runtime.paths.build, "iso-contents");
-    if !is_dir(join_path(iso_contents, "apks")) {
-        log("Extracting Alpine ISO...");
-        shell("rm -rf '" + iso_contents + "'");
-        mkdir(iso_contents);
-        if shell_status("command -v xorriso >/dev/null 2>&1") == 0 {
-            // This is an immutable ISO file, not a writable optical drive.
-            // Avoid the default exclusive/read-write device acquisition.
-            let extract_cmd = "xorriso -drive_access shared:readonly -osirrox on -indev 'stdio:" + ctx.iso_path;
-            extract_cmd += "' -extract / '" + iso_contents;
-            extract_cmd += "/'";
-            shell(extract_cmd);
-        } else if shell_status("command -v 7z >/dev/null 2>&1") == 0 {
-            let extract_cmd = "7z x -y -o'" + iso_contents;
-            extract_cmd += "' '" + ctx.iso_path;
-            extract_cmd += "' >/dev/null";
-            shell(extract_cmd);
-        } else {
-            throw "missing ISO extractor: install xorriso or 7z";
+// BusyBox's applet links, from its own packaged inventory; files the
+// full-size tools ship stay.
+fn busybox_applets(root) {
+    let privileged = ["bin/mount", "bin/umount", "bin/su", "usr/bin/crontab",
+        "usr/bin/passwd", "usr/bin/traceroute", "usr/bin/traceroute6", "usr/bin/vlock"];
+    for path in read_file(join_path(root, "etc/busybox-paths.d/busybox")).split("\n") {
+        path = trim(path);
+        if path == "" { continue; }
+        if !(path.starts_with("bin/") || path.starts_with("sbin/") ||
+             path.starts_with("usr/bin/") || path.starts_with("usr/sbin/")) ||
+             path.contains("..") {
+            throw "invalid packaged BusyBox applet path: " + path;
         }
+        let dest = join_path(root, path);
+        if exists(dest) { continue; }
+        let program = if privileged.contains(path) { "bbsuid" } else { "busybox" };
+        if !is_file(join_path(root, "bin/" + program)) { throw "missing BusyBox provider: " + program; }
+        mkdir(dirname(dest));
+        let prefix = if path.starts_with("usr/") { "../../bin/" }
+                     else if path.starts_with("sbin/") { "../bin/" } else { "" };
+        ln_force(prefix + program, dest);
     }
-    if !is_dir(join_path(iso_contents, "apks")) {
-        throw "Alpine ISO extraction missing apks dir under " + iso_contents;
-    }
-
-    let rootfs = ctx.rootfs_path;
-    if _rootfs_valid(rootfs, ctx.rootfs_recipe_version) {
-        log("Alpine live source rootfs already current; skipping rebuild");
-        ctx.rootfs_path = rootfs;
-        return ctx;
-    }
-
-    shell("rm -rf '" + rootfs + "'");
-    mkdir(rootfs);
-    mkdir(join_path(rootfs, "etc/apk"));
-    mkdir(join_path(rootfs, "etc/apk/keys"));
-    mkdir(join_path(rootfs, "var/cache/apk"));
-
-    let repositories = join_path(iso_contents, "apks") + "\n";
-    repositories += "https://dl-cdn.alpinelinux.org/alpine/" + ctx.release_branch;
-    repositories += "/main\n";
-    repositories += "https://dl-cdn.alpinelinux.org/alpine/" + ctx.release_branch;
-    repositories += "/community\n";
-    write_file(join_path(rootfs, "etc/apk/repositories"), repositories);
-
-    let packages = _profile_packages(ctx.profile);
-    log("Installing Alpine live source package baseline (" + ctx.profile + ")...");
-    let apk_cache = join_path(ctx.runtime.paths.build, "apk-cache");
-    mkdir(apk_cache);
-    let args = ["--root", rootfs, "--usermode", "--initdb", "--no-progress",
-        "--no-scripts", "--allow-untrusted", "--force-non-repository", "--no-network", "--cache-dir", apk_cache, "add"];
-    for pkg in packages.split(" ") { if pkg != "" { args.push(pkg); } }
-    for path in _extra_apk_files(ctx) { args.push(path); }
-    // APK 3 requires non-root usermode execution. Target ownership comes from
-    // the package metadata, independently of this subprocess identity.
-    exec_checked(ctx.apk_static_path, args, #{uid: 1000, gid: 1000});
-    target_capture_apks(rootfs, [join_path(iso_contents, "apks"), ctx.extra_apks_path, apk_cache]);
-    // Make staging readable before applying policy; intended modes stay in metadata.
-    target_finalize(rootfs);
-    installed::busybox_applets(rootfs);
-    _ensure_openrc_live_source_completeness(rootfs);
-
-    if !is_file(join_path(rootfs, "bin/busybox")) {
-        throw "invalid rootfs: missing /bin/busybox after apk install";
-    }
-    let sh_path = join_path(rootfs, "bin/sh");
-    if shell_status("[ -L '" + sh_path + "' ] || [ -f '" + sh_path + "' ]") != 0 {
-        throw "invalid rootfs: missing /bin/sh path after apk install";
-    }
-
-    installed::apply(rootfs, ctx.runtime.paths.inputs, "openrc");
-    target_finalize(rootfs);
-    write_file(_rootfs_marker(rootfs), ctx.rootfs_recipe_version + "\n");
-    ctx.rootfs_path = rootfs;
-    ctx
-}
-
-fn is_installed(ctx) {
-    let rootfs = ctx.rootfs_path;
-    if !_rootfs_valid(rootfs, ctx.rootfs_recipe_version) {
-        return needs_work(ctx, "rootfs not installed");
-    }
-    ctx.rootfs_path = rootfs;
-    ctx.outputs = #{rootfs: ctx.rootfs_path};
-    ready(ctx)
-}
-
-fn install(ctx) {
-    let rootfs = ctx.rootfs_path;
-    if !_rootfs_valid(rootfs, ctx.rootfs_recipe_version) {
-        throw "cannot install: rootfs missing or stale at " + rootfs;
-    }
-    ctx.rootfs_path = rootfs;
-    ctx.outputs = #{rootfs: ctx.rootfs_path};
-    ctx
-}
-
-fn cleanup(ctx, reason) {
-    if reason == "manual" {
-        let rootfs = ctx.rootfs_path;
-        let marker = _rootfs_marker(rootfs);
-        if is_file(marker) {
-            rm(marker);
-        }
-    }
-    ctx
-}
-
-fn remove(ctx) {
-    if is_dir(ctx.rootfs_path) { rm(ctx.rootfs_path); }
-    ctx.outputs = #{};
-    ctx
 }

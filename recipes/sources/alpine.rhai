@@ -43,5 +43,7 @@ fn facts() {
         apk_tools_sha256: "0a1a0682375f66a83b7b903f6e4638ccfe312547d50d336b5f2be9fc391281be",
         extra_apks: extra_apks,
         extra_apks_url: mirror + "/",
+        // The release branch's repositories, which /etc/apk/repositories names.
+        mirror: mirror,
     }
 }

@@ -1,320 +1,166 @@
-// Materialize the rootfs from the locked Fedora RPM set, imported as `rpms`.
-// The RPMs are unpacked without a package manager; their install scripts do
-// not run, so the steps they would take are done below.
+//! extends: rootfs-producer.rhai
+// The RPM backend of the rootfs producer: the locked Fedora RPM set (the
+// `rpms` input), unpacked without a package manager. Their install scripts
+// do not run, so `package_effects` does what they would have done, from the
+// packages' own data where they ship it.
 const RECIPE_API = 2;
 import "sources/levitate-rpm-lock.rhai" as lock;
-import "installed-system.rhai" as installed;
+import "installed-system.rhai" as system;
 let ctx = #{
     name: "fedora-rpm-source-rootfs",
-    description: "Fedora " + lock::release() + " rootfs source from the locked RPM set",
+    description: "The system rootfs from the locked Fedora " + lock::release() + " RPM set",
+    init: "systemd",
     rpms_path: join_path(RUNTIME.paths.inputs, "rpms"),
-    rootfs_path: join_path(RUNTIME.paths.output, "rootfs"),
     packages: lock::packages(),
 };
 
-// The rootfs records the exact builds it was made from; a new lock rebuilds it.
-fn _rootfs_marker(ctx) {
-    let marker = "fedora-rpm-set-v4-mount-points";
-    for rpm in ctx.packages { marker += "\n" + rpm[1]; }
-    marker
-}
+fn rpm_file(ctx, rpm) { join_path(ctx.rpms_path, basename(rpm[2])) }
 
-fn _verify_rpms(ctx) {
+fn verify_inputs(ctx) {
     for rpm in ctx.packages {
-        let file = join_path(ctx.rpms_path, basename(rpm[2]));
+        let file = rpm_file(ctx, rpm);
         if !is_file(file) { throw "the rpms input lacks " + basename(file) + "; run the rootfs source preseed"; }
         verify_sha256(file, rpm[3]);
     }
 }
 
-fn _extract_rpm_into_rootfs(rootfs, rpm_path) {
-    target_extract_rpm(rpm_path, rootfs);
-}
-
-fn is_acquired(ctx) {
-    _verify_rpms(ctx);
-    ready(ctx)
-}
-
-fn acquire(ctx) {
-    _verify_rpms(ctx);
-    ctx
-}
-
-fn is_built(ctx) {
-    let rootfs = ctx.rootfs_path;
-    if !is_dir(join_path(rootfs, "usr")) {
-        return needs_work(ctx, "rootfs not built");
-    }
-    let marker_path = join_path(rootfs, ".source-rootfs.recipe-version");
-    let marker = trim(read_file_or_empty(marker_path));
-    if marker != _rootfs_marker(ctx) {
-        return needs_work(ctx, "rootfs was built from a different RPM lock");
-    }
-    let required_paths = [
-        "usr/lib/systemd/systemd",
-        "usr/sbin/sshd",
-        "usr/sbin/auditd",
-        "usr/bin/sudo",
-        "etc/sudoers.d/10-wheel",
-        "usr/sbin/ip",
-        "usr/lib64/libbpf.so.1",
-        "usr/lib64/libelf.so.1",
-        "usr/lib64/libmnl.so.0",
-        "usr/lib64/libzstd.so.1",
-        "usr/lib/systemd/system/sshd.service",
-        "usr/lib/systemd/system/auditd.service",
-        "usr/bin/systemd-tmpfiles",
-        "usr/bin/udevadm",
-        "usr/sbin/modprobe",
-        "etc/ssh/sshd_config",
-        "usr/share/empty.sshd",
-        "usr/lib/locale/C.utf8/LC_CTYPE",
-        "usr/lib64/libgssapi_krb5.so.2",
-        "usr/lib64/libkrb5.so.3",
-        "usr/lib64/libk5crypto.so.3",
-        "usr/lib64/libkrb5support.so.0",
-        "usr/lib64/libcom_err.so.2",
-        "usr/lib64/libkeyutils.so.1",
-        "usr/lib64/libverto.so.1",
-        "usr/bin/sfdisk",
-        "usr/bin/ping",
-        "usr/bin/curl",
-        "usr/bin/lspci",
-        "usr/bin/lsusb",
-        "usr/bin/less",
-        "usr/lib64/libbrotlidec.so.1",
-        "usr/lib64/libbrotlicommon.so.1",
-        "usr/lib64/libevent-2.1.so.7",
-        "usr/lib64/libsasl2.so.3",
-        "usr/lib/systemd/system/dbus.socket",
-        "usr/lib/systemd/system/dbus-broker.service",
-        "etc/systemd/system/dbus.service",
-        "etc/systemd/system/sockets.target.wants/dbus.socket",
-        "var/log/audit",
-        "usr/lib64/libexpat.so.1",
-        "etc/pam.d/system-auth",
-        "etc/pam.d/password-auth",
-        "etc/pam.d/postlogin",
-        "usr/local/bin/gnu-smoke",
-    ];
-    for rel in required_paths {
-        let full = join_path(rootfs, rel);
-        if !exists(full) {
-            return needs_work(ctx, "minimal source rootfs incomplete: missing " + rel);
-        }
-    }
-
-    ready(ctx)
-}
-
-fn build(ctx) {
-    let rootfs = ctx.rootfs_path;
-    _verify_rpms(ctx);
-
-    if is_dir(rootfs) { shell("chmod -R u+rwX " + rootfs); }
-    shell("rm -rf " + rootfs);
-    mkdir(rootfs);
+fn unpack(ctx, root) {
     log("Extracting the locked Fedora " + lock::release() + " RPM set into the rootfs...");
     for rpm in ctx.packages {
         log("  Extracting " + rpm[1]);
-        let path = join_path(ctx.rpms_path, basename(rpm[2]));
-        // The helper already grants staging access independently of target
-        // modes. Do not rescan/chmod the whole growing tree after each RPM.
-        _extract_rpm_into_rootfs(rootfs, path);
+        target_extract_rpm(rpm_file(ctx, rpm), root);
     }
-
-    // Fedora merged /usr/sbin into /usr/bin: `filesystem` lists /usr/sbin as a
-    // ghost that its install script makes a link to bin.
-    if !exists(join_path(rootfs, "usr/sbin")) {
-        ln_force("bin", join_path(rootfs, "usr/sbin"));
-    }
-
-    // Normalize expected producer source directories even when package layout is sparse.
-    shell("mkdir -p '" + join_path(rootfs, "usr/lib/systemd") + "'");
-    shell("mkdir -p '" + join_path(rootfs, "usr/lib/tmpfiles.d") + "'");
-    shell("mkdir -p '" + join_path(rootfs, "usr/lib/udev") + "'");
-    shell("mkdir -p '" + join_path(rootfs, "usr/lib/kbd") + "'");
-    shell("mkdir -p '" + join_path(rootfs, "usr/lib64") + "'");
-    shell("mkdir -p '" + join_path(rootfs, "usr/bin") + "'");
-    shell("mkdir -p '" + join_path(rootfs, "usr/sbin") + "'");
-    shell("mkdir -p '" + join_path(rootfs, "usr/libexec") + "'");
-    shell("mkdir -p '" + join_path(rootfs, "usr/share/dbus-1") + "'");
-    shell("mkdir -p '" + join_path(rootfs, "etc") + "'");
-    shell("mkdir -p '" + join_path(rootfs, "var") + "'");
-    // The kernel filesystems' mount points. systemd's switch-root moves /proc and /sys
-    // into the new root and gives up without them, so a slot recab stages from this
-    // image must carry them (an install only got them from recchroot's bind mounts).
-    for dir in ["proc", "sys"] {
-        shell("mkdir -p '" + join_path(rootfs, dir) + "'");
-        chmod(join_path(rootfs, dir), 0o555);
-    }
-    if !exists(join_path(rootfs, "usr/bin/sh")) {
-        ln_force("bash", join_path(rootfs, "usr/bin/sh"));
-    }
-    if !exists(join_path(rootfs, "usr/sbin/agetty")) && exists(join_path(rootfs, "usr/bin/agetty")) {
-        ln_force("../bin/agetty", join_path(rootfs, "usr/sbin/agetty"));
-    }
-    if !exists(join_path(rootfs, "usr/sbin/modprobe")) && exists(join_path(rootfs, "usr/bin/kmod")) {
-        ln_force("../bin/kmod", join_path(rootfs, "usr/sbin/modprobe"));
-    }
-    if !exists(join_path(rootfs, "usr/bin/login")) && exists(join_path(rootfs, "usr/sbin/login")) {
-        ln_force("../sbin/login", join_path(rootfs, "usr/bin/login"));
-    }
-    if !exists(join_path(rootfs, "usr/bin/sfdisk")) && exists(join_path(rootfs, "usr/sbin/sfdisk")) {
-        ln_force("../sbin/sfdisk", join_path(rootfs, "usr/bin/sfdisk"));
-    }
-    if !exists(join_path(rootfs, "usr/bin/lspci")) && exists(join_path(rootfs, "usr/sbin/lspci")) {
-        ln_force("../sbin/lspci", join_path(rootfs, "usr/bin/lspci"));
-    }
-    if !exists(join_path(rootfs, "usr/bin/lsusb")) && exists(join_path(rootfs, "usr/sbin/lsusb")) {
-        ln_force("../sbin/lsusb", join_path(rootfs, "usr/bin/lsusb"));
-    }
-    // RPM scriptlets are not executed in this producer path. Ensure dbus broker
-    // is reachable via dbus.service and dbus.socket is enabled for socket activation.
-    mkdir(join_path(rootfs, "etc/systemd/system/sockets.target.wants"));
-    ln_force("/usr/lib/systemd/system/dbus-broker.service", join_path(rootfs, "etc/systemd/system/dbus.service"));
-    ln_force("/usr/lib/systemd/system/dbus.socket", join_path(rootfs, "etc/systemd/system/sockets.target.wants/dbus.socket"));
-
-    // Levitate uses password-authenticated sudo for wheel administrators.
-    mkdir(join_path(rootfs, "etc/sudoers.d"));
-    let wheel_sudoers = join_path(rootfs, "etc/sudoers.d/10-wheel");
-    write_file(wheel_sudoers, "%wheel ALL=(ALL:ALL) ALL\n");
-    target_mode(rootfs, "etc/sudoers.d/10-wheel", 0o440);
-
-    // RPM scriptlets are not executed in this producer path. Ensure OpenSSH
-    // Privilege-separation account entries must exist so sshd can start in live boot.
-    let group_file = join_path(rootfs, "etc/group");
-    let gshadow_file = join_path(rootfs, "etc/gshadow");
-    let passwd_file = join_path(rootfs, "etc/passwd");
-    let shadow_file = join_path(rootfs, "etc/shadow");
-    shell("touch '" + group_file + "' '" + gshadow_file + "' '" + passwd_file + "' '" + shadow_file + "'");
-    append_line_if_missing(group_file, "sshd:x:74:");
-    append_line_if_missing(gshadow_file, "sshd:!::");
-    append_line_if_missing(passwd_file, "sshd:x:74:74:Privilege-separated SSH:/run/sshd:/sbin/nologin");
-    append_line_if_missing(shadow_file, "sshd:!:20000:0:99999:7:::");
-    append_line_if_missing(group_file, "dbus:x:81:");
-    append_line_if_missing(gshadow_file, "dbus:!::");
-    append_line_if_missing(passwd_file, "dbus:x:81:81:System Message Bus:/:/sbin/nologin");
-    append_line_if_missing(shadow_file, "dbus:!:20000:0:99999:7:::");
-
-    // RPM scriptlets are not executed in this producer path, so PAM include
-    // stack files normally materialized by auth tooling must be created here.
-    let pam_dir = join_path(rootfs, "etc/pam.d");
-    let factory_system_auth = join_path(rootfs, "usr/share/factory/etc/pam.d/system-auth");
-    let system_auth = join_path(pam_dir, "system-auth");
-    let password_auth = join_path(pam_dir, "password-auth");
-    let postlogin = join_path(pam_dir, "postlogin");
-    shell("mkdir -p '" + pam_dir + "'");
-    if !exists(system_auth) && exists(factory_system_auth) {
-        copy_into_dir(factory_system_auth, pam_dir);
-    }
-    if !exists(password_auth) {
-        write_file(
-            password_auth,
-            "#%PAM-1.0\n" +
-            "auth        include      system-auth\n" +
-            "account     include      system-auth\n" +
-            "password    include      system-auth\n" +
-            "session     include      system-auth\n"
-        );
-    }
-    if !exists(postlogin) {
-        write_file(
-            postlogin,
-            "#%PAM-1.0\n" +
-            "session     optional     pam_keyinit.so force revoke\n"
-        );
-    }
-
-    // Enforce the merged-usr symlink contract expected by live boot.
-    shell("mkdir -p '" + join_path(rootfs, "usr/bin") + "' '" + join_path(rootfs, "usr/sbin") + "' '" + join_path(rootfs, "usr/lib") + "' '" + join_path(rootfs, "usr/lib64") + "'");
-    ln_force("usr/bin", join_path(rootfs, "bin"));
-    ln_force("usr/sbin", join_path(rootfs, "sbin"));
-    ln_force("usr/lib", join_path(rootfs, "lib"));
-    ln_force("usr/lib64", join_path(rootfs, "lib64"));
-
-    // Install a callable GNU userland smoke script for Levitate live/rootfs validation.
-    shell("mkdir -p '" + join_path(rootfs, "usr/local/bin") + "'");
-    let gnu_smoke = "#!/bin/sh\n";
-    gnu_smoke += "set -u\n";
-    gnu_smoke += "fails=0\n";
-    gnu_smoke += "\n";
-    gnu_smoke += "check_cmd() {\n";
-    gnu_smoke += "    label=\"$1\"\n";
-    gnu_smoke += "    pattern=\"$2\"\n";
-    gnu_smoke += "    shift 2\n";
-    gnu_smoke += "    cmd=\"$1\"\n";
-    gnu_smoke += "    if ! command -v \"$cmd\" >/dev/null 2>&1; then\n";
-    gnu_smoke += "        echo \"[FAIL] $label: missing command '$cmd'\"\n";
-    gnu_smoke += "        fails=$((fails + 1))\n";
-    gnu_smoke += "        return\n";
-    gnu_smoke += "    fi\n";
-    gnu_smoke += "    out=\"$($@ 2>&1 | head -n 2)\"\n";
-    gnu_smoke += "    if printf '%s\\n' \"$out\" | grep -Eqi \"$pattern\"; then\n";
-    gnu_smoke += "        echo \"[PASS] $label\"\n";
-    gnu_smoke += "    else\n";
-    gnu_smoke += "        echo \"[FAIL] $label: expected pattern '$pattern'\"\n";
-    gnu_smoke += "        printf '%s\\n' \"$out\"\n";
-    gnu_smoke += "        fails=$((fails + 1))\n";
-    gnu_smoke += "    fi\n";
-    gnu_smoke += "}\n";
-    gnu_smoke += "\n";
-    gnu_smoke += "check_cmd \"GNU Bash\" \"GNU bash\" bash --version\n";
-    gnu_smoke += "check_cmd \"GNU Coreutils\" \"GNU coreutils\" ls --version\n";
-    gnu_smoke += "check_cmd \"GNU Grep\" \"GNU grep\" grep --version\n";
-    gnu_smoke += "check_cmd \"GNU Sed\" \"GNU sed\" sed --version\n";
-    gnu_smoke += "check_cmd \"GNU Findutils\" \"GNU findutils\" find --version\n";
-    gnu_smoke += "check_cmd \"GNU Awk\" \"GNU Awk\" awk --version\n";
-    gnu_smoke += "check_cmd \"glibc runtime\" \"GNU C Library|glibc\" ldd --version\n";
-    gnu_smoke += "\n";
-    gnu_smoke += "if [ \"$fails\" -eq 0 ]; then\n";
-    gnu_smoke += "    echo \"GNU smoke PASS\"\n";
-    gnu_smoke += "    exit 0\n";
-    gnu_smoke += "fi\n";
-    gnu_smoke += "echo \"GNU smoke FAIL ($fails checks)\"\n";
-    gnu_smoke += "exit 1\n";
-    write_file(join_path(rootfs, "usr/local/bin/gnu-smoke"), gnu_smoke);
-    shell("chmod 0755 '" + join_path(rootfs, "usr/local/bin/gnu-smoke") + "'");
-
-    // Keep rootfs recipe outputs deterministic and lean.
-    shell("rm -rf '" + join_path(rootfs, "var/cache") + "' '" + join_path(rootfs, "var/log") + "'");
-    shell("mkdir -p '" + join_path(rootfs, "var/cache") + "' '" + join_path(rootfs, "var/log") + "' '" + join_path(rootfs, "var/log/audit") + "'");
-    target_mode(rootfs, "var/log/audit", 0o700);
-    installed::apply(rootfs, ctx.runtime.paths.inputs, "systemd");
-    target_finalize(rootfs);
-    write_file(join_path(rootfs, ".source-rootfs.recipe-version"), _rootfs_marker(ctx) + "\n");
-    ctx
 }
 
-fn is_installed(ctx) {
-    let status = is_built(ctx);
-    ctx = status.ctx;
-    if status.status != "ready" { return status; }
-    ctx.outputs = #{rootfs: ctx.rootfs_path};
-    ready(ctx)
-}
-
-fn install(ctx) {
-    let status = is_built(ctx);
-    if status.status != "ready" { throw status.reason; }
-    ctx = status.ctx;
-    ctx.outputs = #{rootfs: ctx.rootfs_path};
-    ctx
-}
-
-fn cleanup(ctx, reason) {
-    if reason == "manual" {
-        let marker = join_path(ctx.rootfs_path, ".source-rootfs.recipe-version");
-        if is_file(marker) {
-            rm(marker);
+fn package_effects(ctx, root) {
+    // `filesystem` lists /usr/sbin as a ghost that its script makes a link to
+    // bin; the merged-/usr links at the root are in its payload.
+    let sbin = join_path(root, "usr/sbin");
+    if !exists(sbin) { ln_force("bin", sbin); }
+    if shell_status("[ \"$(readlink '" + sbin + "')\" = bin ]") != 0 {
+        throw "the locked filesystem package ships /usr/sbin, not the ghost link to bin";
+    }
+    for link in [["bin", "usr/bin"], ["sbin", "usr/sbin"], ["lib", "usr/lib"], ["lib64", "usr/lib64"]] {
+        if shell_status("[ \"$(readlink '" + join_path(root, link[0]) + "')\" = " + link[1] + " ]") != 0 {
+            throw "the locked filesystem package lacks the merged-/usr link /" + link[0];
         }
     }
-    ctx
+    // The kernel filesystems' mount points. systemd's switch-root moves /proc
+    // and /sys into the new root and gives up without them, so a slot recab
+    // stages from this image must carry them.
+    for dir in ["proc", "sys"] { system::directory(root, dir, 0o555); }
+    sysusers(root);
+    // dbus-broker's preset: it is the system bus, started from its socket.
+    system::link(root, "etc/systemd/system/dbus.service", "/usr/lib/systemd/system/dbus-broker.service");
+    system::link(root, "etc/systemd/system/sockets.target.wants/dbus.socket", "/usr/lib/systemd/system/dbus.socket");
+    // The PAM stack authselect would generate: systemd's factory system-auth,
+    // and password-auth and postlogin over it.
+    let factory = join_path(root, "usr/share/factory/etc/pam.d/system-auth");
+    if !is_file(factory) { throw "the locked systemd lacks its factory PAM system-auth"; }
+    system::put(root, "etc/pam.d/system-auth", read_file(factory), 0o644);
+    system::put(root, "etc/pam.d/password-auth",
+        "#%PAM-1.0\nauth        include      system-auth\naccount     include      system-auth\n" +
+        "password    include      system-auth\nsession     include      system-auth\n", 0o644);
+    system::put(root, "etc/pam.d/postlogin", "#%PAM-1.0\nsession     optional     pam_keyinit.so force revoke\n", 0o644);
+    // Password-authenticated sudo for wheel administrators.
+    system::put(root, "etc/sudoers.d/10-wheel", "%wheel ALL=(ALL:ALL) ALL\n", 0o440);
 }
 
-fn remove(ctx) {
-    if is_dir(ctx.rootfs_path) { rm(ctx.rootfs_path); }
-    ctx.outputs = #{};
-    ctx
+// The words of a sysusers.d line; '…' and "…" quote one word.
+fn words(line) {
+    let out = [];
+    let word = "";
+    let quote = "";
+    let open = false;
+    for ch in line.chars() {
+        let c = "" + ch;
+        if quote != "" {
+            if c == quote { quote = ""; } else { word += c; }
+        } else if c == "\"" || c == "'" {
+            quote = c; open = true;
+        } else if c == " " || c == "\t" {
+            if open || word != "" { out.push(word); word = ""; open = false; }
+        } else {
+            word += c; open = true;
+        }
+    }
+    if open || word != "" { out.push(word); }
+    out
+}
+
+// The ids in a passwd or group file, by name.
+fn ids(text) {
+    let map = #{};
+    for line in text.split("\n") {
+        let fields = line.split(":");
+        if fields.len() >= 3 { map[fields[0]] = parse_int(fields[2]); }
+    }
+    map
+}
+
+// The accounts the packages declare in usr/lib/sysusers.d, made as
+// systemd-sysusers makes them (accounts already there are kept; an id of "-"
+// is the highest free system id). target_finalize resolves the packages' file
+// owners against them, and sshd and dbus need theirs before the first boot.
+fn sysusers(root) {
+    let text = |file| {
+        let t = read_file_or_empty(join_path(root, file));
+        if t != "" && !t.ends_with("\n") { t += "\n"; }
+        t
+    };
+    let passwd = text.call("etc/passwd");
+    let group = text.call("etc/group");
+    let shadow = text.call("etc/shadow");
+    let gshadow = text.call("etc/gshadow");
+    let users = ids(passwd);
+    let groups = ids(group);
+    let free = |used| { let id = 999; while used.values().contains(id) { id -= 1; } id };
+    let dir = join_path(root, "usr/lib/sysusers.d");
+    let lines = [];
+    for file in shell_output("ls '" + dir + "'").split("\n") {
+        if file.ends_with(".conf") { lines += read_file(join_path(dir, file)).split("\n"); }
+    }
+    for kind in ["g", "u"] {
+        for line in lines {
+            let w = words(trim(line));
+            if w.len() < 2 || w[0] != kind { continue; }
+            let name = w[1];
+            let id = if w.len() > 2 { w[2] } else { "-" };
+            if kind == "g" {
+                if name in groups { continue; }
+                let gid = if id == "-" { free.call(groups) } else { parse_int(id) };
+                groups[name] = gid;
+                group += name + ":x:" + gid + ":\n";
+                gshadow += name + ":!::\n";
+                continue;
+            }
+            if name in users { continue; }
+            let uid = 0;
+            let gid = 0;
+            if id.contains(":") {
+                let parts = id.split(":");
+                uid = parse_int(parts[0]);
+                gid = if parts[1] in groups { groups[parts[1]] } else { parse_int(parts[1]) };
+            } else {
+                uid = if id == "-" { free.call(users + groups) } else { parse_int(id) };
+                if name in groups { gid = groups[name]; }
+                else {
+                    gid = if groups.values().contains(uid) { free.call(groups) } else { uid };
+                    groups[name] = gid;
+                    group += name + ":x:" + gid + ":\n";
+                    gshadow += name + ":!::\n";
+                }
+            }
+            let gecos = if w.len() > 3 && w[3] != "-" { w[3] } else { "" };
+            let home = if w.len() > 4 && w[4] != "-" { w[4] } else { "/" };
+            let shell = if w.len() > 5 && w[5] != "-" { w[5] } else { "/usr/sbin/nologin" };
+            users[name] = uid;
+            passwd += name + ":x:" + uid + ":" + gid + ":" + gecos + ":" + home + ":" + shell + "\n";
+            shadow += system::shadow_line(name, "!*");
+        }
+    }
+    system::put(root, "etc/passwd", passwd, 0o644);
+    system::put(root, "etc/group", group, 0o644);
+    system::put(root, "etc/shadow", shadow, 0o600);
+    system::put(root, "etc/gshadow", gshadow, 0o600);
 }

@@ -53,7 +53,7 @@ fn openrc_runlevel(service) {
     let levels = #{
         devfs: "sysinit", dmesg: "sysinit", mdev: "sysinit", hwdrivers: "sysinit",
         modules: "boot", sysctl: "boot", hostname: "boot", bootmisc: "boot", syslog: "boot",
-        hwclock: "boot", seedrng: "boot", networking: "boot", loadkmap: "boot",
+        hwclock: "boot", seedrng: "boot", loadkmap: "boot",
         "mount-ro": "shutdown", killprocs: "shutdown", savecache: "shutdown"
     };
     let level = levels[service];
@@ -87,10 +87,12 @@ fn base_services(init) {
             "syslog", "hwclock", "seedrng", "mount-ro", "killprocs", "savecache"] }
 }
 
-// The services that bring up every network interface (each distro's stack).
+// The service that brings up every network interface, wired and WiFi:
+// NetworkManager (with wpa_supplicant for WiFi) on both distros. OpenRC also
+// runs dbus (capability_services), which NetworkManager needs.
 fn network_services(init) {
     check_init(init);
-    if init == "systemd" { ["NetworkManager"] } else { ["networking", "dhcpcd"] }
+    if init == "systemd" { ["NetworkManager"] } else { ["networkmanager"] }
 }
 
 // What every system runs, by its service names: time sync (chrony), the

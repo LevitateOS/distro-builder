@@ -1,7 +1,10 @@
 [package]
 name = "install-split-pane"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
 
 [lib]
 path = "src/lib.rs"
@@ -11,9 +14,9 @@ name = "install-split"
 path = "src/main.rs"
 
 [dependencies]
-anyhow = "1.0"
+anyhow = { workspace = true }
 crossterm = "0.28"
-libc = "0.2"
-portable-pty = "0.8"
+libc = { workspace = true }
+portable-pty = { workspace = true }
 ratatui = "0.29"
-vt100 = "0.15"
+vt100 = { workspace = true }

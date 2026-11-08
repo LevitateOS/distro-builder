@@ -42,10 +42,16 @@ pub(crate) fn build_baseline_producers(
     distro_id: &str,
     os_name: &str,
     os_id: &str,
+    profile: &distro_contract::Profile,
 ) -> Vec<RootfsProducer> {
+    // The image's identity and its distro profile (the REC_* fields the install
+    // tools read on the target).
     let os_release = format!(
-        "NAME=\"{}\"\nID={}\nPRETTY_NAME=\"{}\"\n",
-        os_name, os_id, os_name
+        "NAME=\"{}\"\nID={}\nPRETTY_NAME=\"{}\"\n{}",
+        os_name,
+        os_id,
+        os_name,
+        profile.os_release_lines()
     );
     let product_manifest = format!(
         "{{\n  \"schema\": 1,\n  \"product\": \"base-rootfs\",\n  \"product_slug\": \"base_rootfs\",\n  \"distro_id\": \"{}\",\n  \"os_name\": \"{}\",\n  \"os_id\": \"{}\",\n  \"payload_role\": \"rootfs-source\"\n}}\n",

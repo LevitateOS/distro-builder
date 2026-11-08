@@ -2,12 +2,12 @@
 // recfstab and recsetup from the recstrap crate; recab, the installed system's A/B
 // slot manager, from its crate; install-split, the install screen's split
 // pane, from install-split-pane) from an explicit offline source
-// closure, or use an explicitly supplied executable. Host paths are selected
-// by the caller:
+// closure, selected by the caller:
 //   --input source=<standalone vendored tree of the tool's crate>
-//   --input program=<tool executable>
-// BIN selects the tool (default recstrap). The named program output is
-// published by Recipe for the consumer to install.
+// BIN selects the tool (default recstrap; distro-builder always passes it).
+// RUST_TARGET follows the image's libc and INIT_SYSTEM its init system (the
+// variant's profile). The named program output is published by Recipe for the
+// consumer to install.
 const RECIPE_API = 2;
 let bin = if is_def_var("BIN") { BIN } else { "recstrap" };
 if bin != "recpart" && bin != "recstrap" && bin != "recchroot" && bin != "recfstab" && bin != "recsetup"
@@ -20,8 +20,7 @@ let ctx = #{
     install_path: if is_def_var("INSTALL_PATH") { INSTALL_PATH } else { "usr/bin/" + bin },
     init_system: if is_def_var("INIT_SYSTEM") { INIT_SYSTEM } else { "systemd" },
     rust_target: if is_def_var("RUST_TARGET") { RUST_TARGET } else { "x86_64-unknown-linux-gnu" },
-    source: "/inputs/source",
-    supplied_program: "/inputs/program",
+    source: join_path(RUNTIME.paths.inputs, "source"),
     built_program: "",
     program: join_path(RUNTIME.paths.output, "bin/" + bin),
 };
@@ -41,31 +40,24 @@ fn _verify(ctx, program) {
 }
 
 fn is_acquired(ctx) {
-    if is_file(join_path(ctx.source, "Cargo.toml")) || is_file(ctx.supplied_program) {
-        return ready(ctx);
-    }
-    needs_work(ctx, ctx.name + " source or executable input is missing")
+    if is_file(join_path(ctx.source, "Cargo.toml")) { return ready(ctx); }
+    needs_work(ctx, ctx.name + " source input is missing")
 }
 
 fn acquire(ctx) {
-    if is_file(join_path(ctx.source, "Cargo.toml")) || is_file(ctx.supplied_program) { return ctx; }
-    throw "Import an offline standalone source tree with --input source=PATH, or an executable with --input program=PATH";
+    if is_file(join_path(ctx.source, "Cargo.toml")) { return ctx; }
+    throw "Import an offline standalone source tree with --input source=PATH";
 }
 
 fn is_built(ctx) {
-    let program = if is_file(join_path(ctx.source, "Cargo.toml")) { ctx.built_program } else { ctx.supplied_program };
-    if !is_file(program) { return needs_work(ctx, ctx.name + " needs compilation"); }
-    _verify(ctx, program);
+    if !is_file(ctx.built_program) { return needs_work(ctx, ctx.name + " needs compilation"); }
+    _verify(ctx, ctx.built_program);
     ready(ctx)
 }
 
 fn build(ctx) {
     let work = ctx.runtime.paths.build;
     let jobs = ctx.runtime.options.jobs.to_string();
-    if !is_file(join_path(ctx.source, "Cargo.toml")) {
-        _verify(ctx, ctx.supplied_program);
-        return ctx;
-    }
     let args = ["build", "--release", "--locked", "--offline", "--bin", ctx.name,
         "--manifest-path", join_path(ctx.source, "Cargo.toml"), "--target-dir", join_path(work, "target")];
     if ctx.rust_target == "x86_64-unknown-linux-gnu" {
@@ -98,7 +90,7 @@ fn is_installed(ctx) {
 }
 
 fn install(ctx) {
-    let source = if is_file(join_path(ctx.source, "Cargo.toml")) { ctx.built_program } else { ctx.supplied_program };
+    let source = ctx.built_program;
     _verify(ctx, source);
     mkdir(dirname(ctx.program));
     copy_file(source, ctx.program);

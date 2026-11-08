@@ -1,6 +1,10 @@
 // The live session is a separate product. Never modify the installed rootfs.
 const RECIPE_API = 2;
-let config = parse_json(read_file("/inputs/config"));
+// The `config` input is distro_builder's `LiveOverlayConfig`, serialized; the
+// builder's types guarantee its values (init is "systemd" or "openrc", the
+// variant contract validated the service names).
+let config = parse_json(read_file(join_path(RUNTIME.paths.inputs, "config")));
+config.inputs = RUNTIME.paths.inputs;
 let ctx = #{name: "live-overlay", config: config,
     root: join_path(RUNTIME.paths.output, "overlay")};
 
@@ -13,7 +17,7 @@ fn link(root, path, target) {
     mkdir(dirname(dest)); ln_force(target, dest);
 }
 fn asset(name, config) {
-    let text = read_file(join_path("/inputs/assets/live", name));
+    let text = read_file(join_path(config.inputs, "assets/live/" + name));
     text = text.replace("@OS_NAME@", config.os_name);
     text = text.replace("@SHELL_READY_MARKER@", config.shell_ready_marker);
     if text.contains("@OS_NAME@") { throw "unrendered OS name in live asset " + name; }
@@ -67,16 +71,8 @@ fn systemd(root, config) {
     put(root, "etc/tmpfiles.d/sshd-local.conf", "d /run/sshd 0755 root root -\n", 0o644);
     put(root, "etc/machine-id", "", 0o444);
 }
-fn validate_service(service) {
-    if service == "" { throw "empty live service name"; }
-    for ch in service.chars() {
-        let allowed = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.@".contains(ch);
-        if !allowed { throw "invalid live service name"; }
-    }
-}
 fn services(root, c) {
     for service in c.services {
-        validate_service(service);
         if c.init == "systemd" {
             let unit = service;
             if !service.ends_with(".service") { unit += ".service"; }
@@ -101,7 +97,6 @@ fn install(ctx) {
     if exists(root) { rm(root); }
     mkdir(root);
     let c = ctx.config;
-    if c.init != "systemd" && c.init != "openrc" { throw "unsupported live init system"; }
     for console in c.consoles {
         let valid = ["tty1", "ttyS0"];
         if c.init == "openrc" { valid = ["tty1", "tty2", "tty3", "tty4", "tty5", "tty6", "ttyS0"]; }
@@ -110,14 +105,14 @@ fn install(ctx) {
     put(root, "etc/issue", c.issue, 0o644);
     // Keep package system accounts; override only root for the live session.
     let shadow = "";
-    for line in read_file("/inputs/shadow").split("\n") {
+    for line in read_file(join_path(c.inputs, "shadow")).split("\n") {
         if line.starts_with("root:") { shadow += "root::20000:0:99999:7:::\n"; }
         else if line != "" { shadow += line + "\n"; }
     }
     put(root, "etc/shadow", shadow, 0o600);
     put(root, c.role_file, c.role + "\n", 0o644);
     put(root, "etc/profile.d/20-live-shell.sh", asset("shell-ux.sh", c), 0o755);
-    put(root, "etc/profile.d/99-serial-test.sh", read_file("/inputs/serial_profile"), 0o644);
+    put(root, "etc/profile.d/99-serial-test.sh", read_file(join_path(c.inputs, "serial_profile")), 0o644);
     put(root, "usr/local/bin/live-help", asset("live-help.sh", c), 0o755);
     if c.init == "openrc" { openrc(root, c); } else { systemd(root, c); }
     services(root, c);

@@ -281,7 +281,7 @@ fn build(ctx) {
     shell("rm -rf '" + join_path(rootfs, "var/cache") + "' '" + join_path(rootfs, "var/log") + "'");
     shell("mkdir -p '" + join_path(rootfs, "var/cache") + "' '" + join_path(rootfs, "var/log") + "' '" + join_path(rootfs, "var/log/audit") + "'");
     target_mode(rootfs, "var/log/audit", 0o700);
-    installed::systemd(rootfs);
+    installed::systemd(rootfs, ctx.runtime.paths.inputs);
     target_finalize(rootfs);
     write_file(join_path(rootfs, ".source-rootfs.recipe-version"), _rootfs_marker(ctx) + "\n");
     ctx

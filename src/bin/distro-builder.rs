@@ -20,6 +20,9 @@ struct BuildProduct {
     live_overlay_dir_name: &'static str,
     rootfs_source_pointer_filename: &'static str,
     issue_banner_label: &'static str,
+    /// Whether the product's rootfs is the whole installable system, so its ISO
+    /// carries the installed initramfs built from it. base-rootfs is not.
+    carries_installed_system: bool,
 }
 
 #[derive(Debug, Clone)]

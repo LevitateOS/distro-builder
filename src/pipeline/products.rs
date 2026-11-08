@@ -3,7 +3,6 @@ use distro_contract::ConformanceContract;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::artifact::live_overlay::InitSystem;
 use crate::pipeline::config::{
     load_boot_config_from_contract, load_installed_boot_payload_config_from_contract,
     load_live_tools_config_from_contract,
@@ -13,7 +12,7 @@ use crate::pipeline::io::{
 };
 use crate::pipeline::live_tools::add_required_tools;
 use crate::pipeline::overlay::create_live_overlay;
-use distro_contract::{InstallUxContract, RuntimeActionContract};
+use distro_contract::{InstallUxContract, Profile, RuntimeActionContract};
 
 use crate::pipeline::plan::{
     apply_producer_plan, build_baseline_producers, ProducerPlan, RootfsProducer,
@@ -94,7 +93,7 @@ pub struct LiveBootProductSpec {
     add_plan: ProducerPlan,
     required_services: Vec<String>,
     rootfs_source_policy: Option<RootfsSourcePolicy>,
-    pub overlay: InitSystem,
+    pub profile: Profile,
 }
 
 impl LiveBootProductSpec {
@@ -133,7 +132,7 @@ pub struct LiveToolsProductSpec {
     parent_rootfs: ParentRootfsInput,
     resolved_parent_rootfs_image: Option<PathBuf>,
     live_overlay: OverlayLayout,
-    overlay: InitSystem,
+    profile: Profile,
     required_services: Vec<String>,
 }
 
@@ -167,6 +166,7 @@ pub fn load_base_rootfs_product_spec(
     distro_id: &str,
     os_name: &str,
     os_id: &str,
+    profile: &Profile,
     _output_root: &Path,
     layout: BaseProductLayout,
 ) -> Result<BaseRootfsProductSpec> {
@@ -178,7 +178,7 @@ pub fn load_base_rootfs_product_spec(
         live_overlay_dir_name: layout.live_overlay_dir_name,
         plan: ProducerPlan {
             source_rootfs_dir: None,
-            producers: build_baseline_producers(distro_id, os_name, os_id),
+            producers: build_baseline_producers(distro_id, os_name, os_id, profile),
         },
     })
 }
@@ -235,7 +235,7 @@ pub fn load_live_boot_product_spec(
         },
         required_services: loaded.required_services,
         rootfs_source_policy: loaded.rootfs_source_policy,
-        overlay: loaded.overlay,
+        profile: loaded.profile,
     })
 }
 
@@ -302,7 +302,7 @@ pub fn prepare_live_boot_product(
         &spec.os_name,
         &spec.live_overlay.issue_banner_label,
         &spec.live_overlay.dir_name,
-        &spec.overlay,
+        spec.profile.init,
         &[],
         &spec.required_services,
     )?;
@@ -346,7 +346,7 @@ pub fn load_live_tools_product_spec(
         parent_rootfs: layout.parent_rootfs,
         resolved_parent_rootfs_image: None,
         live_overlay: layout.live_overlay,
-        overlay: live_boot_spec.overlay.clone(),
+        profile: live_boot_spec.profile,
         required_services: live_boot_spec.required_services().to_vec(),
     })
 }
@@ -414,7 +414,7 @@ pub fn prepare_live_tools_product(
         &spec.os_name,
         &spec.live_overlay.issue_banner_label,
         &spec.live_overlay.dir_name,
-        &spec.overlay,
+        spec.profile.init,
         &spec.install_ux.consoles,
         &spec.required_services,
     )?;
@@ -424,6 +424,7 @@ pub fn prepare_live_tools_product(
         &rootfs_source_dir,
         &live_overlay_dir,
         &spec.distro_id,
+        &spec.profile,
         &spec.runtime_actions,
     )
     .with_context(|| format!("adding required live tools for '{}'", spec.distro_id))?;
@@ -432,6 +433,7 @@ pub fn prepare_live_tools_product(
         &rootfs_source_dir,
         &live_overlay_dir,
         &spec.os_name,
+        &spec.profile,
         &spec.install_ux,
         &spec.runtime_actions,
     )

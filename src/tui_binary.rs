@@ -3,11 +3,12 @@
 //!
 //! `bun build --compile` embeds the bun runtime, so each binary is tens of megabytes; one
 //! binary per layer keeps that to a single copy. It runs the app named by the command it
-//! was started as (`argv[0]`), like busybox. The runtime is the one for the target's
-//! libc and CPU, read from the dynamic loader the target rootfs has, so a musl rootfs
-//! (AcornOS) gets a musl build and nothing from the build host's bun lands on the image.
+//! was started as (`argv[0]`), like busybox. The runtime is the one for the image's
+//! libc (the variant's profile), so a musl image gets a musl build and nothing from the
+//! build host's bun lands on the image.
 
 use anyhow::{bail, Context, Result};
+use distro_contract::profile::Libc;
 use distro_contract::tui_apps::TuiApp;
 use std::fs;
 use std::path::Path;
@@ -18,59 +19,22 @@ pub const BIN_DIR: &str = "usr/local/bin";
 /// The binary the commands link to.
 const BINARY: &str = "usr/local/libexec/levitate-tui";
 
-/// A bun compile target, and what it needs from the rootfs besides the loader.
-struct Target {
-    bun: &'static str,
-    libs: &'static [&'static str],
-}
-
-/// Loaders by path in the rootfs, the bun target each means, and the shared libraries
-/// that build links (bun's musl builds link libstdc++).
-const TARGETS: &[(&str, Target)] = &[
-    (
-        "lib/ld-musl-x86_64.so.1",
-        Target {
-            bun: "bun-linux-x64-musl",
-            libs: &["libstdc++.so.6"],
-        },
-    ),
-    (
-        "lib/ld-musl-aarch64.so.1",
-        Target {
-            bun: "bun-linux-arm64-musl",
-            libs: &["libstdc++.so.6"],
-        },
-    ),
-    (
-        "lib64/ld-linux-x86-64.so.2",
-        Target {
-            bun: "bun-linux-x64",
-            libs: &[],
-        },
-    ),
-    (
-        "lib/ld-linux-aarch64.so.1",
-        Target {
-            bun: "bun-linux-arm64",
-            libs: &[],
-        },
-    ),
-];
-
 const LIB_DIRS: &[&str] = &["usr/lib", "usr/lib64", "lib", "lib64"];
 
 /// Compiles `apps` into one binary in `layer` and links `BIN_DIR/<name>` to it for each.
-/// `rootfs` is the root the binary will run on: it picks the target.
+/// `rootfs` is the root the binary will run on, with C library `libc`.
 pub(crate) fn install(
     repo_root: &Path,
     rootfs: &Path,
     layer: &Path,
+    libc: Libc,
     apps: &[TuiApp],
 ) -> Result<()> {
     if apps.is_empty() {
         return Ok(());
     }
-    let target = target_for(rootfs)?;
+    check_libs(rootfs, libc)?;
+    let target = libc.bun_target();
     let bun = crate::process::which("bun").context(
         "bun is required to build the TUI apps: install it and put it on PATH (https://bun.sh)",
     )?;
@@ -98,10 +62,10 @@ pub(crate) fn install(
             .arg("build")
             .arg(&entry)
             .args(["--compile", "--minify"])
-            .arg(format!("--target={}", target.bun))
+            .arg(format!("--target={target}"))
             .arg("--outfile")
             .arg(&binary),
-        &format!("bun build --compile for {}", target.bun),
+        &format!("bun build --compile for {target}"),
     )?;
     if !binary.is_file() {
         bail!("bun build wrote no binary at '{}'", binary.display());
@@ -121,40 +85,22 @@ pub(crate) fn install(
     Ok(())
 }
 
-/// The bun target for the loader `rootfs` has, once its libraries are checked.
-fn target_for(rootfs: &Path) -> Result<&'static Target> {
-    let (loader, target) = TARGETS
-        .iter()
-        .find(|(loader, _)| {
-            // The merged-/usr path first: `lib64` may be a symlink that only resolves
-            // inside the image.
-            rootfs.join("usr").join(loader).exists() || rootfs.join(loader).exists()
-        })
-        .with_context(|| {
-            format!(
-                "no dynamic loader the TUI apps can run on in '{}' (looked for {})",
-                rootfs.display(),
-                TARGETS
-                    .iter()
-                    .map(|(l, _)| *l)
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )
-        })?;
-    for lib in target.libs {
+/// The shared libraries the bun build for `libc` links are in `rootfs`.
+fn check_libs(rootfs: &Path, libc: Libc) -> Result<()> {
+    for lib in libc.bun_libs() {
         if !LIB_DIRS
             .iter()
             .any(|dir| rootfs.join(dir).join(lib).exists())
         {
             bail!(
-                "the TUI apps' {} build needs {lib}, which '{}' lacks (its loader is {loader}): \
-                 add the package that provides it to the rootfs",
-                target.bun,
+                "the TUI apps' {} build needs {lib}, which '{}' lacks: add the package that \
+                 provides it to the rootfs",
+                libc.bun_target(),
                 rootfs.display()
             );
         }
     }
-    Ok(target)
+    Ok(())
 }
 
 /// The entry that runs the app named by `argv[0]`. Each app's entry starts it on import,

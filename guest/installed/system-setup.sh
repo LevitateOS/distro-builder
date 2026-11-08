@@ -1,9 +1,20 @@
 #!/bin/sh
 # Installed by the system recipe. recsetup validates choices and invokes this
 # target-side policy; no compiler image or build runtime is needed on the live ISO.
+# What the system is comes from the distro profile the builder writes into
+# /etc/os-release (REC_* fields), not from probing for programs.
 set -eu
-init='@INIT@'
-libc='@LIBC@'
+
+missing_profile() {
+    echo "/etc/os-release has no $1: the system was built without a distro profile (rebuild it with the current builder)" >&2
+    exit 2
+}
+REC_INIT='' REC_PACKAGES=''
+[ -r /etc/os-release ] || missing_profile REC_INIT
+. /etc/os-release
+init=$REC_INIT packages=$REC_PACKAGES
+[ -n "$init" ] || missing_profile REC_INIT
+[ -n "$packages" ] || missing_profile REC_PACKAGES
 
 assignment() {
     file=$1 key=$2 value=$3
@@ -26,47 +37,26 @@ case "${1:-}" in
     timezone)
         if [ -f "/usr/share/zoneinfo/$2" ]; then
             ln -sfn "../usr/share/zoneinfo/$2" /etc/localtime
-        elif [ "$2" = UTC ]; then rm -f /etc/localtime
         else echo "time zone is unavailable: $2" >&2; exit 2; fi
         ;;
     locale)
-        lang=$2 method=$3
-        case "$method" in
-            localedef) localedef -i "$4" -f "$5" "$lang" ;;
-            locale_gen)
-                line=$4
-                tmp=$(mktemp /etc/locale.gen.XXXXXX)
-                awk -v wanted="$line" '
-                    { bare=$0; sub(/^[[:space:]#]+/, "", bare) }
-                    bare == wanted { if (!done++) print wanted; next }
-                    { print }
-                    END { if (!done) print wanted }
-                ' /etc/locale.gen > "$tmp"
-                chmod 0644 "$tmp"; mv -f "$tmp" /etc/locale.gen
-                locale-gen
-                ;;
-            precompiled|musl) ;;
-            *) echo "unsupported locale method: $method" >&2; exit 2 ;;
-        esac
-        assignment /etc/locale.conf LANG "$lang"
-        # The musl login-shell export is installed by the recipe.
+        # recsetup offers only locales usable as they are (glibc's compiled ones,
+        # musl's), so setting LANG is all there is. systemd reads locale.conf
+        # itself; on OpenRC the recipe's /etc/profile.d/locale.sh exports it.
+        assignment /etc/locale.conf LANG "$2"
         ;;
     keymap)
-        if [ "$init" = systemd ]; then assignment /etc/vconsole.conf KEYMAP "$2"
-        else
-            # busybox's binary keymaps (kbd-bkeymaps), loaded by busybox-openrc's loadkmap;
-            # otherwise kbd's, loaded by its keymaps (or loadkeys) service.
-            bmap=$(find /usr/share/bkeymaps -name "$2.bmap.gz" 2>/dev/null | head -n 1)
-            if [ -n "$bmap" ] && [ -f /etc/init.d/loadkmap ]; then
+        case "$init" in
+            systemd) assignment /etc/vconsole.conf KEYMAP "$2" ;;
+            openrc)
+                # busybox's binary keymaps (kbd-bkeymaps), loaded by busybox-openrc's loadkmap.
+                bmap=$(find /usr/share/bkeymaps -name "$2.bmap.gz" | head -n 1)
+                if [ -z "$bmap" ]; then echo "keymap is unavailable: $2" >&2; exit 2; fi
                 assignment /etc/conf.d/loadkmap KEYMAP "\"$bmap\""
                 rc-update add loadkmap boot
-            else
-                service=keymaps
-                if [ ! -f /etc/init.d/keymaps ] && [ -f /etc/init.d/loadkeys ]; then service=loadkeys; fi
-                assignment "/etc/conf.d/$service" keymap "\"$2\""
-                if [ -f "/etc/init.d/$service" ]; then rc-update add "$service" boot; fi
-            fi
-        fi
+                ;;
+            *) echo "unsupported init system: $init" >&2; exit 2 ;;
+        esac
         ;;
     hostname)
         printf '%s\n' "$2" > /etc/hostname
@@ -85,30 +75,43 @@ case "${1:-}" in
         ;;
     user)
         name=$2 shell=$3 groups=$4
-        if command -v useradd >/dev/null 2>&1; then
-            if [ -n "$groups" ]; then useradd -m -s "$shell" -G "$groups" "$name"
-            else useradd -m -s "$shell" "$name"; fi
-        else
-            adduser -D -s "$shell" "$name"
-            old_ifs=$IFS; IFS=,
-            for group in $groups; do addgroup "$name" "$group"; done
-            IFS=$old_ifs
-        fi
+        # The account tool is the base distro's: shadow-utils' useradd on the
+        # RPM (Fedora) base, busybox's adduser on the APK (Alpine) base.
+        case "$packages" in
+            rpm)
+                if [ -n "$groups" ]; then useradd -m -s "$shell" -G "$groups" "$name"
+                else useradd -m -s "$shell" "$name"; fi
+                ;;
+            apk)
+                adduser -D -s "$shell" "$name"
+                old_ifs=$IFS; IFS=,
+                for group in $groups; do addgroup "$name" "$group"; done
+                IFS=$old_ifs
+                ;;
+            *) echo "unsupported package backend: $packages" >&2; exit 2 ;;
+        esac
         ;;
     machine-id)
-        if command -v systemd-machine-id-setup >/dev/null 2>&1; then systemd-machine-id-setup
-        else
-            id=$(cat /etc/machine-id 2>/dev/null || true)
-            case "$id" in *[!0-9a-f]*|'') valid=no ;; *) valid=yes ;; esac
-            if [ "$valid" = yes ] && [ "${#id}" -eq 32 ]; then exit 0; fi
-            od -An -N16 -tx1 /dev/urandom | tr -d ' \n' > /etc/machine-id
-            printf '\n' >> /etc/machine-id
-            chmod 0444 /etc/machine-id
-        fi
+        case "$init" in
+            systemd) systemd-machine-id-setup ;;
+            openrc)
+                id=
+                if [ -e /etc/machine-id ]; then id=$(cat /etc/machine-id); fi
+                case "$id" in *[!0-9a-f]*|'') valid=no ;; *) valid=yes ;; esac
+                if [ "$valid" = yes ] && [ "${#id}" -eq 32 ]; then exit 0; fi
+                od -An -N16 -tx1 /dev/urandom | tr -d ' \n' > /etc/machine-id
+                printf '\n' >> /etc/machine-id
+                chmod 0444 /etc/machine-id
+                ;;
+            *) echo "unsupported init system: $init" >&2; exit 2 ;;
+        esac
         ;;
     service)
-        if [ "$init" = systemd ]; then SYSTEMD_OFFLINE=1 systemctl enable "$2"
-        else rc-update add "$2" default; fi
+        case "$init" in
+            systemd) SYSTEMD_OFFLINE=1 systemctl enable "$2" ;;
+            openrc) rc-update add "$2" default ;;
+            *) echo "unsupported init system: $init" >&2; exit 2 ;;
+        esac
         ;;
     *) echo "usage: recipe-system-setup timezone|locale|keymap|hostname|user|machine-id|service ..." >&2; exit 2 ;;
 esac

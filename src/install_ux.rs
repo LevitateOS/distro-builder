@@ -12,7 +12,7 @@
 //! installed system has no use for the install screen. Paths are relative to a layer's root.
 
 use anyhow::{bail, Context, Result};
-use distro_contract::{InstallUxContract, RuntimeActionContract};
+use distro_contract::{InstallUxContract, Profile, RuntimeActionContract};
 use std::path::Path;
 
 use crate::artifact::filesystem::write_file;
@@ -43,6 +43,7 @@ pub(crate) fn write_payload(
     rootfs: &Path,
     overlay: &Path,
     os_name: &str,
+    profile: &Profile,
     install_ux: &InstallUxContract,
     runtime_actions: &[RuntimeActionContract],
 ) -> Result<()> {
@@ -76,7 +77,7 @@ pub(crate) fn write_payload(
             }
         }
     }
-    crate::tui_binary::install(repo_root, rootfs, overlay, &apps)
+    crate::tui_binary::install(repo_root, rootfs, overlay, profile.libc, &apps)
         .context("building the install screen's TUI apps")?;
 
     let docs_app = apps

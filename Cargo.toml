@@ -10,6 +10,7 @@ license = "MIT OR Apache-2.0"
 recqemu = { path = "../../tools/recqemu" }
 anyhow = "1.0"
 distro-contract = { path = "../contract" }
+distro-profile = { path = "../profile" }
 recinit = { path = "../../tools/recinit" }
 libc = "0.2"
 levitate-recipe = { path = "../../tools/recipe" }

@@ -130,6 +130,7 @@ fn product_base_rootfs() -> crate::BuildProduct {
         live_overlay_dir_name: "live-overlay",
         rootfs_source_pointer_filename: ".live-rootfs-source.path",
         issue_banner_label: "Base Rootfs",
+        carries_installed_system: false,
     }
 }
 
@@ -142,6 +143,7 @@ fn product_live_boot() -> crate::BuildProduct {
         live_overlay_dir_name: "live-overlay",
         rootfs_source_pointer_filename: ".live-rootfs-source.path",
         issue_banner_label: "Live Boot",
+        carries_installed_system: true,
     }
 }
 
@@ -154,6 +156,7 @@ fn product_live_tools() -> crate::BuildProduct {
         live_overlay_dir_name: "live-overlay",
         rootfs_source_pointer_filename: ".live-rootfs-source.path",
         issue_banner_label: "Live Tools",
+        carries_installed_system: true,
     }
 }
 
@@ -166,6 +169,7 @@ fn product_installed_boot() -> crate::BuildProduct {
         live_overlay_dir_name: "boot-overlay",
         rootfs_source_pointer_filename: ".rootfs-source.path",
         issue_banner_label: "Installed Boot",
+        carries_installed_system: true,
     }
 }
 

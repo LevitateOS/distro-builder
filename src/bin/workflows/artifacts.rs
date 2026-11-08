@@ -222,6 +222,7 @@ fn prepare_product_inputs(
                 distro_id,
                 &bundle.contract.identity.os_name,
                 &bundle.contract.identity.os_id,
+                &bundle.contract.profile,
                 &output_root,
                 canonical_base_product_layout(product),
             )

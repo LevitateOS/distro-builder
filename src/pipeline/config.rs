@@ -1,13 +1,12 @@
 use anyhow::{bail, Result};
 use distro_contract::{
-    ConformanceContract, InstallUxContract, OverlayContract, OverlayKind, PayloadProducerContract,
+    ConformanceContract, InstallUxContract, PayloadProducerContract, Profile,
     RuntimeActionContract,
 };
 use std::path::Path;
 
 use crate::pipeline::plan::RootfsProducer;
 
-use crate::artifact::live_overlay::InitSystem;
 use crate::pipeline::source::{rootfs_source_policy_from_contract, RootfsSourcePolicy};
 
 #[derive(Debug, Clone)]
@@ -15,7 +14,7 @@ pub(crate) struct BootLoadedConfig {
     pub(crate) os_name: String,
     pub(crate) required_services: Vec<String>,
     pub(crate) rootfs_source_policy: Option<RootfsSourcePolicy>,
-    pub(crate) overlay: InitSystem,
+    pub(crate) profile: Profile,
     pub(crate) payload_producers: Vec<RootfsProducer>,
 }
 
@@ -49,14 +48,13 @@ fn load_boot_payload_config_with_rootfs_source_policy(
     // The contract guarantees distinct service names; the overlay takes them sorted.
     let mut required_services = contract.scenarios.live_environment.required_services.clone();
     required_services.sort();
-    let overlay = overlay_policy_from_contract(&contract.product_config.live_overlay)?;
     let payload_producers = load_boot_payload_producers(contract, BootPayloadProduct::Live)?;
 
     Ok(BootLoadedConfig {
         os_name,
         required_services,
         rootfs_source_policy,
-        overlay,
+        profile: contract.profile,
         payload_producers,
     })
 }
@@ -175,12 +173,5 @@ fn rootfs_producer_from_contract(producer: &PayloadProducerContract) -> Result<R
             content: content.clone(),
             mode: *mode,
         },
-    })
-}
-
-fn overlay_policy_from_contract(overlay: &OverlayContract) -> Result<InitSystem> {
-    Ok(match overlay.kind {
-        OverlayKind::Systemd => InitSystem::Systemd,
-        OverlayKind::OpenRc => InitSystem::OpenRc,
     })
 }

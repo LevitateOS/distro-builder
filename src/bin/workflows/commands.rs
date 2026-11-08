@@ -99,20 +99,7 @@ pub(crate) fn dispatch_non_release_command(args: &[String]) -> Result<()> {
         {
             let repo = crate::workflows::repo_root()?;
             let output = Path::new(output);
-            if std::fs::symlink_metadata(output).is_ok() {
-                bail!("source output already exists: {}", output.display());
-            }
-            let parent = output
-                .parent()
-                .filter(|path| !path.as_os_str().is_empty())
-                .unwrap_or(Path::new("."));
-            std::fs::create_dir_all(parent)?;
-            let source = distro_builder::recipe::tools::prepare_tool_source(&repo, package)?;
-            let pending = tempfile::Builder::new()
-                .prefix(".source-")
-                .tempdir_in(parent)?;
-            distro_builder::copy_dir_recursive(source.path(), pending.path())?;
-            std::fs::rename(pending.path(), output)?;
+            distro_builder::recipe::tools::prepare_tool_source_into(&repo, package, output)?;
             println!("{}", output.display());
             Ok(())
         }

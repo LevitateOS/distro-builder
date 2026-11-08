@@ -7,13 +7,10 @@ fn put(root, path, content, mode) {
     target_mode(root, path, mode);
 }
 
-fn setup_program(root, init, libc) {
-    let script = read_file("/inputs/system_setup");
-    script = script.replace("@INIT@", init);
-    script = script.replace("@LIBC@", libc);
-    if script.contains("@INIT@") { throw "unrendered setup init system"; }
-    if script.contains("@LIBC@") { throw "unrendered setup libc"; }
-    put(root, "usr/libexec/recipe-system-setup", script, 0o755);
+// The setup program reads the distro profile from the image's /etc/os-release
+// (the REC_* fields the builder writes), so it is installed as it is.
+fn setup_program(root, inputs) {
+    put(root, "usr/libexec/recipe-system-setup", read_file(join_path(inputs, "system_setup")), 0o755);
 }
 
 fn lock_root(root) {
@@ -33,7 +30,7 @@ fn lock_root(root) {
     put(root, "etc/machine-id", "", 0o444);
 }
 
-fn systemd(root) {
+fn systemd(root, inputs) {
     put(root, "etc/issue", "Linux \\l\n", 0o644);
     mkdir(join_path(root, "etc/systemd/system"));
     ln_force("/usr/lib/systemd/system/multi-user.target",
@@ -64,7 +61,7 @@ fn systemd(root) {
     ln_force("/usr/lib/systemd/system/NetworkManager.service",
         join_path(root, "etc/systemd/system/multi-user.target.wants/NetworkManager.service"));
     lock_root(root);
-    setup_program(root, "systemd", "glibc");
+    setup_program(root, inputs);
 }
 
 // APK runs without package scripts. Reproduce BusyBox's link installation from
@@ -91,7 +88,7 @@ fn busybox_applets(root) {
     }
 }
 
-fn openrc(root) {
+fn openrc(root, inputs) {
     // Busybox init reads this in the installed system. No alternate login program.
     let inittab = "::sysinit:/sbin/openrc sysinit\n::sysinit:/sbin/openrc boot\n";
     for tty in ["tty1", "tty2", "tty3", "tty4", "tty5", "tty6"] {
@@ -123,5 +120,5 @@ fn openrc(root) {
         }
     }
     lock_root(root);
-    setup_program(root, "openrc", "musl");
+    setup_program(root, inputs);
 }

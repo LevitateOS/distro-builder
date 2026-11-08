@@ -103,6 +103,16 @@ pub(crate) fn ensure_release_iso_via_variant_hook(
         .env("PRODUCT_BOOT_LABEL", product.issue_banner_label)
         .env("ROOTFS_FILENAME", &rootfs_filename)
         .env("INITRAMFS_LIVE_FILENAME", &initramfs_live_filename)
+        .env(
+            "INITRAMFS_INSTALLED_FILENAME",
+            bundle
+                .contract
+                .artifacts
+                .initramfs_installed_output
+                .as_deref()
+                .filter(|_| product.carries_installed_system)
+                .unwrap_or(""),
+        )
         .env("LIVE_OVERLAY_DIRNAME", product.live_overlay_dir_name)
         .env("LIVE_OVERLAY_IMAGE_FILENAME", &overlay_filename)
         .env(

@@ -1,5 +1,6 @@
 //! Explicit offline source preparation and managed producers for live tools.
 use anyhow::{bail, Context, Result};
+use distro_profile::Profile;
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -30,18 +31,57 @@ fn tool(package: &str) -> Result<(&'static str, &'static str, &'static [&'static
         .with_context(|| format!("no live tool declared for package {package}"))
 }
 
-/// Prepare only the selected production crate and its local dependencies.
-/// Cargo resolves/prunes the copied workspace lock offline; every selected
-/// dependency must remain an exact member of the original lock.
+/// Prepare only the selected production crate and its local dependencies in a
+/// temporary directory. Cargo resolves/prunes the copied workspace lock
+/// offline; every selected dependency must remain an exact member of the
+/// original lock.
 pub fn prepare_tool_source(repo: &Path, package: &str) -> Result<tempfile::TempDir> {
-    let (_, relative, _) = tool(package)?;
-    let relative = PathBuf::from(relative);
-    let repo = repo.canonicalize()?;
     let source = tempfile::Builder::new()
         .prefix("recipe-tool-source-")
         .tempdir()?;
+    prepare_tool_source_at(repo, package, source.path())?;
+    Ok(source)
+}
+
+/// Prepare the source closure of `package` at `output`, which must not exist:
+/// it is built beside `output` and renamed into place, so `output` is either
+/// complete or absent.
+pub fn prepare_tool_source_into(repo: &Path, package: &str, output: &Path) -> Result<()> {
+    match fs::symlink_metadata(output) {
+        Ok(_) => bail!("source output already exists: {}", output.display()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(error).with_context(|| format!("checking '{}'", output.display()))
+        }
+    }
+    let parent = output
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    fs::create_dir_all(parent).with_context(|| format!("creating '{}'", parent.display()))?;
+    let pending = tempfile::Builder::new()
+        .prefix(".source-")
+        .tempdir_in(parent)?;
+    prepare_tool_source_at(repo, package, pending.path())?;
+    let pending = pending.keep();
+    if let Err(error) = fs::rename(&pending, output) {
+        let _ = fs::remove_dir_all(&pending);
+        return Err(error).with_context(|| format!("moving the source into '{}'", output.display()));
+    }
+    Ok(())
+}
+
+fn prepare_tool_source_at(repo: &Path, package: &str, source: &Path) -> Result<()> {
+    let (_, relative, _) = tool(package)?;
+    let relative = PathBuf::from(relative);
+    let repo = repo.canonicalize()?;
+    let root_manifest: toml::Value = toml::from_str(&fs::read_to_string(repo.join("Cargo.toml"))?)?;
+    let root_workspace = root_manifest.get("workspace");
+    let workspace_dependencies = root_workspace
+        .and_then(|w| w.get("dependencies"))
+        .and_then(toml::Value::as_table);
     let mut copied = BTreeSet::new();
-    copy_crate(&repo, &relative, source.path(), &mut copied)?;
+    copy_crate(&repo, &relative, source, workspace_dependencies, &mut copied)?;
     let mut workspace = toml::map::Map::new();
     workspace.insert("resolver".into(), "2".into());
     workspace.insert(
@@ -52,15 +92,15 @@ pub fn prepare_tool_source(repo: &Path, package: &str) -> Result<tempfile::TempD
         "default-members".into(),
         vec![relative.to_string_lossy().to_string()].into(),
     );
-    let root_manifest: toml::Value = toml::from_str(&fs::read_to_string(repo.join("Cargo.toml"))?)?;
-    if let Some(package) = root_manifest
-        .get("workspace")
-        .and_then(|w| w.get("package"))
-    {
-        workspace.insert("package".into(), package.clone());
+    // Inherited package fields and dependencies (`x.workspace = true`) resolve
+    // against the same tables as in the repository.
+    for table in ["package", "dependencies"] {
+        if let Some(value) = root_workspace.and_then(|w| w.get(table)) {
+            workspace.insert(table.into(), value.clone());
+        }
     }
     fs::write(
-        source.path().join("Cargo.toml"),
+        source.join("Cargo.toml"),
         toml::to_string(&toml::Value::Table(
             [("workspace".into(), toml::Value::Table(workspace))]
                 .into_iter()
@@ -68,11 +108,11 @@ pub fn prepare_tool_source(repo: &Path, package: &str) -> Result<tempfile::TempD
         ))?,
     )?;
     let original_lock = fs::read_to_string(repo.join("Cargo.lock"))?;
-    fs::write(source.path().join("Cargo.lock"), &original_lock)?;
+    fs::write(source.join("Cargo.lock"), &original_lock)?;
     let output = Command::new("cargo")
         .args(["vendor", "--offline", "--manifest-path"])
-        .arg(source.path().join("Cargo.toml"))
-        .arg(source.path().join("vendor"))
+        .arg(source.join("Cargo.toml"))
+        .arg(source.join("vendor"))
         .current_dir(&repo)
         .output()
         .context("preparing pinned offline Cargo source closure")?;
@@ -82,7 +122,7 @@ pub fn prepare_tool_source(repo: &Path, package: &str) -> Result<tempfile::TempD
             String::from_utf8_lossy(&output.stderr)
         );
     }
-    let selected_lock = fs::read_to_string(source.path().join("Cargo.lock"))?;
+    let selected_lock = fs::read_to_string(source.join("Cargo.lock"))?;
     let unexpected: Vec<_> = locked_packages(&selected_lock)?
         .difference(&locked_packages(&original_lock)?)
         .cloned()
@@ -90,10 +130,10 @@ pub fn prepare_tool_source(repo: &Path, package: &str) -> Result<tempfile::TempD
     if !unexpected.is_empty() {
         bail!("source closure selected dependencies outside the workspace lock: {unexpected:?}");
     }
-    fs::create_dir_all(source.path().join(".cargo"))?;
-    fs::write(source.path().join(".cargo/config.toml"),
+    fs::create_dir_all(source.join(".cargo"))?;
+    fs::write(source.join(".cargo/config.toml"),
         "[source.crates-io]\nreplace-with = \"vendored-sources\"\n[source.vendored-sources]\ndirectory = \"/inputs/source/vendor\"\n[net]\noffline = true\n")?;
-    Ok(source)
+    Ok(())
 }
 
 fn locked_packages(lock: &str) -> Result<BTreeSet<(String, String, String)>> {
@@ -122,6 +162,7 @@ fn copy_crate(
     repo: &Path,
     relative: &Path,
     destination: &Path,
+    workspace_dependencies: Option<&toml::map::Map<String, toml::Value>>,
     copied: &mut BTreeSet<PathBuf>,
 ) -> Result<()> {
     let original = repo.join(relative).canonicalize()?;
@@ -141,128 +182,89 @@ fn copy_crate(
     table.remove("bench");
     table.remove("example");
     let mut local_dependencies = Vec::new();
-    collect_local_dependencies(table, &original, &mut local_dependencies)?;
+    collect_local_dependencies(
+        table,
+        &original,
+        repo,
+        workspace_dependencies,
+        &mut local_dependencies,
+    )?;
     let output = destination.join(relative);
-    fs::create_dir_all(&output)?;
-    crate::copy_dir_recursive(&original.join("src"), &output.join("src"))?;
-    if let Some(build) = manifest
-        .get("package")
-        .and_then(|p| p.get("build"))
-        .and_then(toml::Value::as_str)
-    {
-        let path = Path::new(build);
-        if path.is_absolute()
-            || path
-                .components()
-                .any(|c| matches!(c, std::path::Component::ParentDir))
-        {
-            bail!("build script path escapes tool crate");
-        }
-        if let Some(parent) = output.join(path).parent() {
-            fs::create_dir_all(parent)?;
-        }
-        fs::copy(original.join(path), output.join(path))?;
-    } else if original.join("build.rs").is_file() {
-        fs::copy(original.join("build.rs"), output.join("build.rs"))?;
-    }
-    copy_included_files(&original, &output)?;
+    copy_crate_files(&original, &output)?;
     fs::write(output.join("Cargo.toml"), toml::to_string(&manifest)?)?;
     for dependency in local_dependencies {
         let dependency = dependency.canonicalize()?;
         let relative = dependency
             .strip_prefix(repo)
             .context("tool dependency is outside repository")?;
-        copy_crate(repo, relative, destination, copied)?;
+        copy_crate(repo, relative, destination, workspace_dependencies, copied)?;
     }
     Ok(())
 }
 
-/// Copy the files the copied Rust sources pull in with `include_str!`,
-/// `include_bytes!` or `include!` (for example templates kept beside `src`),
-/// so the source closure holds exactly what the crate compiles from.
-fn copy_included_files(original: &Path, output: &Path) -> Result<()> {
-    let mut pending = Vec::new();
-    collect_rust_files(output, &mut pending)?;
-    while let Some(file) = pending.pop() {
-        let text = fs::read_to_string(&file)?;
-        let directory = file.parent().context("source file has no parent")?;
-        for literal in included_paths(&text) {
-            let copied = directory.join(literal);
-            if copied.exists() {
-                continue;
-            }
-            let relative = copied
-                .strip_prefix(output)
-                .context("included file resolves outside the copied crate")?;
-            // A path that names nothing (say, a macro in a doc comment) is
-            // left for cargo to report if the code really includes it.
-            let Ok(source) = original.join(relative).canonicalize() else {
-                continue;
-            };
-            let inside = source.strip_prefix(original).with_context(|| {
-                format!(
-                    "{} includes {literal} from outside its crate",
-                    file.display()
-                )
-            })?;
-            let destination = output.join(inside);
-            if let Some(parent) = destination.parent() {
-                fs::create_dir_all(parent)?;
-            }
-            fs::copy(&source, &destination)?;
-            if destination.extension().is_some_and(|e| e == "rs") {
-                pending.push(destination);
-            }
+/// Copy every file of the crate that git knows of (tracked, or new and not
+/// ignored), so whatever the crate compiles from (`src`, a build script and
+/// what it reads, `#[path]` modules, included files) comes along.
+fn copy_crate_files(original: &Path, output: &Path) -> Result<()> {
+    let listing = Command::new("git")
+        .arg("-C")
+        .arg(original)
+        .args(["ls-files", "-z", "--cached", "--others", "--exclude-standard"])
+        .output()
+        .with_context(|| format!("listing the files of '{}' with git", original.display()))?;
+    if !listing.status.success() {
+        bail!(
+            "cannot list the files of tool crate '{}' (it must be in a git checkout): {}",
+            original.display(),
+            String::from_utf8_lossy(&listing.stderr).trim()
+        );
+    }
+    for name in listing.stdout.split(|byte| *byte == 0).filter(|name| !name.is_empty()) {
+        let name = Path::new(std::str::from_utf8(name).context("tool crate file name is not UTF-8")?);
+        let source = original.join(name);
+        let metadata = match fs::symlink_metadata(&source) {
+            Ok(metadata) => metadata,
+            // Tracked but deleted in the working tree: the crate no longer has it.
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error).with_context(|| format!("reading '{}'", source.display())),
+        };
+        let target = output.join(name);
+        if let Some(parent) = target.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        if metadata.file_type().is_symlink() {
+            std::os::unix::fs::symlink(fs::read_link(&source)?, &target)?;
+        } else {
+            fs::copy(&source, &target)
+                .with_context(|| format!("copying '{}'", source.display()))?;
         }
     }
     Ok(())
-}
-
-fn collect_rust_files(directory: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
-    for entry in fs::read_dir(directory)? {
-        let path = entry?.path();
-        if path.is_dir() {
-            collect_rust_files(&path, files)?;
-        } else if path.extension().is_some_and(|e| e == "rs") {
-            files.push(path);
-        }
-    }
-    Ok(())
-}
-
-/// The literal paths given to `include_str!`, `include_bytes!` and `include!`.
-fn included_paths(text: &str) -> Vec<&str> {
-    let mut paths = Vec::new();
-    for macro_name in ["include_str!", "include_bytes!", "include!"] {
-        for (at, _) in text.match_indices(macro_name) {
-            let after = text[at + macro_name.len()..].trim_start();
-            let Some(after) = after.strip_prefix(['(', '[', '{']) else {
-                continue;
-            };
-            let Some(after) = after.trim_start().strip_prefix('"') else {
-                continue;
-            };
-            if let Some(end) = after.find('"') {
-                paths.push(&after[..end]);
-            }
-        }
-    }
-    paths
 }
 
 fn collect_local_dependencies(
     table: &mut toml::map::Map<String, toml::Value>,
     original: &Path,
+    repo: &Path,
+    workspace_dependencies: Option<&toml::map::Map<String, toml::Value>>,
     dependencies: &mut Vec<PathBuf>,
 ) -> Result<()> {
     for name in ["dependencies", "build-dependencies"] {
         if let Some(entries) = table.get(name).and_then(toml::Value::as_table) {
-            for dependency in entries.values() {
+            for (dependency_name, dependency) in entries {
                 if let Some(path) = dependency.get("path").and_then(toml::Value::as_str) {
                     dependencies.push(original.join(path));
                 }
                 if dependency.get("workspace").and_then(toml::Value::as_bool) == Some(true) {
-                    bail!("tool source producer requires explicit crate dependency declarations");
+                    // Resolved against the root's [workspace.dependencies], copied as it is.
+                    let inherited = workspace_dependencies
+                        .and_then(|deps| deps.get(dependency_name))
+                        .with_context(|| {
+                            format!("{dependency_name} inherits a workspace dependency the root manifest does not declare")
+                        })?;
+                    if let Some(path) = inherited.get("path").and_then(toml::Value::as_str) {
+                        dependencies.push(repo.join(path));
+                    }
                 }
             }
         }
@@ -273,41 +275,39 @@ fn collect_local_dependencies(
                 .as_table_mut()
                 .context("target dependencies must be a table")?;
             target.remove("dev-dependencies");
-            collect_local_dependencies(target, original, dependencies)?;
+            collect_local_dependencies(target, original, repo, workspace_dependencies, dependencies)?;
         }
     }
     Ok(())
 }
 
-/// Compile through the package's actual recipe and return its published program.
-fn build_tool_outputs(
+/// Compile `package`'s `binary` (its default when `None`) through its recipe
+/// for the image `profile` describes, and return the published package tree.
+pub(crate) fn build_tool_tree(
     repo: &Path,
     package: &str,
     binary: Option<&str>,
-    target: Option<&str>,
     destination: Option<&str>,
-    init: &str,
-) -> Result<serde_json::Value> {
+    profile: &Profile,
+) -> Result<PathBuf> {
     let (_, _, binaries) = tool(package)?;
     let binary = binary.unwrap_or(binaries[0]);
     if !binaries.contains(&binary) {
         bail!("package {package} does not build binary {binary}");
     }
-    // The recipe checks the target.
-    let target = target.unwrap_or(if init == "openrc" {
-        "x86_64-unknown-linux-musl"
-    } else {
-        "x86_64-unknown-linux-gnu"
-    });
+    let target = profile.libc.rust_target();
+    let init = profile.init.as_str();
     let source = prepare_tool_source(repo, package)?;
     let recipe = repo
         .join("distro/builder/recipes")
         .join("install-tools.rhai");
     let recipe_bin = super::find_recipe(repo)?;
+    // The tree depends on the target (libc) and, for recab's trial service, the init system.
     let work = repo
         .join(".artifacts/work/recipe-tools")
         .join(binary)
-        .join(target);
+        .join(target)
+        .join(init);
     let install_path = destination
         .map(str::to_string)
         .unwrap_or_else(|| format!("usr/bin/{binary}"));
@@ -327,27 +327,5 @@ fn build_tool_outputs(
         None,
         recipe.parent(),
     )?;
-    Ok(ctx)
-}
-
-pub fn build_tool_program(
-    repo: &Path,
-    package: &str,
-    binary: Option<&str>,
-    target: Option<&str>,
-) -> Result<PathBuf> {
-    let ctx = build_tool_outputs(repo, package, binary, target, None, "systemd")?;
-    super::outputs::file(&ctx, "program")
-}
-
-pub(crate) fn build_tool_tree(
-    repo: &Path,
-    package: &str,
-    binary: Option<&str>,
-    target: Option<&str>,
-    destination: Option<&str>,
-    init: &str,
-) -> Result<PathBuf> {
-    let ctx = build_tool_outputs(repo, package, binary, target, destination, init)?;
     super::outputs::directory(&ctx, "rootfs")
 }

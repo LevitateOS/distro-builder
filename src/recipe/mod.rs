@@ -195,6 +195,7 @@ impl<'a> Invocation<'a> {
             .arg("--recipes-path")
             .arg(&recipes_path)
             .args(&self.args)
+            .dir(self.repo)
             .stdout_to_stderr()
             .error_msg(format!("recipe {} {}", self.phase, recipe.display()));
         for (key, _) in std::env::vars_os() {

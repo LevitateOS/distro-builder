@@ -1,8 +1,8 @@
 use std::path::Path;
-use std::process::Command;
 
 use anyhow::{bail, Context, Result};
 use distro_builder::kernel::{KERNEL_IMAGE_PATH, KERNEL_RELEASE_PATH};
+use distro_builder::process::Cmd;
 use distro_contract::Variant;
 
 use distro_builder::product::ReleaseProduct;
@@ -52,9 +52,10 @@ pub(crate) fn ensure_release_iso_via_variant_hook(
     let distro_builder_bin =
         std::env::current_exe().context("resolving distro-builder executable path")?;
 
-    let status = Command::new("sh")
+    Cmd::new("sh")
         .arg(&native_build)
-        .current_dir(&bundle.repo_root)
+        .dir(&bundle.repo_root)
+        .env("REPO_ROOT", &bundle.repo_root)
         .env("DISTRO_ID", distro_id)
         .env("IDENTITY_OS_NAME", &bundle.contract.identity.os_name)
         .env("IDENTITY_OS_ID", &bundle.contract.identity.os_id)
@@ -85,17 +86,11 @@ pub(crate) fn ensure_release_iso_via_variant_hook(
         .env("DISTRO_BUILDER_BIN", &distro_builder_bin)
         .env("KERNEL_OUTPUT_DIR", kernel_output_dir)
         .env("PRODUCT_REQUIRED_KERNEL_CMDLINE", &required_kernel_cmdline)
-        .status()
-        .with_context(|| {
-            format!(
-                "running variant release build hook '{}' for product '{product}' on '{distro_id}'",
-                native_build.display(),
-            )
-        })?;
-
-    if !status.success() {
-        bail!("builder command failed for '{distro_id}' with status {status}");
-    }
+        .error_msg(format!(
+            "variant release build hook '{}' for product '{product}' on '{distro_id}'",
+            native_build.display(),
+        ))
+        .run_interactive()?;
 
     if std::fs::metadata(&iso_path).map_or(true, |m| !m.is_file() || m.len() == 0) {
         bail!(

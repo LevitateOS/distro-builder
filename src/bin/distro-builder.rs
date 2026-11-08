@@ -1,36 +1,79 @@
+//! distro-builder: the command line over the library. Its one grammar is
+//! `distro_builder::cli`; each command calls one workflow. A usage error exits 2,
+//! a failed command exits 1.
+
 use anyhow::{Context, Result};
+use distro_builder::cli::{self, Command};
+use distro_builder::process::{self, HostNeed};
+use distro_builder::product::ReleaseProduct;
+use std::path::Path;
+use std::process::ExitCode;
 
 mod workflows;
 
-fn usage() -> String {
-    use distro_contract::ProductId;
-    let releases = ProductId::list(ProductId::releases());
-    let products = ProductId::list(ProductId::ALL);
-    format!(
-        "Usage:\n  distro-builder release build iso [<product>] <distro_id>\n    \
-         product defaults to base-rootfs; release products: {releases}\n  \
-         distro-builder release build-all iso [{releases}]\n  \
-         distro-builder product prepare <{products}> <distro_id> <output_dir>\n  \
-         distro-builder transform build rootfs-erofs <source_dir> <output>\n  \
-         distro-builder transform build overlayfs-erofs <source_dir> <output>\n  \
-         distro-builder transform build product-erofs <prepared_product_dir>\n  \
-         distro-builder artifact prepare-qemu-tools\n  \
-         distro-builder artifact prepare-tool-source <package> <output_dir>\n  \
-         distro-builder artifact preseed-rootfs-source <distro_id> [--refresh]\n  \
-         distro-builder artifact materialize-rootfs-source <distro_id>"
-    )
+use workflows::{artifacts, build};
+
+fn main() -> ExitCode {
+    let args: Result<Vec<String>, _> = std::env::args_os().skip(1).map(|arg| arg.into_string()).collect();
+    let args = match args {
+        Ok(args) => args,
+        Err(arg) => return usage_error(&format!("argument {arg:?} is not UTF-8")),
+    };
+    if matches!(args.as_slice(), [flag] if flag == "--help" || flag == "-h") {
+        println!("{}", cli::usage());
+        return ExitCode::SUCCESS;
+    }
+    let (repo, command) = match cli::parse(&args) {
+        Ok(parsed) => parsed,
+        Err(cli::Usage(message)) => return usage_error(&message),
+    };
+    match run(&repo, command).with_context(|| format!("distro-builder {}", args[2..].join(" "))) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("Error: {error:?}");
+            ExitCode::FAILURE
+        }
+    }
 }
 
-fn main() -> Result<()> {
+fn usage_error(message: &str) -> ExitCode {
+    eprintln!("distro-builder: {message}\n\n{}", cli::usage());
+    ExitCode::from(2)
+}
+
+fn run(repo: &Path, command: Command) -> Result<()> {
     // If the launcher dies (cancel, abort), this build dies with it.
-    distro_builder::process::die_with_parent()
-        .context("arming the parent-death signal for distro-builder")?;
-
-    let args: Vec<String> = std::env::args().skip(1).collect();
-
-    if workflows::is_release_build_invocation(&args) {
-        return workflows::run_release_build_command(&args);
+    process::die_with_parent().context("arming the parent-death signal for distro-builder")?;
+    match command {
+        Command::ReleaseBuild { product, distro } => {
+            let release = ReleaseProduct::new(product)
+                .with_context(|| format!("'{product}' is not built into a release ISO"))?;
+            process::check_host_tools(HostNeed::Build)?;
+            build::ensure_release_prerequisites(repo, &distro, product)?;
+            build::build_one(repo, &distro, release)
+        }
+        Command::ProductPrepare {
+            product,
+            distro,
+            output,
+        } => artifacts::prepare_product_cmd(repo, product, &distro, &output),
+        Command::RootfsErofs { source, output } => artifacts::build_rootfs_erofs(&source, &output),
+        Command::OverlayErofs { source, output } => {
+            artifacts::build_overlayfs_erofs(&source, &output)
+        }
+        Command::ProductErofs { prepared } => artifacts::build_prepared_product_erofs_cmd(&prepared),
+        Command::PrepareQemuTools => {
+            let selection = distro_builder::recipe::qemu::prepare_qemu_tools(repo)?;
+            println!("{}", selection.display());
+            Ok(())
+        }
+        Command::PrepareToolSource { package, output } => {
+            distro_builder::recipe::tools::prepare_tool_source_into(repo, &package, &output)?;
+            println!("{}", output.display());
+            Ok(())
+        }
+        Command::PreseedRootfsSource { distro, refresh } => {
+            artifacts::preseed_rootfs_source_cmd(repo, &distro, refresh)
+        }
     }
-
-    workflows::dispatch_non_release_command(&args)
 }

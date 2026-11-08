@@ -20,28 +20,15 @@ pub(crate) fn ensure_release_prerequisites(
         println!(
             "[release:iso:{product}:{distro_id}] materializing missing parent release '{parent}'..."
         );
-        build_one(distro_id, release)?;
+        build_one(repo_root, distro_id, release)?;
     }
 
     Ok(())
 }
 
-pub(crate) fn build_all(release: ReleaseProduct) -> Result<()> {
+pub(crate) fn build_one(repo_root: &Path, distro_id: &str, release: ReleaseProduct) -> Result<()> {
     let product = release.product;
-    let repo_root = crate::workflows::repo_root()?;
-    let distro_ids = crate::workflows::parse::discover_distro_ids(&repo_root)?;
-    for distro_id in &distro_ids {
-        println!("[release:iso:{product}] building {distro_id}...");
-        ensure_release_prerequisites(&repo_root, distro_id, product)?;
-        build_one(distro_id, release)?;
-    }
-    Ok(())
-}
-
-pub(crate) fn build_one(distro_id: &str, release: ReleaseProduct) -> Result<()> {
-    let product = release.product;
-    let repo_root = crate::workflows::repo_root()?;
-    let bundle = distro_contract::load(&repo_root, distro_id)?;
+    let bundle = distro_contract::load(repo_root, distro_id)?;
 
     let kernel_output_dir = runs::kernel_dir(&bundle.repo_root, distro_id);
     let mut run = runs::Run::start_release(&bundle.repo_root, distro_id, product)?;
@@ -55,7 +42,7 @@ pub(crate) fn build_one(distro_id: &str, release: ReleaseProduct) -> Result<()> 
             format!("install it first: cargo xtask build kernel {distro_id} (--prebuilt downloads it)")
         })?;
         println!("[release:iso:{product}:{distro_id}] kernel already installed");
-        crate::workflows::ensure_release_iso_via_variant_hook(
+        super::release_hook::ensure_release_iso_via_variant_hook(
             &bundle,
             distro_id,
             &kernel_output_dir,

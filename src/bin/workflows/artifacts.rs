@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use anyhow::{Context, Result};
+use distro_builder::product::ProductId;
 use distro_builder::recipe::rootfs_source::preseed_rootfs_source;
 use distro_builder::{build_erofs_default, build_overlayfs_default, PreparedProduct};
 
@@ -50,11 +51,14 @@ pub(crate) fn build_prepared_product_erofs_cmd(prepared_dir: &Path) -> Result<()
     Ok(())
 }
 
-pub(crate) fn prepare_product_cmd(product: &str, distro_id: &str, output_dir: &Path) -> Result<()> {
-    let product = crate::workflows::parse_product(product)?;
-    let repo_root = crate::workflows::repo_root()?;
-    let bundle = distro_contract::load(&repo_root, distro_id)?;
-    crate::workflows::ensure_release_prerequisites(&bundle.repo_root, distro_id, product)
+pub(crate) fn prepare_product_cmd(
+    repo_root: &Path,
+    product: ProductId,
+    distro_id: &str,
+    output_dir: &Path,
+) -> Result<()> {
+    let bundle = distro_contract::load(repo_root, distro_id)?;
+    super::build::ensure_release_prerequisites(&bundle.repo_root, distro_id, product)
         .with_context(|| {
             format!("realizing parent release prerequisites for product '{product}' on '{distro_id}'")
         })?;
@@ -67,9 +71,12 @@ pub(crate) fn prepare_product_cmd(product: &str, distro_id: &str, output_dir: &P
     Ok(())
 }
 
-pub(crate) fn preseed_rootfs_source_cmd(distro_id: &str, refresh: bool) -> Result<()> {
-    let repo_root = crate::workflows::repo_root()?;
-    let bundle = distro_contract::load(&repo_root, distro_id)?;
+pub(crate) fn preseed_rootfs_source_cmd(
+    repo_root: &Path,
+    distro_id: &str,
+    refresh: bool,
+) -> Result<()> {
+    let bundle = distro_contract::load(repo_root, distro_id)?;
     let source = &bundle.contract.sources.rootfs_source;
     let recipe_script = source
         .preseed_recipe_script
@@ -89,14 +96,5 @@ pub(crate) fn preseed_rootfs_source_cmd(distro_id: &str, refresh: bool) -> Resul
     for (name, path) in paths {
         println!("  {name}: {}", path.display());
     }
-    Ok(())
-}
-
-pub(crate) fn materialize_rootfs_source_cmd(distro_id: &str) -> Result<()> {
-    let repo_root = crate::workflows::repo_root()?;
-    let bundle = distro_contract::load(&repo_root, distro_id)?;
-    let source_rootfs_dir = distro_builder::materialize_rootfs_source(&bundle)?;
-    println!("rootfs source ready for {}:", distro_id);
-    println!("  rootfs source: {}", source_rootfs_dir.display());
     Ok(())
 }

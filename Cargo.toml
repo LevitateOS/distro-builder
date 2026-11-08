@@ -2,7 +2,6 @@
 name = "distro-builder"
 version = "0.1.0"
 edition = "2021"
-autobins = false
 description = "Shared infrastructure for building LevitateOS and AcornOS ISOs"
 license = "MIT OR Apache-2.0"
 
@@ -23,7 +22,3 @@ walkdir = "2"
 which = "5.0"
 time = "0.3"
 tempfile = "3"
-
-[[bin]]
-name = "distro-builder"
-path = "src/bin/distro-builder.rs"

@@ -1,6 +1,7 @@
 //! Builds a variant's products (rootfs, overlays, release ISOs) over Recipe.
 
 pub mod artifact;
+pub mod cli;
 pub mod install_ux;
 pub(crate) mod guest;
 pub use pipeline::kernel;

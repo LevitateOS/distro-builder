@@ -45,13 +45,14 @@ fn check_init(init) {
     if init != "systemd" && init != "openrc" { throw "unsupported init system: " + init; }
 }
 
-// The OpenRC runlevel a service belongs in: the boot sequence Alpine's
-// setup-alpine enables (sysinit mounts /dev, /dev/pts and /dev/shm and loads
-// the drivers mdev finds; boot sets up the system; shutdown stops it cleanly).
+// The OpenRC runlevel a service belongs in: sysinit mounts /dev, /dev/pts
+// and /dev/shm, then udev initializes devices for NetworkManager. The boot
+// runlevel sets up the system, and shutdown stops it cleanly.
 // Every other service goes in default.
 fn openrc_runlevel(service) {
     let levels = #{
-        devfs: "sysinit", dmesg: "sysinit", mdev: "sysinit", hwdrivers: "sysinit",
+        devfs: "sysinit", dmesg: "sysinit", udev: "sysinit", "udev-trigger": "sysinit",
+        "udev-settle": "sysinit",
         modules: "boot", sysctl: "boot", hostname: "boot", bootmisc: "boot", syslog: "boot",
         hwclock: "boot", seedrng: "boot", loadkeys: "boot",
         "mount-ro": "shutdown", killprocs: "shutdown", savecache: "shutdown"
@@ -83,7 +84,7 @@ fn enable(root, init, service) {
 fn base_services(init) {
     check_init(init);
     if init == "systemd" { [] }
-    else { ["devfs", "dmesg", "mdev", "hwdrivers", "modules", "sysctl", "hostname", "bootmisc",
+    else { ["devfs", "dmesg", "udev", "udev-trigger", "udev-settle", "modules", "sysctl", "hostname", "bootmisc",
             "syslog", "hwclock", "seedrng", "mount-ro", "killprocs", "savecache"] }
 }
 
@@ -319,4 +320,11 @@ fn apply(root, inputs, init) {
     homes(root);
     lock_root(root);
     setup_program(root, inputs);
+    if init == "openrc" {
+        // D-Bus cannot initialize an existing empty machine-id, and /var/log
+        // may be a fresh live tmpfs or the installed system's shared state.
+        put(root, "etc/init.d/recipe-system-setup",
+            "#!/sbin/openrc-run\ndescription=\"Initialize machine identity and runtime directories\"\n\ndepend() {\n    need localmount\n    before dbus auditd\n}\n\nstart() {\n    /usr/libexec/recipe-system-setup machine-id || return 1\n    checkpath -d -m 0700 -o root:root /var/log/audit\n}\n", 0o755);
+        enable(root, init, "recipe-system-setup");
+    }
 }

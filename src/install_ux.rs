@@ -83,10 +83,11 @@ pub(crate) fn write_payload(
         .iter()
         .find(|a| a.name == docs.app)
         .expect("the docs app is among the apps");
+    // The docs app is told which distro's docs to show; it reads nothing from the running system.
     let mut docs_argv = vec![
         format!("/{}/{}", crate::tui_binary::BIN_DIR, docs.app),
-        "--title".to_string(),
-        format!("{os_name} install guide"),
+        "--os-name".to_string(),
+        os_name.to_string(),
     ];
     docs_argv.extend(docs.args.iter().cloned());
     if let Some(page) = &docs.page {

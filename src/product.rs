@@ -15,6 +15,9 @@ pub struct ProductBuild {
     /// The overlay also carries the install tools and the install screen,
     /// which runs on the variant's install consoles.
     pub install_screen: bool,
+    /// The overlay also boots the graphical desktop: it enables the
+    /// variant's display manager and the graphical boot target.
+    pub desktop: bool,
 }
 
 pub fn build(product: ProductId) -> ProductBuild {
@@ -22,6 +25,7 @@ pub fn build(product: ProductId) -> ProductBuild {
         overlay_dir: "live-overlay",
         live_session: true,
         install_screen: false,
+        desktop: false,
     };
     match product {
         ProductId::BaseRootfs => ProductBuild {
@@ -33,10 +37,16 @@ pub fn build(product: ProductId) -> ProductBuild {
             install_screen: true,
             ..LIVE
         },
+        ProductId::LiveDesktop => ProductBuild {
+            install_screen: true,
+            desktop: true,
+            ..LIVE
+        },
         ProductId::InstalledBoot => ProductBuild {
             overlay_dir: "boot-overlay",
             live_session: false,
             install_screen: false,
+            desktop: false,
         },
     }
 }

@@ -26,6 +26,9 @@ pub(crate) struct LiveSession {
     /// Units (systemd) or services (OpenRC) the session starts besides the
     /// installed system's.
     services: Vec<String>,
+    /// The display manager a desktop product starts; the session then boots
+    /// to the graphical target.
+    display_manager: Option<String>,
     /// Where recinit's live init keeps the boot medium mounted.
     live_media_dir: &'static str,
     /// The overlay's payload role file (recinit's payload-role protocol).
@@ -37,7 +40,8 @@ impl LiveSession {
     /// `product`'s session, from the variant's live and install-screen config.
     pub(crate) fn new(variant: &Variant, product: ProductId) -> Self {
         let contract = &variant.contract;
-        let install_screen = crate::product::build(product).install_screen;
+        let build = crate::product::build(product);
+        let install_screen = build.install_screen;
         Self {
             os_name: contract.identity.os_name.clone(),
             label: product.title(),
@@ -50,6 +54,7 @@ impl LiveSession {
             },
             launcher: install_screen.then(|| format!("/{}", crate::install_ux::LAUNCHER)),
             services: contract.live_service_units(),
+            display_manager: build.desktop.then(|| contract.desktop.display_manager.clone()),
             live_media_dir: recinit::live::LIVE_MEDIA_DIR,
             role_file: recinit::live::PAYLOAD_ROLE_FILE,
             role: recinit::live::ROLE_OVERLAY,

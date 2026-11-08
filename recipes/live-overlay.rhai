@@ -61,6 +61,7 @@ fn install(ctx) {
     // Services, and what they need.
     system::sshd_runtime_dir(root, c.init);
     for service in c.services { system::enable(root, c.init, service); }
+    if c.display_manager != () { system::graphical(root, c.init, c.display_manager); }
     // Release the boot medium and its loop devices at shutdown.
     system::shutdown_hook(root, c.init, "live-shutdown-cleanup",
         input(c, "shutdown_cleanup"), c.live_media_dir);

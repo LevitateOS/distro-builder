@@ -113,6 +113,16 @@ fn boot_target(root, init) {
     }
 }
 
+// Boot to the graphical desktop: start the display manager and, on systemd,
+// make graphical.target the default. OpenRC has no target; its display manager
+// starts in the default runlevel after dbus and elogind.
+fn graphical(root, init, display_manager) {
+    enable(root, init, display_manager);
+    if init == "systemd" {
+        link(root, "etc/systemd/system/default.target", "/usr/lib/systemd/system/graphical.target");
+    }
+}
+
 // The login on each console. `gettys` is a list of [console, login]: login ""
 // is a login prompt, "root" logs root in without asking, and a path runs that
 // program as root in place of login. A serial login prompt runs only when

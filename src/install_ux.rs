@@ -99,8 +99,13 @@ pub(crate) fn write_payload(
     }
 
     // The left pane: the hub, which opens the shell on request, or the shell itself.
+    // The hub is told which distro it installs; it reads nothing from the running system.
     let left = match &install_ux.hub {
-        Some(hub) => format!("/{}/{hub}", crate::tui_binary::BIN_DIR),
+        Some(hub) => shell_words(&[
+            format!("/{}/{hub}", crate::tui_binary::BIN_DIR),
+            "--os-name".to_string(),
+            os_name.to_string(),
+        ]),
         None => "\"$SHELL\" -l".to_string(),
     };
     let launcher = crate::guest::render(

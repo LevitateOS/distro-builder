@@ -8,7 +8,6 @@
 
 pub mod linux;
 mod outputs;
-pub mod qemu;
 pub mod rootfs_source;
 pub mod tools;
 

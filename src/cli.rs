@@ -24,8 +24,6 @@ pub enum Command {
     OverlayErofs { source: PathBuf, output: PathBuf },
     /// Write both EROFS images of a prepared product.
     ProductErofs { prepared: PathBuf },
-    /// Install the QEMU/OVMF tools and select them as `.artifacts/tools/current`.
-    PrepareQemuTools,
     /// Write a tool package's offline source tree to `output`.
     PrepareToolSource { package: String, output: PathBuf },
     /// Run `distro`'s rootfs-source acquisition; `refresh` acquires again.
@@ -46,7 +44,6 @@ pub fn usage() -> String {
          transform build rootfs-erofs <source> <output>     write a rootfs EROFS image\n  \
          transform build overlayfs-erofs <source> <output>  write an overlay EROFS image\n  \
          transform build product-erofs <prepared_dir>       write a prepared product's EROFS images\n  \
-         artifact prepare-qemu-tools                        install the QEMU/OVMF tools as .artifacts/tools/current\n  \
          artifact prepare-tool-source <package> <dir>       write a tool's offline source tree\n  \
          artifact preseed-rootfs-source <distro> [--refresh]  acquire a distro's rootfs source",
         releases = ProductId::list(ProductId::releases()),
@@ -79,7 +76,6 @@ impl Command {
             Self::ProductErofs { prepared } => {
                 push(&[&"transform", &"build", &"product-erofs", prepared])
             }
-            Self::PrepareQemuTools => push(&[&"artifact", &"prepare-qemu-tools"]),
             Self::PrepareToolSource { package, output } => {
                 push(&[&"artifact", &"prepare-tool-source", package, output])
             }
@@ -159,7 +155,6 @@ pub fn parse(args: &[String]) -> Result<(PathBuf, Command), Usage> {
         ["transform", "build", "product-erofs", prepared] => Command::ProductErofs {
             prepared: prepared.into(),
         },
-        ["artifact", "prepare-qemu-tools"] => Command::PrepareQemuTools,
         ["artifact", "prepare-tool-source", package, output] => Command::PrepareToolSource {
             package: package.to_string(),
             output: output.into(),

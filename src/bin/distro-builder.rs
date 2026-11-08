@@ -62,11 +62,6 @@ fn run(repo: &Path, command: Command) -> Result<()> {
             artifacts::build_overlayfs_erofs(&source, &output)
         }
         Command::ProductErofs { prepared } => artifacts::build_prepared_product_erofs_cmd(&prepared),
-        Command::PrepareQemuTools => {
-            let selection = distro_builder::recipe::qemu::prepare_qemu_tools(repo)?;
-            println!("{}", selection.display());
-            Ok(())
-        }
         Command::PrepareToolSource { package, output } => {
             distro_builder::recipe::tools::prepare_tool_source_into(repo, &package, &output)?;
             println!("{}", output.display());

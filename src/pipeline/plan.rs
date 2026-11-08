@@ -1,12 +1,6 @@
 use anyhow::{bail, Context, Result};
 use std::fs;
-use std::path::Component;
 use std::path::{Path, PathBuf};
-
-const LEGACY_ROOTFS_COMPONENT_SEQUENCES: &[&[&str]] = &[
-    &["leviso", "downloads", "rootfs"],
-    &["acornos", "downloads", "rootfs"],
-];
 
 #[derive(Debug, Clone)]
 pub(crate) struct ProducerPlan {
@@ -58,25 +52,6 @@ pub(crate) fn build_baseline_producers(
 }
 
 pub(crate) fn apply_producer_plan(plan: &ProducerPlan, destination_root: &Path) -> Result<()> {
-    if let Some(source_root) = plan.source_rootfs_dir.as_ref() {
-        ensure_non_legacy_rootfs_source(source_root).with_context(|| {
-            format!(
-                "applying producer plan with source rootfs '{}'",
-                source_root.display()
-            )
-        })?;
-    } else if plan
-        .producers
-        .iter()
-        .any(|producer| matches!(producer, RootfsProducer::CopyTree { .. }))
-    {
-        bail!(
-            "live-boot product preparation requires copy-based rootfs sourcing, but no non-legacy source_rootfs_dir is configured.\n\
-             Legacy */downloads/rootfs mappings are intentionally forbidden.\n\
-             Migrate payload assembly to canonical non-legacy producers."
-        );
-    }
-
     for producer in &plan.producers {
         match producer {
             RootfsProducer::CopyTree {
@@ -120,41 +95,4 @@ pub(crate) fn apply_producer_plan(plan: &ProducerPlan, destination_root: &Path) 
     }
 
     Ok(())
-}
-
-pub(crate) fn ensure_non_legacy_rootfs_source(path: &Path) -> Result<()> {
-    if !is_legacy_rootfs_source(path) {
-        return Ok(());
-    }
-
-    bail!(
-        "policy violation: legacy rootfs source '{}' is forbidden.\n\
-         Legacy distro crate rootfs trees must not be consumed by distro-builder product inputs.\n\
-         Provide a non-legacy product source path (for example under '.artifacts/prepared/<distro>/<product>/' or 'distro/variants/<distro>/').",
-        path.display()
-    );
-}
-
-fn is_legacy_rootfs_source(path: &Path) -> bool {
-    let components: Vec<String> = path
-        .components()
-        .filter_map(|component| match component {
-            Component::Normal(part) => Some(part.to_string_lossy().to_ascii_lowercase()),
-            _ => None,
-        })
-        .collect();
-
-    LEGACY_ROOTFS_COMPONENT_SEQUENCES
-        .iter()
-        .any(|needle| contains_component_sequence(&components, needle))
-}
-
-fn contains_component_sequence(haystack: &[String], needle: &[&str]) -> bool {
-    if needle.is_empty() || needle.len() > haystack.len() {
-        return false;
-    }
-
-    haystack
-        .windows(needle.len())
-        .any(|window| window.iter().map(String::as_str).eq(needle.iter().copied()))
 }

@@ -7,7 +7,7 @@ use distro_contract::Variant;
 
 use distro_builder::product::ReleaseProduct;
 
-use crate::BuildOutputLayout;
+use distro_contract::runs::Run;
 
 /// The default live UKI's extra kernel command line (its emergency and debug
 /// siblings boot in text mode).
@@ -17,13 +17,13 @@ pub(crate) fn ensure_release_iso_via_variant_hook(
     bundle: &Variant,
     distro_id: &str,
     kernel_output_dir: &Path,
-    build_layout: &BuildOutputLayout,
+    run: &Run,
     release: ReleaseProduct,
 ) -> Result<()> {
     let product = release.product;
     let build = distro_builder::product::build(product);
     let artifacts = &bundle.contract.artifacts;
-    let output_dir = &build_layout.output_dir;
+    let output_dir = &run.dir;
     let iso_filename = artifacts.iso(product);
     let iso_path = output_dir.join(&iso_filename);
     let native_build = bundle.path("hooks").join(release.hook);
@@ -44,7 +44,7 @@ pub(crate) fn ensure_release_iso_via_variant_hook(
 
     println!(
         "[release:iso:{product}:{distro_id}] building release run {} via variant release hook {} (output: {})",
-        build_layout.run_id.as_deref().unwrap_or("adhoc"),
+        run.manifest.run_id,
         native_build.display(),
         iso_path.display()
     );
@@ -85,10 +85,7 @@ pub(crate) fn ensure_release_iso_via_variant_hook(
         .env("LIVE_OVERLAY_DIRNAME", build.overlay_dir)
         .env("LIVE_OVERLAY_IMAGE_FILENAME", &artifacts.overlay)
         .env("ROOTFS_SOURCE_POINTER_FILENAME", build.rootfs_source_pointer)
-        .env("RELEASE_ROOT_DIR", &build_layout.root_dir)
-        .env("RELEASE_RUN_DIR", output_dir)
         .env("RELEASE_OUTPUT_DIR", output_dir)
-        .env("BUILD_RUN_ID", build_layout.run_id.as_deref().unwrap_or(""))
         .env("DISTRO_BUILDER_BIN", &distro_builder_bin)
         .env("KERNEL_OUTPUT_DIR", kernel_output_dir)
         .env("PRODUCT_REQUIRED_KERNEL_CMDLINE", &required_kernel_cmdline)

@@ -7,8 +7,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::pipeline::paths::{normalize_distro_id, resolve_repo_path};
-use crate::pipeline::plan::ensure_non_legacy_rootfs_source;
+use crate::pipeline::paths::resolve_repo_path;
 use crate::recipe::rootfs_source::{materialize_rootfs_from_recipe, RootfsSourceRecipeSpec};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -102,42 +101,11 @@ pub(crate) fn materialize_source_rootfs(
         },
     )
     .with_context(|| format!("materializing rootfs source recipe output for '{distro_id}'"))?;
-    ensure_non_legacy_rootfs_source(&source_rootfs_dir)?;
     Ok(source_rootfs_dir)
 }
 
-pub(crate) fn cleanup_legacy_provider_dir(output_dir: &Path) -> Result<()> {
-    let entries = fs::read_dir(output_dir)
-        .with_context(|| format!("reading output directory '{}'", output_dir.display()))?;
-    for entry in entries {
-        let entry = entry.with_context(|| {
-            format!(
-                "reading legacy provider directory entry under '{}'",
-                output_dir.display()
-            )
-        })?;
-        let path = entry.path();
-        if !path.is_dir() {
-            continue;
-        }
-        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
-            continue;
-        };
-        if !name.ends_with("-rootfs-provider") {
-            continue;
-        }
-        fs::remove_dir_all(&path)
-            .with_context(|| format!("removing legacy provider dir '{}'", path.display()))?;
-    }
-    Ok(())
-}
-
 fn rootfs_source_provider_work_dir(repo_root: &Path, distro_id: &str) -> Result<PathBuf> {
-    let normalized = normalize_distro_id(distro_id, "rootfs source provider work directory")?;
-    let provider_dir = repo_root
-        .join(".artifacts/work")
-        .join(normalized)
-        .join("rootfs-source-provider");
+    let provider_dir = distro_contract::runs::rootfs_source_work_dir(repo_root, distro_id);
     fs::create_dir_all(&provider_dir).with_context(|| {
         format!(
             "creating rootfs source provider work directory '{}'",
@@ -156,6 +124,6 @@ fn rootfs_source_provider_recipe_work_dir(
         .file_stem()
         .and_then(|stem| stem.to_str())
         .filter(|stem| !stem.is_empty())
-        .unwrap_or("recipe");
+        .with_context(|| format!("rootfs source recipe '{}' has no file name", recipe_script.display()))?;
     Ok(rootfs_source_provider_work_dir(repo_root, distro_id)?.join(recipe_dir_name))
 }

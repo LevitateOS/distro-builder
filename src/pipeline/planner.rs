@@ -1,9 +1,7 @@
 //! The product chain: each product starts from its parent's latest built
 //! rootfs, and a release build first builds the parents that have none.
 
-use crate::pipeline::io::{
-    release_product_rootfs_exists_for_distro, resolve_release_product_rootfs_image_for_distro,
-};
+use crate::pipeline::io::latest_release_rootfs;
 use anyhow::Result;
 use distro_contract::{ConformanceContract, ProductId};
 use std::path::{Path, PathBuf};
@@ -18,12 +16,7 @@ pub fn missing_parent_releases(
 ) -> Result<Vec<ProductId>> {
     let mut missing = Vec::new();
     for parent in product.chain().into_iter().filter(|parent| *parent != product) {
-        if !release_product_rootfs_exists_for_distro(
-            repo_root,
-            distro_id,
-            parent,
-            &contract.artifacts.rootfs,
-        )? {
+        if latest_release_rootfs(repo_root, distro_id, parent, &contract.artifacts.rootfs)?.is_none() {
             missing.push(parent);
         }
     }
@@ -41,12 +34,13 @@ pub fn parent_rootfs_image(
     product
         .parent()
         .map(|parent| {
-            resolve_release_product_rootfs_image_for_distro(
-                repo_root,
-                distro_id,
-                parent,
-                &contract.artifacts.rootfs,
-            )
+            latest_release_rootfs(repo_root, distro_id, parent, &contract.artifacts.rootfs)?
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "{distro_id} has no successful {parent} release with a rootfs image ({}); build that release first",
+                        contract.artifacts.rootfs
+                    )
+                })
         })
         .transpose()
 }

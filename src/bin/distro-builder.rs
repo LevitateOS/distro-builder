@@ -1,31 +1,6 @@
 use anyhow::{Context, Result};
-use serde::Serialize;
 
-mod run_manifest;
 mod workflows;
-
-const RELEASE_RUN_RETENTION_COUNT: usize = 5;
-
-#[derive(Debug, Clone)]
-struct BuildOutputLayout {
-    root_dir: std::path::PathBuf,
-    output_dir: std::path::PathBuf,
-    run_id: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-struct BuildRunMetadata {
-    run_id: String,
-    distro_id: String,
-    target_kind: String,
-    target_name: String,
-    status: String,
-    created_at_utc: String,
-    finished_at_utc: Option<String>,
-    root_dir: String,
-    output_dir: String,
-    iso_path: String,
-}
 
 fn usage() -> String {
     use distro_contract::ProductId;

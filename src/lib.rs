@@ -9,12 +9,11 @@ pub mod product;
 pub(crate) mod tui_binary;
 pub mod process;
 pub mod recipe;
-pub mod run_history;
 
 pub use artifact::filesystem::copy_dir_recursive;
 pub use artifact::overlayfs::{build_overlayfs_default, create_overlayfs_erofs};
 pub use artifact::rootfs::{build_erofs_default, create_erofs};
-pub use pipeline::io::resolve_release_product_rootfs_image_for_distro;
+pub use pipeline::io::latest_release_rootfs;
 pub use pipeline::planner::{missing_parent_releases, parent_rootfs_image};
 pub use pipeline::products::{
     load_base_rootfs_product_spec, load_installed_boot_product_spec, load_live_boot_product_spec,

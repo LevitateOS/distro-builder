@@ -114,7 +114,7 @@ fn write_prepared_product_manifest(
     let manifest_path = prepared_product_manifest_path(output_dir);
     let bytes =
         serde_json::to_vec_pretty(manifest).context("serializing prepared product manifest")?;
-    fs::write(&manifest_path, bytes).with_context(|| {
+    distro_contract::runs::write_atomic(&manifest_path, &bytes).with_context(|| {
         format!(
             "writing prepared product manifest '{}'",
             manifest_path.display()

@@ -43,42 +43,18 @@ pub(crate) fn create_empty_overlay_dir(output_dir: &Path, dir_name: &str) -> Res
     Ok(overlay_dir)
 }
 
-/// The rootfs image of the latest successful release of `product`.
-pub fn resolve_release_product_rootfs_image_for_distro(
+/// The rootfs image of the latest successful release of `product`; `None`
+/// when there is no successful release or it has no rootfs image.
+pub fn latest_release_rootfs(
     repo_root: &Path,
     distro_id: &str,
     product: ProductId,
     rootfs_filename: &str,
-) -> Result<PathBuf> {
-    let product_root = crate::run_history::release_product_dir(repo_root, distro_id, product);
-    let run_id = crate::run_history::latest_successful_run_id(&product_root)?.ok_or_else(|| {
-        anyhow::anyhow!(
-            "{distro_id} has no successful {product} release under '{}'; build that release first",
-            product_root.display(),
-        )
-    })?;
-    let path = product_root.join(run_id).join(rootfs_filename);
-    if !path.is_file() {
-        bail!(
-            "the latest {distro_id} {product} release has no rootfs image '{}'; build that release again",
-            path.display(),
-        );
-    }
-    Ok(path)
-}
-
-/// Whether the latest successful release of `product` has its rootfs image.
-pub fn release_product_rootfs_exists_for_distro(
-    repo_root: &Path,
-    distro_id: &str,
-    product: ProductId,
-    rootfs_filename: &str,
-) -> Result<bool> {
-    let product_root = crate::run_history::release_product_dir(repo_root, distro_id, product);
-    let Some(run_id) = crate::run_history::latest_successful_run_id(&product_root)? else {
-        return Ok(false);
-    };
-    Ok(product_root.join(run_id).join(rootfs_filename).is_file())
+) -> Result<Option<PathBuf>> {
+    let release_dir = distro_contract::runs::release_dir(repo_root, distro_id, product);
+    Ok(distro_contract::runs::latest_success(&release_dir)?
+        .map(|(dir, _)| dir.join(rootfs_filename))
+        .filter(|path| path.is_file()))
 }
 
 pub(crate) fn extract_erofs_rootfs(image: &Path, destination: &Path) -> Result<()> {

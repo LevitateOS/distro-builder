@@ -10,19 +10,12 @@ pub(crate) fn resolve_repo_path(repo_root: &Path, path: &str) -> PathBuf {
     }
 }
 
-pub(crate) fn normalize_distro_id(distro_id: &str, purpose: &str) -> Result<&'static str> {
-    match distro_id.trim().to_ascii_lowercase().as_str() {
-        "levitate" | "leviso" => Ok("levitate"),
-        "acorn" | "acornos" => Ok("acorn"),
-        other => bail!("unsupported distro '{}' for {} resolution", other, purpose),
-    }
-}
-
-/// Shared acquisition/build work for a distro's recipes, separate from published outputs.
+/// The Recipe build and state directory of variant `distro_id`
+/// (`distro_contract::runs::recipe_work_dir`); an error for an id that names
+/// no variant under `distro/variants`.
 pub fn recipe_work_dir(repo_root: &Path, distro_id: &str) -> Result<PathBuf> {
-    let normalized = normalize_distro_id(distro_id, "recipe work directory")?;
-    Ok(repo_root
-        .join(".artifacts/work")
-        .join(normalized)
-        .join("downloads"))
+    if !distro_contract::distro_ids(repo_root).iter().any(|id| id == distro_id) {
+        bail!("'{distro_id}' is not a variant under distro/variants");
+    }
+    Ok(distro_contract::runs::recipe_work_dir(repo_root, distro_id))
 }

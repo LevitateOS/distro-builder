@@ -18,7 +18,7 @@ use crate::pipeline::plan::{
     apply_producer_plan, build_baseline_producers, ProducerPlan, RootfsProducer,
 };
 use crate::pipeline::source::{
-    cleanup_legacy_provider_dir, materialize_source_rootfs, RootfsSourcePolicy,
+    materialize_source_rootfs, RootfsSourcePolicy,
 };
 
 #[derive(Debug, Clone)]
@@ -246,12 +246,6 @@ pub fn prepare_live_boot_product(
     })?;
 
     let rootfs_source_dir = create_unique_output_dir(output_dir, &spec.rootfs_source_dir)?;
-    cleanup_legacy_provider_dir(output_dir).with_context(|| {
-        format!(
-            "cleaning legacy live boot provider directory under '{}'",
-            output_dir.display()
-        )
-    })?;
     extract_erofs_rootfs(parent_rootfs, &rootfs_source_dir).with_context(|| {
         format!(
             "extracting parent rootfs for live boot product from '{}'",
@@ -442,12 +436,6 @@ pub fn prepare_installed_boot_product(
     })?;
 
     let rootfs_source_dir = create_unique_output_dir(output_dir, &spec.rootfs_source_dir)?;
-    cleanup_legacy_provider_dir(output_dir).with_context(|| {
-        format!(
-            "cleaning legacy installed boot provider directory under '{}'",
-            output_dir.display()
-        )
-    })?;
     extract_erofs_rootfs(parent_rootfs, &rootfs_source_dir).with_context(|| {
         format!(
             "extracting parent rootfs for installed boot product from '{}'",

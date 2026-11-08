@@ -1,7 +1,6 @@
 //! Shared Linux kernel recipe wrapper.
 
 use super::{find_recipe, recipe_work_dir, run_recipe_phase_json_with_inputs};
-use crate::pipeline::paths::normalize_distro_id;
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 
@@ -25,7 +24,6 @@ impl LinuxPaths {
 
 /// Run the source kernel producer with canonical variant configuration and work paths.
 pub fn linux_for_distro(repo_root: &Path, distro_id: &str) -> Result<LinuxPaths> {
-    let distro_id = normalize_distro_id(distro_id, "Linux adapter")?;
     let bundle = distro_contract::load(repo_root, distro_id)?;
     let monorepo_dir = &bundle.repo_root;
     let work_dir = recipe_work_dir(monorepo_dir, distro_id)?;
@@ -41,7 +39,7 @@ pub fn linux_for_distro(repo_root: &Path, distro_id: &str) -> Result<LinuxPaths>
     let recipe_path = shared_recipe;
 
     let (kconfig_path, fragments) = crate::kernel::kconfig_inputs(&bundle);
-    let current = crate::run_history::kernel_output_dir(monorepo_dir, distro_id);
+    let current = distro_contract::runs::kernel_dir(monorepo_dir, distro_id);
     let mut inputs: Vec<(&str, &Path)> = vec![("kconfig", &kconfig_path)];
     if let Some(fragments) = &fragments {
         inputs.push(("kconfig_fragments", fragments));

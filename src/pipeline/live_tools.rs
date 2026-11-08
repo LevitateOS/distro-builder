@@ -37,7 +37,6 @@ const fn tool(package: &'static str, binary: Option<&'static str>, layer: ToolLa
 /// which is live-tools only.
 pub(crate) const LIVE_TOOLS: &[LiveTool] = &[
     tool("recpart", None, ToolLayer::Overlay),
-    tool("recstrap", None, ToolLayer::Overlay),
     tool("recstrap", Some("recfstab"), ToolLayer::Overlay),
     tool("recstrap", Some("recchroot"), ToolLayer::Overlay),
     tool("recstrap", Some("recsetup"), ToolLayer::Overlay),

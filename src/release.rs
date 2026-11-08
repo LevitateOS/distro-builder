@@ -229,7 +229,7 @@ fn add_modules(rootfs: &Path, modules: &Path, release: &str) -> Result<()> {
 }
 
 /// The static busybox the initramfs run, from its recipe.
-fn busybox(variant: &Variant) -> Result<PathBuf> {
+pub fn busybox(variant: &Variant) -> Result<PathBuf> {
     let repo = &variant.repo_root;
     Invocation::new(repo, "install", repo.join(BUSYBOX_RECIPE), recipe_work_dir(repo, &variant.id)?)
         .run()?

@@ -34,6 +34,8 @@ pub struct KernelPin {
     pub localversion: String,
     /// The exact `kernel.release` the pin builds: version and localversion.
     pub release: String,
+    /// The sha256 of the version's kernel.org source tarball.
+    pub sha256: String,
 }
 
 /// Where `install` gets the kernel.
@@ -118,6 +120,7 @@ impl Metadata {
             version: field("version")?,
             localversion: field("localversion")?,
             release: field("release")?,
+            sha256: field("sha256")?,
         };
         Ok((spec, pin))
     }
@@ -240,15 +243,22 @@ fn existing_bundle(current: &Path) -> Result<Option<PathBuf>> {
     bundle_root(current).map(Some)
 }
 
-/// The kconfig the recipes are given: the shared kconfig, then the variant's,
-/// written to the variant's recipe work directory.
-fn merged_kconfig(variant: &Variant) -> Result<PathBuf> {
+/// The kernel configuration of the variant: the shared kconfig, then the
+/// variant's own.
+pub fn kconfig_text(variant: &Variant) -> Result<String> {
     let mut text = String::new();
     for path in [variant.repo_root.join(SHARED_KCONFIG), variant.path("kconfig")] {
         text += &std::fs::read_to_string(&path)
             .with_context(|| format!("reading {}", path.display()))?;
         text.push('\n');
     }
+    Ok(text)
+}
+
+/// The kconfig the recipes are given: [`kconfig_text`], written to the
+/// variant's recipe work directory.
+fn merged_kconfig(variant: &Variant) -> Result<PathBuf> {
+    let text = kconfig_text(variant)?;
     let work = recipe_work_dir(&variant.repo_root, &variant.id)?;
     std::fs::create_dir_all(&work)
         .with_context(|| format!("creating {}", work.display()))?;

@@ -118,6 +118,7 @@ fn prepare_tool_source_at(repo: &Path, package: &str, source: &Path) -> Result<(
         .dir(&repo)
         .error_msg(format!("preparing the offline source closure for {package}"))
         .run()?;
+    omit_vendor_development_files(&source.join("vendor"))?;
     let selected_lock = fs::read_to_string(source.join("Cargo.lock"))?;
     let unexpected: Vec<_> = locked_packages(&selected_lock)?
         .difference(&locked_packages(&original_lock)?)
@@ -129,6 +130,38 @@ fn prepare_tool_source_at(repo: &Path, package: &str, source: &Path) -> Result<(
     fs::create_dir_all(source.join(".cargo"))?;
     fs::write(source.join(".cargo/config.toml"),
         "[source.crates-io]\nreplace-with = \"vendored-sources\"\n[source.vendored-sources]\ndirectory = \"/inputs/source/vendor\"\n[net]\noffline = true\n")?;
+    Ok(())
+}
+
+/// These dependency directories are certificate test fixtures or an old
+/// compiler-bootstrap script, not inputs to the shipped Rust libraries. Keep
+/// them out of the production source import, whose key-material guard must
+/// still reject unexpected files. Checksums of every retained file stay intact.
+fn omit_vendor_development_files(vendor: &Path) -> Result<()> {
+    for (package, directories) in [
+        ("rustls-native-certs", &["tests", "integration-tests"][..]),
+        ("rustls-pemfile", &["tests"][..]),
+        ("untrusted", &["mk"][..]),
+    ] {
+        let root = vendor.join(package);
+        if !root.is_dir() {
+            continue;
+        }
+        let checksum_path = root.join(".cargo-checksum.json");
+        let mut checksum: serde_json::Value = serde_json::from_slice(&fs::read(&checksum_path)?)?;
+        let files = checksum.get_mut("files")
+            .and_then(serde_json::Value::as_object_mut)
+            .context("vendored crate checksum has no files map")?;
+        for directory in directories {
+            let path = root.join(directory);
+            if path.is_dir() {
+                fs::remove_dir_all(&path)?;
+                let prefix = format!("{directory}/");
+                files.retain(|name, _| !name.starts_with(&prefix));
+            }
+        }
+        fs::write(checksum_path, serde_json::to_vec(&checksum)?)?;
+    }
     Ok(())
 }
 

@@ -2,39 +2,6 @@
 //!
 //! Provides the shared EROFS implementation used by both LevitateOS and AcornOS.
 //! This is the **only** rootfs format supported for output artifacts.
-//!
-//! # Why EROFS Only?
-//!
-//! - EROFS is the modern format (Fedora 42+, RHEL 10, Android)
-//! - Better random-access performance than squashfs
-//! - Lower memory overhead during decompression
-//! - Actively developed in Linux kernel
-//!
-//! # Example
-//!
-//! ```rust,ignore
-//! use distro_builder::artifact::rootfs::create_erofs;
-//! use std::path::Path;
-//!
-//! // Build EROFS with custom settings
-//! create_erofs(
-//!     Path::new("staging/"),
-//!     Path::new("output/filesystem.erofs"),
-//!     "zstd",
-//!     6,
-//!     1048576,
-//! )?;
-//!
-//! // Or use the default settings
-//! use distro_builder::build_erofs_default;
-//! build_erofs_default(Path::new("staging/"), Path::new("output/filesystem.erofs"))?;
-//! ```
-//!
-//! # Note on Squashfs
-//!
-//! Squashfs support is intentionally NOT provided here. Both LevitateOS and
-//! AcornOS use EROFS for their rootfs. Legacy squashfs inputs may still exist
-//! in upstream ecosystems, but this builder does not emit squashfs artifacts.
 
 use anyhow::{bail, Context, Result};
 use std::fs;

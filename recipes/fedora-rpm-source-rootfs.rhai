@@ -4,7 +4,7 @@
 // do not run, so `package_effects` does what they would have done, from the
 // packages' own data where they ship it.
 const RECIPE_API = 2;
-const NEEDS = #{ inputs: #{ rpms: "directory", capabilities: "file", system_setup: "file", os_release: "file" }, outputs: #{ rootfs: "directory" }, memory_mib: 8192, storage_max_objects: 131072 };
+const NEEDS = #{ inputs: #{ rpms: "directory", capabilities: "file", system_setup: "file", os_release: "file", admin_rule_file: "file", admin_rule: "file" }, outputs: #{ rootfs: "directory" }, memory_mib: 8192, storage_max_objects: 131072 };
 import "sources/levitate-rpm-lock.rhai" as lock;
 import "installed-system.rhai" as system;
 let ctx = #{
@@ -63,8 +63,6 @@ fn package_effects(ctx, root) {
         "#%PAM-1.0\nauth        include      system-auth\naccount     include      system-auth\n" +
         "password    include      system-auth\nsession     include      system-auth\n", 0o644);
     system::put(root, "etc/pam.d/postlogin", "#%PAM-1.0\nsession     optional     pam_keyinit.so force revoke\n", 0o644);
-    // Password-authenticated sudo for wheel administrators.
-    system::put(root, "etc/sudoers.d/10-wheel", "%wheel ALL=(ALL:ALL) ALL\n", 0o440);
 }
 
 // The words of a sysusers.d line; '…' and "…" quote one word.

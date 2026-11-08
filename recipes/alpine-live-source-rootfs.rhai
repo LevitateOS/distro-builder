@@ -3,7 +3,7 @@
 // `apks` input), installed by the locked apk.static without the packages'
 // scripts, so `package_effects` does what those scripts would have done.
 const RECIPE_API = 2;
-const NEEDS = #{ inputs: #{ apks: "directory", capabilities: "file", system_setup: "file", os_release: "file" }, outputs: #{ rootfs: "directory" }, memory_mib: 4096, storage_max_objects: 131072 };
+const NEEDS = #{ inputs: #{ apks: "directory", capabilities: "file", system_setup: "file", os_release: "file", admin_rule_file: "file", admin_rule: "file" }, outputs: #{ rootfs: "directory" }, memory_mib: 4096, storage_max_objects: 131072 };
 import "sources/acorn-apk-lock.rhai" as lock;
 import "installed-system.rhai" as system;
 let ctx = #{
@@ -54,19 +54,11 @@ fn unpack(ctx, root) {
 fn package_effects(ctx, root) {
     busybox_applets(root);
     // The accounts the packages' install scripts add (adduser -S): busybox's
-    // klogd, chrony, dbus's messagebus, dhcpcd; NetworkManager's plugdev group.
-    for account in [["klogd", "/dev/null"], ["chrony", "/dev/null"], ["messagebus", "/dev/null"],
-                    ["dhcpcd", "/var/lib/dhcpcd"]] {
+    // klogd, chrony, dbus's messagebus; NetworkManager's plugdev group.
+    for account in [["klogd", "/dev/null"], ["chrony", "/dev/null"], ["messagebus", "/dev/null"]] {
         system_account(root, account[0], account[1]);
     }
     system_group(root, "plugdev");
-    // Password-authenticated doas for wheel administrators.
-    system::put(root, "etc/doas.conf", "permit persist :wheel\n", 0o600);
-    // The network stack ifupdown and dhcpcd bring up (installed-system.rhai
-    // network_services): loopback here, dhcpcd for every other interface.
-    system::put(root, "etc/network/interfaces",
-        "# Installed loopback; dhcpcd discovers wired interfaces.\nauto lo\niface lo inet loopback\n", 0o644);
-    system::put(root, "etc/conf.d/dhcpcd", "dhcpcd_args=\"--quiet\"\n", 0o644);
 }
 
 // The lowest free system id (adduser -S/addgroup -S: from 100).

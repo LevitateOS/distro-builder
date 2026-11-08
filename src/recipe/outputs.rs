@@ -83,13 +83,6 @@ impl RecipeResult {
         Ok(path)
     }
 
-    pub fn optional_directory(&self, name: &str) -> Result<Option<PathBuf>> {
-        if !self.outputs()?.contains_key(name) {
-            return Ok(None);
-        }
-        self.directory(name).map(Some)
-    }
-
     pub fn metadata_string(&self, name: &str) -> Result<&str> {
         self.ctx.get(name).and_then(exact).with_context(|| {
             format!("recipe must report ctx.{name} as a nonempty metadata string")

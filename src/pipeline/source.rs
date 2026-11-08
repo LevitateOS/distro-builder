@@ -34,8 +34,7 @@ pub(crate) fn os_release(contract: &ConformanceContract) -> String {
     )
 }
 
-/// Adds input `name`; the variant, the builder and the preseed each name
-/// their own.
+/// Adds input `name`; the builder and the preseed each name their own.
 fn add_input(inputs: &mut BTreeMap<String, PathBuf>, name: &str, path: PathBuf) -> Result<()> {
     if inputs.insert(name.to_string(), path).is_some() {
         bail!("the rootfs recipe's input {name} is given twice");
@@ -52,30 +51,29 @@ pub fn materialize_rootfs_source(variant: &Variant) -> Result<PathBuf> {
     let work = distro_contract::runs::rootfs_source_work_dir(repo, &variant.id);
 
     let mut inputs = BTreeMap::new();
-    for (name, path) in &source.inputs {
-        add_input(&mut inputs, name, resolve_repo_path(repo, path))?;
-    }
     // What the system recipe installs from the builder: the setup program
     // and the system's identity.
     let rendered = work.join("builder-inputs");
     fs::create_dir_all(&rendered)
         .with_context(|| format!("creating {}", rendered.display()))?;
+    let privilege = variant.contract.profile.privilege;
     for (name, text) in [
         ("system_setup", crate::guest::render(&crate::guest::SYSTEM_SETUP, &[])?),
         ("os_release", os_release(&variant.contract)),
+        ("capabilities", distro_contract::capabilities_text().to_string()),
+        ("admin_rule_file", privilege.admin_rule_file().to_string()),
+        ("admin_rule", privilege.admin_rule()),
     ] {
         let path = rendered.join(name);
         fs::write(&path, text).with_context(|| format!("writing {}", path.display()))?;
         add_input(&mut inputs, name, path)?;
     }
-    if let Some(preseed) = &source.preseed_recipe_script {
-        for (name, path) in crate::recipe::rootfs_source::preseed_inputs(
-            repo,
-            &variant.id,
-            &resolve_repo_path(repo, preseed),
-        )? {
-            add_input(&mut inputs, &name, path)?;
-        }
+    for (name, path) in crate::recipe::rootfs_source::preseed_inputs(
+        repo,
+        &variant.id,
+        &resolve_repo_path(repo, &source.preseed_recipe_script),
+    )? {
+        add_input(&mut inputs, &name, path)?;
     }
 
     let stem = recipe
@@ -91,7 +89,6 @@ pub fn materialize_rootfs_source(variant: &Variant) -> Result<PathBuf> {
         &build_dir,
         &RootfsSourceRecipeSpec {
             recipe_script: recipe,
-            defines: source.defines.clone(),
             inputs,
         },
     )

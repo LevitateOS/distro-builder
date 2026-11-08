@@ -53,7 +53,7 @@ fn openrc_runlevel(service) {
     let levels = #{
         devfs: "sysinit", dmesg: "sysinit", udev: "sysinit", "udev-trigger": "sysinit",
         "udev-settle": "sysinit",
-        modules: "boot", sysctl: "boot", hostname: "boot", bootmisc: "boot", syslog: "boot",
+        modules: "boot", sysctl: "boot", hostname: "boot", bootmisc: "boot", loopback: "boot", syslog: "boot",
         hwclock: "boot", seedrng: "boot", loadkeys: "boot",
         "mount-ro": "shutdown", killprocs: "shutdown", savecache: "shutdown"
     };
@@ -80,11 +80,12 @@ fn enable(root, init, service) {
     }
 }
 
-// The init system's own boot services.
+// The init system's own boot services. systemd brings up `lo` itself; OpenRC's
+// `loopback` does (NetworkManager leaves lo alone), so it owns loopback there.
 fn base_services(init) {
     check_init(init);
     if init == "systemd" { [] }
-    else { ["devfs", "dmesg", "udev", "udev-trigger", "udev-settle", "modules", "sysctl", "hostname", "bootmisc",
+    else { ["devfs", "dmesg", "udev", "udev-trigger", "udev-settle", "modules", "sysctl", "hostname", "bootmisc", "loopback",
             "syslog", "hwclock", "seedrng", "mount-ro", "killprocs", "savecache"] }
 }
 
@@ -248,10 +249,30 @@ fn identity(root, inputs) {
     if exists(path) { write_file(path, text); } else { put(root, "etc/os-release", text, 0o644); }
 }
 
+// The OS's PRETTY_NAME from the builder's `os_release` input, for the login banner.
+fn pretty_name(inputs) {
+    for line in read_file(join_path(inputs, "os_release")).split("\n") {
+        if line.starts_with("PRETTY_NAME=") {
+            let name = line.sub_string(12);
+            name.replace("\"", "");
+            return name;
+        }
+    }
+    throw "the os_release input has no PRETTY_NAME";
+}
+
 // The setup program reads the distro profile from /etc/os-release, so it is
 // installed as the builder rendered it (its `system_setup` input).
 fn setup_program(root, inputs) {
     put(root, "usr/libexec/recipe-system-setup", read_file(join_path(inputs, "system_setup")), 0o755);
+}
+
+// The wheel administrators' password-authenticated privilege rule, in the file
+// the distro profile names (the builder's `admin_rule_file` and `admin_rule`
+// inputs).
+fn admin_rule(root, inputs) {
+    put(root, read_file(join_path(inputs, "admin_rule_file")).trim(),
+        read_file(join_path(inputs, "admin_rule")).trim() + "\n", 0o440);
 }
 
 // Root's login shell is bash, which recsetup also gives new users, and
@@ -301,7 +322,7 @@ fn lock_root(root) {
 fn apply(root, inputs, init) {
     check_init(init);
     identity(root, inputs);
-    put(root, "etc/issue", "Linux \\l\n", 0o644);
+    put(root, "etc/issue", pretty_name(inputs) + " \\l\n", 0o644);
     put(root, "etc/locale.conf", "LANG=C.UTF-8\n", 0o644);
     locale_env(root, init);
     // sshd's privilege-separation directories.
@@ -320,6 +341,7 @@ fn apply(root, inputs, init) {
     homes(root);
     lock_root(root);
     setup_program(root, inputs);
+    admin_rule(root, inputs);
     if init == "openrc" {
         // D-Bus cannot initialize an existing empty machine-id, and /var/log
         // may be a fresh live tmpfs or the installed system's shared state.

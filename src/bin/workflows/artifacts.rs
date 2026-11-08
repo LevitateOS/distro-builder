@@ -58,10 +58,7 @@ pub(crate) fn preseed_rootfs_source_cmd(
 ) -> Result<()> {
     let bundle = distro_contract::load(repo_root, distro_id)?;
     let source = &bundle.contract.sources.rootfs_source;
-    let recipe_script = source
-        .preseed_recipe_script
-        .as_deref()
-        .with_context(|| format!("the {distro_id} rootfs source has no preseed recipe"))?;
+    let recipe_script = &source.preseed_recipe_script;
     let paths = preseed_rootfs_source(
         &bundle.repo_root,
         distro_id,

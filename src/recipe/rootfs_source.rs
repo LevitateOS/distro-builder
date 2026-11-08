@@ -7,7 +7,6 @@ use super::{recipe_work_dir, Invocation};
 #[derive(Debug, Clone)]
 pub struct RootfsSourceRecipeSpec {
     pub recipe_script: PathBuf,
-    pub defines: BTreeMap<String, String>,
     pub inputs: BTreeMap<String, PathBuf>,
 }
 
@@ -33,9 +32,6 @@ pub fn materialize_rootfs_from_recipe(
     }
 
     let mut invocation = Invocation::new(repo_root, "install", &recipe_path, build_dir);
-    for (key, value) in &spec.defines {
-        invocation = invocation.define(key, value);
-    }
     for (name, path) in &spec.inputs {
         invocation = invocation.input(name, path);
     }

@@ -306,8 +306,8 @@ fn collect_local_dependencies(
     Ok(())
 }
 
-/// Compile `package`'s `binary` (its default when `None`) through its recipe
-/// for the image `profile` describes, and return the published package tree,
+/// Compile `package`'s `binary` (its default when `None`) through its recipe,
+/// as a static musl program on every distro, and return the published package tree,
 /// which holds it at `usr/bin/<binary>`.
 pub(crate) fn build_tool_tree(
     repo: &Path,

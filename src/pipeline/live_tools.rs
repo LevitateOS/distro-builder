@@ -1,5 +1,5 @@
-//! The workspace tools the products carry, built for the variant's libc by
-//! Recipe, each at `usr/bin/<binary>`.
+//! The workspace tools the products carry, built by
+//! Recipe (static musl; only the TUI binary follows the libc), each at `usr/bin/<binary>`.
 use anyhow::{Context, Result};
 use distro_contract::Profile;
 use std::path::Path;

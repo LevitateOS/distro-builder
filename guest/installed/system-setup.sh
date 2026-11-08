@@ -48,11 +48,10 @@ case "${1:-}" in
         case "$init" in
             systemd) assignment /etc/vconsole.conf KEYMAP "$2" ;;
             openrc)
-                # busybox's binary keymaps (kbd-bkeymaps), loaded by busybox-openrc's loadkmap.
-                bmap=$(find /usr/share/bkeymaps -name "$2.bmap.gz" | head -n 1)
-                if [ -z "$bmap" ]; then echo "keymap is unavailable: $2" >&2; exit 2; fi
-                assignment /etc/conf.d/loadkmap KEYMAP "\"$bmap\""
-                rc-update add loadkmap boot
+                # kbd's keymaps, loaded by the kbd-openrc loadkeys service.
+                if [ -z "$(find /usr/share/keymaps -name "$2.map.gz" | head -n 1)" ]; then echo "keymap is unavailable: $2" >&2; exit 2; fi
+                assignment /etc/conf.d/loadkeys keymap "\"$2\""
+                rc-update add loadkeys boot
                 ;;
             *) echo "unsupported init system: $init" >&2; exit 2 ;;
         esac

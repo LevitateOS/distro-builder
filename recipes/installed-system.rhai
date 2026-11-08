@@ -53,7 +53,7 @@ fn openrc_runlevel(service) {
     let levels = #{
         devfs: "sysinit", dmesg: "sysinit", mdev: "sysinit", hwdrivers: "sysinit",
         modules: "boot", sysctl: "boot", hostname: "boot", bootmisc: "boot", syslog: "boot",
-        hwclock: "boot", seedrng: "boot", loadkmap: "boot",
+        hwclock: "boot", seedrng: "boot", loadkeys: "boot",
         "mount-ro": "shutdown", killprocs: "shutdown", savecache: "shutdown"
     };
     let level = levels[service];

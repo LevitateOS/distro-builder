@@ -38,7 +38,6 @@ fn unpack(ctx, root) {
     // alpine-keys keeps it.
     let key = lock::signing_key();
     system::put(root, "etc/apk/keys/" + key[0], key[1], 0o644);
-    system::put(root, "etc/apk/repositories", lock::mirror() + "/main\n" + lock::mirror() + "/community\n", 0o644);
     let cache = join_path(build, "apk-cache");
     mkdir(cache);
     log("Installing the locked Alpine " + lock::release() + " APK set...");

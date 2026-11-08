@@ -5,7 +5,6 @@
 use anyhow::{Context, Result};
 use distro_builder::cli::{self, Command};
 use distro_builder::process::{self, HostNeed};
-use distro_builder::product::ReleaseProduct;
 use std::path::Path;
 use std::process::ExitCode;
 
@@ -46,21 +45,15 @@ fn run(repo: &Path, command: Command) -> Result<()> {
     process::die_with_parent().context("arming the parent-death signal for distro-builder")?;
     match command {
         Command::ReleaseBuild { product, distro } => {
-            let release = ReleaseProduct::new(product)
-                .with_context(|| format!("'{product}' is not built into a release ISO"))?;
             process::check_host_tools(HostNeed::Build)?;
             build::ensure_release_prerequisites(repo, &distro, product)?;
-            build::build_one(repo, &distro, release)
+            build::build_one(repo, &distro, product)
         }
         Command::ProductPrepare {
             product,
             distro,
             output,
         } => artifacts::prepare_product_cmd(repo, product, &distro, &output),
-        Command::RootfsErofs { source, output } => artifacts::build_rootfs_erofs(&source, &output),
-        Command::OverlayErofs { source, output } => {
-            artifacts::build_overlayfs_erofs(&source, &output)
-        }
         Command::ProductErofs { prepared } => artifacts::build_prepared_product_erofs_cmd(&prepared),
         Command::PrepareToolSource { package, output } => {
             distro_builder::recipe::tools::prepare_tool_source_into(repo, &package, &output)?;

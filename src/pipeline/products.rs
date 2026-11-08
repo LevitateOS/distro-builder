@@ -74,7 +74,7 @@ impl PreparedProduct {
 }
 
 /// Prepares `product` of `variant` in `dir`: its rootfs tree, its overlay
-/// tree, the rootfs source pointer the release hooks read, and the manifest.
+/// tree and the manifest.
 /// A derived product starts from its parent's latest release.
 pub fn prepare_product(variant: &Variant, product: ProductId, dir: &Path) -> Result<PreparedProduct> {
     let contract = &variant.contract;
@@ -118,9 +118,6 @@ pub fn prepare_product(variant: &Variant, product: ProductId, dir: &Path) -> Res
     }
     check_live_only(&overlay, &rootfs)?;
 
-    let pointer = dir.join(build.rootfs_source_pointer);
-    fs::write(&pointer, format!("{}\n", rootfs.display()))
-        .with_context(|| format!("writing {}", pointer.display()))?;
     let prepared = PreparedProduct {
         product: product.name().to_string(),
         distro_id: variant.id.clone(),

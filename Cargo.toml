@@ -11,6 +11,8 @@ anyhow = "1.0"
 distro-contract = { path = "../contract" }
 distro-profile = { path = "../profile" }
 recinit = { path = "../../tools/recinit" }
+reciso = { path = "../../tools/reciso" }
+recuki = { path = "../../tools/recuki" }
 libc = "0.2"
 levitate-recipe = { path = "../../tools/recipe" }
 # The kernel pins in recipes/kernel/metadata.rhai, read by src/pipeline/kernel.rs.

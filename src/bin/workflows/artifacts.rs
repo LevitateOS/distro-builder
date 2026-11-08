@@ -5,26 +5,6 @@ use distro_builder::product::ProductId;
 use distro_builder::recipe::rootfs_source::preseed_rootfs_source;
 use distro_builder::{build_erofs_default, build_overlayfs_default, PreparedProduct};
 
-pub(crate) fn build_rootfs_erofs(source_dir: &Path, output: &Path) -> Result<()> {
-    build_erofs_default(source_dir, output).with_context(|| {
-        format!(
-            "building rootfs EROFS from '{}' to '{}'",
-            source_dir.display(),
-            output.display()
-        )
-    })
-}
-
-pub(crate) fn build_overlayfs_erofs(source_dir: &Path, output: &Path) -> Result<()> {
-    build_overlayfs_default(source_dir, output).with_context(|| {
-        format!(
-            "building overlayfs EROFS from '{}' to '{}'",
-            source_dir.display(),
-            output.display()
-        )
-    })
-}
-
 pub(crate) fn build_prepared_product_erofs_cmd(prepared_dir: &Path) -> Result<()> {
     let manifest = PreparedProduct::read(prepared_dir)?;
     let rootfs_source_dir = manifest.rootfs_source(prepared_dir);
@@ -32,10 +12,10 @@ pub(crate) fn build_prepared_product_erofs_cmd(prepared_dir: &Path) -> Result<()
     let rootfs_output = prepared_dir.join(&manifest.rootfs_erofs);
     let overlay_output = prepared_dir.join(&manifest.overlay_erofs);
 
-    build_rootfs_erofs(&rootfs_source_dir, &rootfs_output).with_context(|| {
+    build_erofs_default(&rootfs_source_dir, &rootfs_output).with_context(|| {
         format!("building the {} rootfs EROFS", manifest.product)
     })?;
-    build_overlayfs_erofs(&overlay_dir, &overlay_output).with_context(|| {
+    build_overlayfs_default(&overlay_dir, &overlay_output).with_context(|| {
         format!("building the {} overlay EROFS", manifest.product)
     })?;
 

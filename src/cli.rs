@@ -18,10 +18,6 @@ pub enum Command {
         distro: String,
         output: PathBuf,
     },
-    /// Write the EROFS image of a rootfs tree.
-    RootfsErofs { source: PathBuf, output: PathBuf },
-    /// Write the EROFS image of an overlay tree.
-    OverlayErofs { source: PathBuf, output: PathBuf },
     /// Write both EROFS images of a prepared product.
     ProductErofs { prepared: PathBuf },
     /// Write a tool package's offline source tree to `output`.
@@ -41,8 +37,6 @@ pub fn usage() -> String {
          Commands:\n  \
          release build <product> <distro>                   build a release ISO ({releases})\n  \
          product prepare <product> <distro> <dir>           prepare a product's rootfs and overlay ({products})\n  \
-         transform build rootfs-erofs <source> <output>     write a rootfs EROFS image\n  \
-         transform build overlayfs-erofs <source> <output>  write an overlay EROFS image\n  \
          transform build product-erofs <prepared_dir>       write a prepared product's EROFS images\n  \
          artifact prepare-tool-source <package> <dir>       write a tool's offline source tree\n  \
          artifact preseed-rootfs-source <distro> [--refresh]  acquire a distro's rootfs source",
@@ -67,12 +61,6 @@ impl Command {
                 distro,
                 output,
             } => push(&[&"product", &"prepare", &product.name(), distro, output]),
-            Self::RootfsErofs { source, output } => {
-                push(&[&"transform", &"build", &"rootfs-erofs", source, output])
-            }
-            Self::OverlayErofs { source, output } => {
-                push(&[&"transform", &"build", &"overlayfs-erofs", source, output])
-            }
             Self::ProductErofs { prepared } => {
                 push(&[&"transform", &"build", &"product-erofs", prepared])
             }
@@ -142,14 +130,6 @@ pub fn parse(args: &[String]) -> Result<(PathBuf, Command), Usage> {
         ["product", "prepare", name, id, output] => Command::ProductPrepare {
             product: product(name)?,
             distro: distro(id)?,
-            output: output.into(),
-        },
-        ["transform", "build", "rootfs-erofs", source, output] => Command::RootfsErofs {
-            source: source.into(),
-            output: output.into(),
-        },
-        ["transform", "build", "overlayfs-erofs", source, output] => Command::OverlayErofs {
-            source: source.into(),
             output: output.into(),
         },
         ["transform", "build", "product-erofs", prepared] => Command::ProductErofs {

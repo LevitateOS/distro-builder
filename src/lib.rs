@@ -7,6 +7,7 @@ pub(crate) mod guest;
 pub use pipeline::kernel;
 pub(crate) mod pipeline;
 pub mod product;
+pub mod release;
 pub mod tui_apps;
 pub(crate) mod tui_binary;
 pub mod process;

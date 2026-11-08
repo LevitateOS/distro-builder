@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use std::path::Path;
 
-use distro_builder::product::{ProductId, ReleaseProduct};
+use distro_builder::product::ProductId;
 
 use distro_contract::runs;
 
@@ -15,19 +15,16 @@ pub(crate) fn ensure_release_prerequisites(
     let missing =
         distro_builder::missing_parent_releases(repo_root, distro_id, &variant.contract, product)?;
     for parent in missing {
-        let release = ReleaseProduct::new(parent)
-            .with_context(|| format!("{product} is built on {parent}, which has no release"))?;
         println!(
             "[release:iso:{product}:{distro_id}] materializing missing parent release '{parent}'..."
         );
-        build_one(repo_root, distro_id, release)?;
+        build_one(repo_root, distro_id, parent)?;
     }
 
     Ok(())
 }
 
-pub(crate) fn build_one(repo_root: &Path, distro_id: &str, release: ReleaseProduct) -> Result<()> {
-    let product = release.product;
+pub(crate) fn build_one(repo_root: &Path, distro_id: &str, product: ProductId) -> Result<()> {
     let bundle = distro_contract::load(repo_root, distro_id)?;
 
     let kernel_output_dir = runs::kernel_dir(&bundle.repo_root, distro_id);
@@ -42,13 +39,7 @@ pub(crate) fn build_one(repo_root: &Path, distro_id: &str, release: ReleaseProdu
             format!("install it first: cargo xtask build kernel {distro_id} (--prebuilt downloads it)")
         })?;
         println!("[release:iso:{product}:{distro_id}] kernel already installed");
-        super::release_hook::ensure_release_iso_via_variant_hook(
-            &bundle,
-            distro_id,
-            &kernel_output_dir,
-            &run,
-            release,
-        )?;
+        distro_builder::release::assemble(&bundle, product, &run.dir, &kernel_output_dir)?;
 
         println!(
             "[release:iso:{product}:{distro_id}] built at {}",

@@ -79,6 +79,10 @@ impl PreparedProduct {
 pub fn prepare_product(variant: &Variant, product: ProductId, dir: &Path) -> Result<PreparedProduct> {
     let contract = &variant.contract;
     let build = crate::product::build(product);
+    if build.install_screen {
+        crate::install_ux::check(&variant.repo_root)
+            .with_context(|| format!("resolving the install screen's apps for {}", variant.id))?;
+    }
     fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
 
     let rootfs = create_empty_overlay_dir(dir, ROOTFS_SOURCE_DIR)?;
@@ -109,7 +113,6 @@ pub fn prepare_product(variant: &Variant, product: ProductId, dir: &Path) -> Res
             &overlay,
             &contract.identity.os_name,
             &contract.profile,
-            &contract.install_ux,
         )
         .with_context(|| format!("writing the install screen for {}", variant.id))?;
     }

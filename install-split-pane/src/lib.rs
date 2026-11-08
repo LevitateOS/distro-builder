@@ -1,15 +1,17 @@
-//! The install screen's layout: two bordered panes side by side over a one-row footer.
+//! The install screen's layout: two bordered panes side by side, the install hub on
+//! the left and the docs on the right, over a one-row footer.
 //!
-//! The split pane draws with it and sizes each child's terminal from it, and
-//! `cargo xtask check tui` uses it to render the docs app at the size it really gets.
+//! The split pane owns the screen's geometry: it draws with this layout and sizes
+//! each child's terminal from it, its smoke check runs the panes at these sizes, and
+//! `cargo xtask check tui` renders the docs app at the size it really gets.
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 
 /// Each pane's share of the width, in percent.
-const PANE_PERCENT: u16 = 50;
+pub const PANE_PERCENT: u16 = 50;
 
 pub struct ScreenLayout {
-    /// Left (shell) and right (docs) pane areas, borders included.
+    /// Left (hub) and right (docs) pane areas, borders included.
     pub panes: [Rect; 2],
     pub footer: Rect,
 }
@@ -40,7 +42,14 @@ pub fn pane_terminal_size(pane: Rect) -> (u16, u16) {
     )
 }
 
+/// The hub's and the docs' terminal sizes on a `columns`×`rows` console.
+pub fn pane_sizes(columns: u16, rows: u16) -> [(u16, u16); 2] {
+    screen_layout(Rect::new(0, 0, columns, rows))
+        .panes
+        .map(pane_terminal_size)
+}
+
 /// The docs pane's terminal size on a `columns`×`rows` console.
 pub fn docs_pane_size(columns: u16, rows: u16) -> (u16, u16) {
-    pane_terminal_size(screen_layout(Rect::new(0, 0, columns, rows)).panes[1])
+    pane_sizes(columns, rows)[1]
 }

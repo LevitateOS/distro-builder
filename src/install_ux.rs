@@ -1,52 +1,105 @@
 //! The live ISO's install screen, from login to the split pane.
 //!
-//! The variant declares it (`[install_ux]` in products.toml). On each console it
-//! lists, getty starts [`LAUNCHER`] in place of login (the live overlay writes those
-//! getty lines, taking the console list and the launcher path from here). The
-//! launcher runs [`SPLIT`] with the variant's install hub (or, without one, its shell) on the left and the docs on the
-//! right, and becomes a root login shell when the screen ends. A serial console runs
-//! the screen only when the boot-injection payload sets [`SERIAL_KEY`]`=1`; otherwise
-//! it gets the shell straight away.
+//! The screen is the same on every variant (`distro_contract::install_ux`): the
+//! hub and the docs side by side in the split pane, and the other install apps
+//! as commands. On each console it lists, getty starts the launcher in place of
+//! login (the live overlay writes those getty lines). The launcher runs the split
+//! pane with the hub on the left and the docs on the right, and becomes a root
+//! login shell when the screen ends. A serial console runs the screen only when
+//! the boot-injection payload sets `SERIAL_KEY=1`; otherwise it gets the shell
+//! straight away.
 //!
 //! Everything goes into the live-tools overlay (the layer `pipeline/products.rs` adds
 //! for a product with `install_screen`), never into the system rootfs below it, which
 //! has no use for the install screen. Paths are relative to a layer's root.
 
 use anyhow::{bail, Context, Result};
-use distro_contract::{InstallUxContract, Profile};
+use distro_contract::install_ux::{APPS, BIN_DIR, CONSOLES, DOCS, DOCS_PAGE, HUB, SHELL};
+use distro_contract::Profile;
 use std::path::Path;
 
 use crate::artifact::filesystem::write_file;
+use crate::tui_apps::{TuiApp, Workspace};
 
-/// What getty starts on an install-screen console; `--probe` prints
-/// `PROBE_PREFIX<split pane path>`.
-pub const LAUNCHER: &str = "usr/local/bin/install-ux";
-/// The split pane (`install-split-pane`'s `install-split`); the variant's
-/// `tool_payload_workspace_binary` action puts it here.
-pub const SPLIT: &str = "usr/bin/install-split";
-/// The boot-injection key that turns the install screen on for the serial console.
-pub const SERIAL_KEY: &str = "INSTALL_UX_SERIAL";
-pub const PROBE_PREFIX: &str = "install-entrypoint-helper=";
-/// Set to 1, the launcher runs the split pane's `--smoke` instead.
-pub const SMOKE_ENV: &str = "INSTALL_UX_SMOKE";
-/// Printed by `install-split --smoke`.
-pub const SPLIT_SMOKE_OK: &str = "split-smoke:ok";
+pub use distro_contract::install_ux::{
+    LAUNCHER, PROBE_PREFIX, SERIAL_KEY, SMOKE_ENV, SMOKE_OK as SPLIT_SMOKE_OK, SPLIT,
+};
 
 /// The line under the live `/etc/issue` banner. Every live console logs root
 /// in without a password (the install screen's too), so the hint says so;
 /// the install tests treat it as the live serial console being ready.
 pub const LIVE_LOGIN_HINT: &str = "root is logged in on every console (no password)";
 
-/// Writes the install screen into `overlay`: the TUI apps (the docs app among them)
-/// and the launcher. The split pane must already be
-/// there; `rootfs` is the root the overlay goes on.
+/// The screen's apps, resolved from the workspace.
+pub struct Screen<'a> {
+    pub hub: &'a TuiApp,
+    pub docs: &'a TuiApp,
+    /// The other apps, commands for the shell beside the docs.
+    pub extra: Vec<&'a TuiApp>,
+}
+
+impl<'a> Screen<'a> {
+    /// The screen's apps in `workspace`. Each must exist, the hub and the docs must
+    /// take the distro's name by a declared flag (the hub its shell too), and the
+    /// docs must declare how a page is opened.
+    pub fn resolve(workspace: &'a Workspace) -> Result<Self> {
+        let screen = Self {
+            hub: workspace.app(HUB)?,
+            docs: workspace.app(DOCS)?,
+            extra: APPS.iter().map(|name| workspace.app(name)).collect::<Result<_>>()?,
+        };
+        for (app, shell) in [(screen.hub, true), (screen.docs, false)] {
+            let flags = &app.distro_args;
+            if flags.os_name.is_none() || (shell && flags.shell.is_none()) {
+                bail!(
+                    "the install screen tells {} the distro's name{}: its package.json must \
+                     declare levitate.distroArgs.osName{}",
+                    app.name,
+                    if shell { " and shell" } else { "" },
+                    if shell { " and .shell" } else { "" },
+                );
+            }
+        }
+        screen.docs.page_arg()?;
+        Ok(screen)
+    }
+
+    /// Every app the screen's TUI binary carries.
+    pub fn apps(&self) -> Vec<&'a TuiApp> {
+        [self.hub, self.docs].into_iter().chain(self.extra.iter().copied()).collect()
+    }
+
+    /// The pane commands on `os_name`: the hub's, and the docs' at their page.
+    pub fn panes(&self, os_name: &str) -> Result<[Vec<String>; 2]> {
+        let command = |app: &TuiApp| {
+            let mut argv = vec![format!("/{BIN_DIR}/{}", app.name)];
+            argv.extend(app.distro_argv(os_name, SHELL));
+            argv
+        };
+        let mut docs = command(self.docs);
+        docs.extend([self.docs.page_arg()?.to_string(), DOCS_PAGE.to_string()]);
+        Ok([command(self.hub), docs])
+    }
+}
+
+/// Fails, before anything is built, if the screen's apps don't resolve.
+pub(crate) fn check(repo_root: &Path) -> Result<()> {
+    Screen::resolve(&Workspace::load(repo_root)?).map(drop)
+}
+
+/// The consoles whose getty starts the launcher.
+pub(crate) fn consoles() -> Vec<String> {
+    CONSOLES.iter().map(|console| console.to_string()).collect()
+}
+
+/// Writes the install screen into `overlay`: the TUI apps and the launcher. The
+/// split pane must already be there; `rootfs` is the root the overlay goes on.
 pub(crate) fn write_payload(
     repo_root: &Path,
     rootfs: &Path,
     overlay: &Path,
     os_name: &str,
     profile: &Profile,
-    install_ux: &InstallUxContract,
 ) -> Result<()> {
     if !overlay.join(SPLIT).is_file() {
         bail!(
@@ -55,23 +108,18 @@ pub(crate) fn write_payload(
         );
     }
 
-    let mut app_names: Vec<&str> = install_ux.apps.iter().map(String::as_str).collect();
-    let docs = &install_ux.docs;
-    for app in std::iter::once(&docs.app).chain(&install_ux.hub) {
-        if !app_names.contains(&app.as_str()) {
-            app_names.insert(0, app);
-        }
-    }
-    let apps = app_names
-        .iter()
-        .map(|name| Ok(distro_contract::tui_apps::find(repo_root, name)?))
-        .collect::<Result<Vec<_>>>()?;
+    let workspace = Workspace::load(repo_root)?;
+    let screen = Screen::resolve(&workspace)?;
+    let apps = screen.apps();
     for app in &apps {
         for tool in &app.tools {
-            if !crate::pipeline::live_tools::ships(tool) {
+            let shipped = crate::pipeline::live_tools::LIVE_TOOLS
+                .iter()
+                .any(|live| live.binary.unwrap_or(live.package) == tool);
+            if !shipped {
                 bail!(
                     "the install screen's app '{}' runs {tool}, but the live tools don't ship \
-                     it: add the '{tool}' package to the builder's live tools \
+                     a binary called that: add it to the builder's live tools \
                      (pipeline/live_tools.rs)",
                     app.name
                 );
@@ -81,47 +129,22 @@ pub(crate) fn write_payload(
     crate::tui_binary::install(repo_root, rootfs, overlay, profile.libc, &apps)
         .context("building the install screen's TUI apps")?;
 
-    let docs_app = apps
+    let [hub, docs] = screen.panes(os_name)?;
+    let serial: Vec<String> = CONSOLES
         .iter()
-        .find(|a| a.name == docs.app)
-        .expect("the docs app is among the apps");
-    // The docs app is told which distro's docs to show; it reads nothing from the running system.
-    let mut docs_argv = vec![
-        format!("/{}/{}", crate::tui_binary::BIN_DIR, docs.app),
-        "--os-name".to_string(),
-        os_name.to_string(),
-    ];
-    docs_argv.extend(docs.args.iter().cloned());
-    if let Some(page) = &docs.page {
-        // The flag that opens a page is the one the app's manifest declares.
-        let pages = docs_app.inspect.pages.as_ref().with_context(|| {
-            format!("install_ux opens page '{page}', but {} declares no inspect.pages", docs.app)
-        })?;
-        docs_argv.extend([pages.arg.clone(), page.clone()]);
-    }
-
-    // The left pane: the hub, which opens the shell on request, or the shell itself.
-    // The hub is told which distro it installs and its shell; it reads neither from the
-    // running system.
-    let left = match &install_ux.hub {
-        Some(hub) => vec![
-            format!("/{}/{hub}", crate::tui_binary::BIN_DIR),
-            "--os-name".to_string(),
-            os_name.to_string(),
-            "--shell".to_string(),
-            install_ux.shell.clone(),
-        ],
-        None => vec![install_ux.shell.clone(), "-l".to_string()],
-    };
+        .filter(|console| console.starts_with("ttyS"))
+        .map(|console| format!("/dev/{console}"))
+        .collect();
     use crate::guest::Value::{Argv, Word};
     let split = format!("/{SPLIT}");
     let launcher = crate::guest::render(
         &crate::guest::INSTALL_UX,
         &[
-            ("SHELL", Word(&install_ux.shell)),
-            ("LEFT", Argv(&left)),
+            ("SHELL", Word(SHELL)),
+            ("LEFT", Argv(&hub)),
             ("SPLIT", Word(&split)),
-            ("DOCS_ARGV", Argv(&docs_argv)),
+            ("DOCS_ARGV", Argv(&docs)),
+            ("SERIAL_CONSOLES", Argv(&serial)),
             ("SERIAL_KEY", Word(SERIAL_KEY)),
             ("BOOT_INJECTION_ENV", Word(recinit::live::BOOT_INJECTION_ENV)),
             ("PROBE", Word(PROBE_PREFIX)),

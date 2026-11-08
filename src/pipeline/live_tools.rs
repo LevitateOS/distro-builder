@@ -45,12 +45,6 @@ pub(crate) const LIVE_TOOLS: &[LiveTool] = &[
     tool("install-split-pane", Some("install-split"), ToolLayer::Overlay),
 ];
 
-/// Whether the live-tools ISO has a binary of the Cargo `package` (in its
-/// overlay or in the rootfs below it).
-pub(crate) fn ships(package: &str) -> bool {
-    LIVE_TOOLS.iter().any(|tool| tool.package == package)
-}
-
 /// Builds the tools of `layer` into `root`, the layer's tree: base-rootfs
 /// takes the rootfs tools, live-tools' overlay the others.
 pub(crate) fn add_tools(

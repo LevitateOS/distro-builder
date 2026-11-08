@@ -1,13 +1,16 @@
 //! install-split: the install screen's terminal host.
 //!
-//! Two panes side by side, each running a program in its own PTY, drawn through a
-//! vt100 emulator, over a footer that lists the host's keys. Every other key goes to
-//! the focused pane. A pane whose program exits stays on screen and restarts on
-//! Enter; the host itself ends only when the user quits.
+//! Two panes side by side, the install hub on the left and the docs on the right,
+//! each running a program in its own PTY, drawn through a vt100 emulator, over a
+//! footer that lists the host's keys. Every other key goes to the focused pane. A
+//! pane whose program exits, or whose PTY fails, stays on screen with the reason and
+//! restarts on Enter; the host itself ends only when the user quits. A pane's
+//! clipboard writes (OSC 52) go on to the host's own terminal, which the emulator
+//! would drop.
 
 use std::{
     env,
-    io::{self, Read, Write},
+    io::{self, IsTerminal, Read, Write},
     panic,
     path::Path,
     sync::mpsc,
@@ -23,6 +26,7 @@ use crossterm::{
         disable_raw_mode, enable_raw_mode, size, EnterAlternateScreen, LeaveAlternateScreen,
     },
 };
+use distro_contract::install_ux::{PANE_TERM, SMOKE_OK};
 use install_split_pane::{pane_terminal_size, screen_layout};
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use ratatui::{
@@ -34,9 +38,15 @@ use ratatui::{
     Frame, Terminal,
 };
 
-const SMOKE_TIMEOUT: Duration = Duration::from_secs(8);
-const SMOKE_LEFT_MARKER: &str = "__LEVITATE_SPLIT_LEFT_OK__";
-const SMOKE_RIGHT_MARKER: &str = "__LEVITATE_SPLIT_RIGHT_OK__";
+/// How long the smoke check gives both panes to draw.
+const SMOKE_TIMEOUT: Duration = Duration::from_secs(20);
+/// A pane counts as drawn once its output has been quiet this long.
+const SMOKE_QUIET: Duration = Duration::from_millis(500);
+/// The console the smoke check lays the screen out on without a terminal: the
+/// serial console, the smallest one the screen runs on.
+const SMOKE_CONSOLE: (u16, u16) = (80, 24);
+/// The longest OSC sequence passed on (a clipboard write carries base64 text).
+const OSC_MAX: usize = 1 << 20;
 /// How long to wait for a key before looking for pane output again.
 const INPUT_WAIT: Duration = Duration::from_millis(30);
 
@@ -120,10 +130,12 @@ fn print_help() {
     println!("  install-split --left PROGRAM [ARGS...] --right PROGRAM [ARGS...]");
     println!("  install-split --smoke --left PROGRAM [ARGS...] --right PROGRAM [ARGS...]");
     println!();
-    println!("Runs the left command (the shell) beside the right one (the docs).");
+    println!("Runs the left command (the install hub) beside the right one (the docs).");
     println!();
     println!("Options:");
-    println!("  --smoke     Non-interactive split-pane smoke check for install UX tests.");
+    println!("  --smoke     Start both panes at the screen's pane sizes (this terminal's, or");
+    println!("              an 80x24 console's without one) and check that each draws and");
+    println!("              keeps running; prints '{SMOKE_OK} ...' when they do.");
     println!("  --version   Print the version.");
     println!();
     println!("Keys:");
@@ -171,7 +183,7 @@ impl Side {
 
     fn title(self) -> &'static str {
         match self {
-            Self::Left => "Shell",
+            Self::Left => "Install",
             Self::Right => "Docs",
         }
     }
@@ -182,6 +194,14 @@ impl Side {
 enum PtyEvent {
     Output(Side, u64, Vec<u8>),
     Closed(Side, u64, Option<String>),
+}
+
+impl PtyEvent {
+    fn side(&self) -> Side {
+        match self {
+            Self::Output(side, ..) | Self::Closed(side, ..) => *side,
+        }
+    }
 }
 
 /// A running program in a PTY.
@@ -203,7 +223,7 @@ impl Process {
         let mut cmd = CommandBuilder::new(&argv[0]);
         cmd.args(&argv[1..]);
         // The panes' terminal is this program's vt100 emulator, an xterm with 256 colours.
-        cmd.env("TERM", "xterm-256color");
+        cmd.env("TERM", PANE_TERM);
         let child = pair
             .slave
             .spawn_command(cmd)
@@ -230,6 +250,7 @@ impl Process {
                     Err(err) => break Some(err.to_string()),
                 }
             };
+            // A failed send means the host has stopped listening: it is shutting down.
             let _ = tx.send(PtyEvent::Closed(side, run, error));
         });
         Ok(Self {
@@ -244,10 +265,20 @@ impl Process {
         self.writer.flush()
     }
 
-    /// Stops the program; it may have exited already.
-    fn stop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+    /// Stops the program (it may have exited already) and reaps it.
+    fn stop(&mut self) -> Result<(), String> {
+        match self.child.try_wait() {
+            Ok(Some(_)) => return Ok(()),
+            Ok(None) => {}
+            Err(err) => return Err(format!("wait failed: {err}")),
+        }
+        let killed = match self.child.kill() {
+            // It exited between the two calls.
+            Err(err) if err.raw_os_error() == Some(libc::ESRCH) => Ok(()),
+            result => result.map_err(|err| format!("kill failed: {err}")),
+        };
+        let waited = self.child.wait().map(drop).map_err(|err| format!("wait failed: {err}"));
+        killed.and(waited)
     }
 }
 
@@ -261,6 +292,8 @@ struct Pane {
     run: u64,
     /// Why the program isn't running, once it isn't.
     ended: Option<String>,
+    /// OSC 52 sequences the program wrote, for the host's terminal.
+    clipboard: OscScan,
 }
 
 impl Pane {
@@ -273,12 +306,14 @@ impl Pane {
             process: None,
             run: 0,
             ended: None,
+            clipboard: OscScan::default(),
         }
     }
 
     fn start(&mut self, tx: &mpsc::Sender<PtyEvent>) {
-        if let Some(mut process) = self.process.take() {
-            process.stop();
+        if let Err(err) = self.stop() {
+            self.ended = Some(format!("stopping the last run: {err}"));
+            return;
         }
         self.run += 1;
         self.parser = vt100::Parser::new(self.size.rows, self.size.cols, 0);
@@ -293,31 +328,41 @@ impl Pane {
 
     fn on_event(&mut self, event: PtyEvent) {
         match event {
-            PtyEvent::Output(_, run, bytes) if run == self.run => self.parser.process(&bytes),
+            PtyEvent::Output(_, run, bytes) if run == self.run => {
+                self.clipboard.scan(&bytes);
+                self.parser.process(&bytes);
+            }
             PtyEvent::Closed(_, run, error) if run == self.run => {
                 let status = self
                     .process
                     .as_mut()
-                    .and_then(|process| process.child.try_wait().ok().flatten());
-                self.ended = Some(match (error, status) {
+                    .map(|process| process.child.try_wait());
+                let reason = match (error, status) {
                     (Some(error), _) => format!("read error: {error}"),
-                    (None, Some(status)) if !status.success() => {
+                    (None, Some(Err(err))) => format!("wait failed: {err}"),
+                    (None, Some(Ok(Some(status)))) if !status.success() => {
                         format!("exit {}", status.exit_code())
                     }
                     _ => "exited".to_string(),
-                });
-                if let Some(mut process) = self.process.take() {
-                    process.stop();
-                }
+                };
+                self.end(reason);
             }
             _ => {}
         }
     }
 
+    /// The program is done for: stop it, so Enter restarts it, and show why.
+    fn end(&mut self, reason: String) {
+        self.ended = Some(match self.stop() {
+            Ok(()) => reason,
+            Err(err) => format!("{reason}; {err}"),
+        });
+    }
+
     fn write(&mut self, bytes: &[u8]) {
         if let Some(process) = self.process.as_mut() {
             if let Err(err) = process.write(bytes) {
-                self.ended = Some(format!("write error: {err}"));
+                self.end(format!("write error: {err}"));
             }
         }
     }
@@ -327,76 +372,143 @@ impl Pane {
         self.parser.set_size(self.size.rows, self.size.cols);
         if let Some(process) = self.process.as_mut() {
             if let Err(err) = process.master.resize(self.size) {
-                self.ended = Some(format!("resize error: {err:#}"));
+                self.end(format!("resize error: {err:#}"));
             }
         }
     }
 
-    fn stop(&mut self) {
-        if let Some(mut process) = self.process.take() {
-            process.stop();
+    /// Stops the program if it runs.
+    fn stop(&mut self) -> Result<(), String> {
+        match self.process.take() {
+            Some(mut process) => process.stop(),
+            None => Ok(()),
         }
     }
 }
 
+/// Picks OSC 52 (clipboard) sequences out of a pane's output, which may split them
+/// across reads, for the host to pass on to its own terminal.
+#[derive(Default)]
+struct OscScan {
+    /// The sequence so far: empty, a lone ESC, or an OSC from `ESC ]` on.
+    pending: Vec<u8>,
+    /// Whole OSC 52 sequences not yet passed on.
+    found: Vec<Vec<u8>>,
+}
+
+impl OscScan {
+    fn scan(&mut self, bytes: &[u8]) {
+        for &byte in bytes {
+            let in_osc = self.pending.starts_with(b"\x1b]");
+            if !in_osc {
+                match (self.pending.as_slice(), byte) {
+                    (_, 0x1b) => self.pending = vec![byte],
+                    ([0x1b], b']') => self.pending.push(byte),
+                    _ => self.pending.clear(),
+                }
+                continue;
+            }
+            let after_esc = self.pending.last() == Some(&0x1b);
+            self.pending.push(byte);
+            // BEL or ST (ESC \) ends an OSC; ESC followed by anything else cancels it.
+            if byte == 0x07 || (after_esc && byte == b'\\') {
+                let sequence = std::mem::take(&mut self.pending);
+                if sequence.starts_with(b"\x1b]52;") {
+                    self.found.push(sequence);
+                }
+            } else if (after_esc && byte != 0x1b) || self.pending.len() > OSC_MAX {
+                self.pending.clear();
+            }
+        }
+    }
+
+    fn take(&mut self) -> Vec<Vec<u8>> {
+        std::mem::take(&mut self.found)
+    }
+}
+
+/// Starts both panes as the screen does, at the pane sizes of this terminal (or of
+/// the serial console without one), and checks that each program draws and is still
+/// running once its output goes quiet.
 fn run_smoke(args: &Args) -> Result<()> {
-    let right_program = &args.panes[1][0];
-    let (tx, rx) = mpsc::channel::<PtyEvent>();
-    let size = PtySize {
-        rows: 24,
-        cols: 80,
-        pixel_width: 0,
-        pixel_height: 0,
+    let (columns, rows) = if io::stdout().is_terminal() {
+        size().context("read terminal size")?
+    } else {
+        SMOKE_CONSOLE
     };
-    let right_probe = format!(
-        "if command -v \"$1\" >/dev/null 2>&1; then printf '{SMOKE_RIGHT_MARKER}\\n'; else printf '__LEVITATE_SPLIT_RIGHT_MISSING__\\n'; fi; sleep 0.2"
-    );
-    let right_argv = [
-        "/bin/sh".to_string(),
-        "-c".to_string(),
-        right_probe,
-        "_".to_string(),
-        right_program.clone(),
-    ];
-    let mut left = Process::spawn(Side::Left, 0, &args.panes[0], size, tx.clone())?;
-    let mut right = Process::spawn(Side::Right, 0, &right_argv, size, tx)?;
-    left.write(format!("printf '{SMOKE_LEFT_MARKER}\\n'\r").as_bytes())
-        .context("type into the left pane")?;
+    let areas = screen_layout(Rect::new(0, 0, columns, rows)).panes;
+    let (tx, rx) = mpsc::channel::<PtyEvent>();
+    let mut panes = [Side::Left, Side::Right].map(|side| {
+        let mut pane = Pane::new(
+            side,
+            args.panes[side.index()].clone(),
+            pty_size_for_area(areas[side.index()]),
+        );
+        pane.start(&tx);
+        pane
+    });
+    drop(tx);
 
     let deadline = Instant::now() + SMOKE_TIMEOUT;
-    let mut output = [String::new(), String::new()];
-    let markers = [SMOKE_LEFT_MARKER, SMOKE_RIGHT_MARKER];
-    let seen =
-        |output: &[String; 2], side: Side| output[side.index()].contains(markers[side.index()]);
-    while Instant::now() < deadline && !(seen(&output, Side::Left) && seen(&output, Side::Right)) {
-        match rx.recv_timeout(Duration::from_millis(100)) {
-            Ok(PtyEvent::Output(side, _, bytes)) => {
-                output[side.index()].push_str(&String::from_utf8_lossy(&bytes))
+    let mut last_output: [Option<Instant>; 2] = [None, None];
+    loop {
+        let now = Instant::now();
+        let settled = |side: usize| {
+            panes[side].ended.is_some()
+                || last_output[side].is_some_and(|at| now - at >= SMOKE_QUIET)
+        };
+        if now >= deadline || (settled(0) && settled(1)) {
+            break;
+        }
+        match rx.recv_timeout(Duration::from_millis(50)) {
+            Ok(event) => {
+                let side = event.side().index();
+                if matches!(event, PtyEvent::Output(..)) {
+                    last_output[side] = Some(Instant::now());
+                }
+                panes[side].on_event(event);
             }
-            Ok(PtyEvent::Closed(..)) | Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
         }
     }
-    left.stop();
-    right.stop();
 
-    let (left_ok, right_ok) = (seen(&output, Side::Left), seen(&output, Side::Right));
-    if left_ok && right_ok {
-        println!(
-            "split-smoke:ok left={} right={right_program}",
-            args.panes[0][0]
-        );
-        return Ok(());
+    let mut report = Vec::new();
+    let mut failed = false;
+    for pane in &mut panes {
+        let screen = pane.parser.screen().contents();
+        let problem = match (&pane.ended, screen.trim().is_empty()) {
+            (Some(reason), _) => Some(format!("ended ({reason})")),
+            (None, true) => Some(format!("drew nothing in {}s", SMOKE_TIMEOUT.as_secs())),
+            (None, false) => None,
+        };
+        let stopped = pane.stop();
+        let size = format!("{}x{}", pane.size.cols, pane.size.rows);
+        match (problem, stopped) {
+            (None, Ok(())) => report.push(format!("{}={} ({size})", pane.side.name(), pane.argv[0])),
+            (problem, stopped) => {
+                failed = true;
+                let mut why: Vec<String> = problem.into_iter().collect();
+                why.extend(stopped.err());
+                report.push(format!(
+                    "{} pane `{}` ({size}): {}\nscreen:\n{}",
+                    pane.side.name(),
+                    pane.argv.join(" "),
+                    why.join("; "),
+                    tail(screen.trim_end())
+                ));
+            }
+        }
     }
-    bail!(
-        "split-smoke: failed (left_ok={left_ok}, right_ok={right_ok})\nleft_output:\n{}\nright_output:\n{}",
-        tail(&output[0]),
-        tail(&output[1])
-    )
+    if failed {
+        bail!("split-smoke: failed on a {columns}x{rows} console\n{}", report.join("\n"));
+    }
+    println!("{SMOKE_OK} {}", report.join(" "));
+    Ok(())
 }
 
 fn tail(s: &str) -> &str {
-    const MAX: usize = 300;
+    const MAX: usize = 4000;
     let mut start = s.len().saturating_sub(MAX);
     while !s.is_char_boundary(start) {
         start += 1;
@@ -430,10 +542,15 @@ fn run_ui(args: &Args) -> Result<()> {
     let mut dirty = true;
     loop {
         while let Ok(event) = rx.try_recv() {
-            let side = match &event {
-                PtyEvent::Output(side, ..) | PtyEvent::Closed(side, ..) => *side,
-            };
-            panes[side.index()].on_event(event);
+            let pane = &mut panes[event.side().index()];
+            pane.on_event(event);
+            for sequence in pane.clipboard.take() {
+                let backend = terminal.backend_mut();
+                backend
+                    .write_all(&sequence)
+                    .and_then(|()| backend.flush())
+                    .context("pass a pane's clipboard write to the terminal")?;
+            }
             dirty = true;
         }
         if dirty {
@@ -469,8 +586,12 @@ fn run_ui(args: &Args) -> Result<()> {
             _ => {}
         }
     }
-    for pane in &mut panes {
-        pane.stop();
+    let errors: Vec<String> = panes
+        .iter_mut()
+        .filter_map(|pane| pane.stop().err().map(|err| format!("{} pane: {err}", pane.side.name())))
+        .collect();
+    if !errors.is_empty() {
+        bail!("stopping the panes: {}", errors.join("; "));
     }
     Ok(())
 }
@@ -670,9 +791,15 @@ fn install_panic_hook() {
     }));
 }
 
+/// Leaves raw mode and the alternate screen; a failure is reported on stderr, which
+/// is all that is left by then.
 fn restore_terminal() {
-    let _ = disable_raw_mode();
-    let _ = execute!(io::stdout(), LeaveAlternateScreen, crossterm::cursor::Show);
+    if let Err(err) = disable_raw_mode() {
+        eprintln!("install-split: leaving raw mode failed: {err}");
+    }
+    if let Err(err) = execute!(io::stdout(), LeaveAlternateScreen, crossterm::cursor::Show) {
+        eprintln!("install-split: leaving the alternate screen failed: {err}");
+    }
 }
 
 struct TerminalRestore;

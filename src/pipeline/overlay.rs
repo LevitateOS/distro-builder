@@ -44,7 +44,7 @@ impl LiveSession {
             hint: crate::install_ux::LIVE_LOGIN_HINT,
             init: contract.profile.init,
             consoles: if install_screen {
-                contract.install_ux.consoles.clone()
+                crate::install_ux::consoles()
             } else {
                 Vec::new()
             },

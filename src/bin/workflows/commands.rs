@@ -37,6 +37,7 @@ pub(crate) fn run_release_build_command(args: &[String]) -> Result<()> {
 
     let (distro_id, product) =
         crate::workflows::parse_release_build_command(build_args, &repo_root)?;
+    distro_builder::process::check_host_tools(distro_builder::process::HostNeed::Build)?;
     crate::workflows::ensure_release_prerequisites(&repo_root, &distro_id, product.product)?;
     crate::workflows::build_one(&distro_id, product)
 }

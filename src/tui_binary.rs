@@ -8,11 +8,11 @@
 //! build host's bun lands on the image.
 
 use anyhow::{bail, Context, Result};
+use crate::process::Cmd;
 use distro_contract::profile::Libc;
 use distro_contract::tui_apps::TuiApp;
 use std::fs;
 use std::path::Path;
-use std::process::Command;
 
 /// Where the commands go, relative to a layer's root: `usr/local/bin/<app name>`.
 pub const BIN_DIR: &str = "usr/local/bin";
@@ -35,17 +35,13 @@ pub(crate) fn install(
     }
     check_libs(rootfs, libc)?;
     let target = libc.bun_target();
-    let bun = crate::process::which("bun").context(
-        "bun is required to build the TUI apps: install it and put it on PATH (https://bun.sh)",
-    )?;
 
     // The apps are members of the root JavaScript workspace; install it the one way xtask does.
-    run(
-        Command::new(&bun)
-            .args(["install", "--frozen-lockfile"])
-            .current_dir(repo_root),
-        "bun install --frozen-lockfile at the repo root",
-    )?;
+    Cmd::new("bun")
+        .args(["install", "--frozen-lockfile"])
+        .dir(repo_root)
+        .error_msg("bun install --frozen-lockfile at the repo root")
+        .run()?;
 
     let scratch = tempfile::tempdir().context("creating a directory for the TUI entry file")?;
     let entry = scratch.path().join("levitate-tui.ts");
@@ -57,16 +53,15 @@ pub(crate) fn install(
         fs::create_dir_all(parent).with_context(|| format!("creating '{}'", parent.display()))?;
     }
     // A target other than the host's makes bun download that runtime once (it caches it).
-    run(
-        Command::new(&bun)
-            .arg("build")
-            .arg(&entry)
-            .args(["--compile", "--minify"])
-            .arg(format!("--target={target}"))
-            .arg("--outfile")
-            .arg(&binary),
-        &format!("bun build --compile for {target}"),
-    )?;
+    Cmd::new("bun")
+        .arg("build")
+        .arg(&entry)
+        .args(["--compile", "--minify"])
+        .arg(format!("--target={target}"))
+        .arg("--outfile")
+        .arg(&binary)
+        .error_msg(format!("bun build --compile for {target}"))
+        .run()?;
     if !binary.is_file() {
         bail!("bun build wrote no binary at '{}'", binary.display());
     }
@@ -127,18 +122,4 @@ fn entry_source(apps: &[TuiApp]) -> String {
 
 fn json_string(value: &str) -> String {
     serde_json::to_string(value).expect("a string serializes")
-}
-
-fn run(command: &mut Command, what: &str) -> Result<()> {
-    let output = command
-        .output()
-        .with_context(|| format!("running {what}"))?;
-    if !output.status.success() {
-        bail!(
-            "{what} failed: {}\n{}",
-            String::from_utf8_lossy(&output.stdout).trim(),
-            String::from_utf8_lossy(&output.stderr).trim()
-        );
-    }
-    Ok(())
 }

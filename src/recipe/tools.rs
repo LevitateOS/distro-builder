@@ -4,7 +4,8 @@ use distro_profile::Profile;
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+
+use crate::process::Cmd;
 
 /// The live tools `recipes/install-tools.rhai` builds: package, crate directory,
 /// binaries (the first is the package's default).
@@ -109,19 +110,13 @@ fn prepare_tool_source_at(repo: &Path, package: &str, source: &Path) -> Result<(
     )?;
     let original_lock = fs::read_to_string(repo.join("Cargo.lock"))?;
     fs::write(source.join("Cargo.lock"), &original_lock)?;
-    let output = Command::new("cargo")
+    Cmd::new("cargo")
         .args(["vendor", "--offline", "--manifest-path"])
         .arg(source.join("Cargo.toml"))
         .arg(source.join("vendor"))
-        .current_dir(&repo)
-        .output()
-        .context("preparing pinned offline Cargo source closure")?;
-    if !output.status.success() {
-        bail!(
-            "cannot prepare offline source closure for {package}: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
+        .dir(&repo)
+        .error_msg(format!("preparing the offline source closure for {package}"))
+        .run()?;
     let selected_lock = fs::read_to_string(source.join("Cargo.lock"))?;
     let unexpected: Vec<_> = locked_packages(&selected_lock)?
         .difference(&locked_packages(&original_lock)?)
@@ -206,21 +201,17 @@ fn copy_crate(
 /// ignored), so whatever the crate compiles from (`src`, a build script and
 /// what it reads, `#[path]` modules, included files) comes along.
 fn copy_crate_files(original: &Path, output: &Path) -> Result<()> {
-    let listing = Command::new("git")
+    let listing = Cmd::new("git")
         .arg("-C")
         .arg(original)
         .args(["ls-files", "-z", "--cached", "--others", "--exclude-standard"])
-        .output()
-        .with_context(|| format!("listing the files of '{}' with git", original.display()))?;
-    if !listing.status.success() {
-        bail!(
-            "cannot list the files of tool crate '{}' (it must be in a git checkout): {}",
-            original.display(),
-            String::from_utf8_lossy(&listing.stderr).trim()
-        );
-    }
-    for name in listing.stdout.split(|byte| *byte == 0).filter(|name| !name.is_empty()) {
-        let name = Path::new(std::str::from_utf8(name).context("tool crate file name is not UTF-8")?);
+        .error_msg(format!(
+            "listing the files of tool crate '{}' (it must be in a git checkout)",
+            original.display()
+        ))
+        .run()?;
+    for name in listing.stdout.split('\0').filter(|name| !name.is_empty()) {
+        let name = Path::new(name);
         let source = original.join(name);
         let metadata = match fs::symlink_metadata(&source) {
             Ok(metadata) => metadata,
@@ -301,7 +292,6 @@ pub(crate) fn build_tool_tree(
     let recipe = repo
         .join("distro/builder/recipes")
         .join("install-tools.rhai");
-    let recipe_bin = super::find_recipe(repo)?;
     // The tree depends on the target (libc) and, for recab's trial service, the init system.
     let work = repo
         .join(".artifacts/work/recipe-tools")
@@ -309,21 +299,12 @@ pub(crate) fn build_tool_tree(
         .join(target)
         .join(init);
     let install_path = format!("usr/bin/{binary}");
-    let ctx = super::run_recipe_phase_json_with_inputs(
-        &recipe_bin.path,
-        "install",
-        &recipe,
-        &work,
-        &[
-            ("RUST_TARGET", target),
-            ("BIN", binary),
-            ("INSTALL_PATH", &install_path),
-            ("INIT_SYSTEM", init),
-        ],
-        &[("source", source.path())],
-        &[],
-        None,
-        recipe.parent(),
-    )?;
-    super::outputs::directory(&ctx, "rootfs")
+    super::Invocation::new(repo, "install", &recipe, &work)
+        .define("RUST_TARGET", target)
+        .define("BIN", binary)
+        .define("INSTALL_PATH", &install_path)
+        .define("INIT_SYSTEM", init)
+        .input("source", source.path())
+        .run()?
+        .directory("rootfs")
 }

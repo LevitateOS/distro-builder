@@ -4,19 +4,10 @@ use std::path::{Path, PathBuf};
 
 pub fn prepare_qemu_tools(repo: &Path) -> Result<PathBuf> {
     let recipe = repo.join("distro/builder/recipes/qemu-tools.rhai");
-    let binary = super::find_recipe(repo)?;
-    let result = super::run_recipe_phase_json_with_inputs(
-        &binary.path,
-        "install",
-        &recipe,
-        &repo.join(".artifacts/work/qemu-tools"),
-        &[],
-        &[],
-        &["dl.rockylinux.org:443".into()],
-        None,
-        recipe.parent(),
-    )?;
-    let tools = super::outputs::directory(&result, "tools")?;
+    let tools = super::Invocation::new(repo, "install", recipe, repo.join(".artifacts/work/qemu-tools"))
+        .network_host("dl.rockylinux.org:443")
+        .run()?
+        .directory("tools")?;
     for file in [
         "usr/bin/qemu-img",
         "usr/libexec/qemu-kvm",

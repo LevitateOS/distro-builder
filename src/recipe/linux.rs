@@ -1,6 +1,6 @@
 //! Shared Linux kernel recipe wrapper.
 
-use super::{find_recipe, recipe_work_dir, run_recipe_phase_json_with_inputs};
+use super::{recipe_work_dir, Invocation, RecipeResult};
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 
@@ -40,37 +40,24 @@ pub fn linux_for_distro(repo_root: &Path, distro_id: &str) -> Result<LinuxPaths>
 
     let (kconfig_path, fragments) = crate::kernel::kconfig_inputs(&bundle);
     let current = distro_contract::runs::kernel_dir(monorepo_dir, distro_id);
-    let mut inputs: Vec<(&str, &Path)> = vec![("kconfig", &kconfig_path)];
+    let mut invocation = Invocation::new(monorepo_dir, "install", &recipe_path, &work_dir)
+        .define("KERNEL_TARGET", distro_id)
+        .input("kconfig", &kconfig_path);
     if let Some(fragments) = &fragments {
-        inputs.push(("kconfig_fragments", fragments));
+        invocation = invocation.input("kconfig_fragments", fragments);
     }
     if current.is_dir() {
-        inputs.push(("target", &current));
+        invocation = invocation.input("target", &current);
     }
-    let defines = [("KERNEL_TARGET", distro_id)];
-
-    // Find and run recipe, parse JSON output
-    let recipes_dir = monorepo_dir.join("distro/builder/recipes");
-    let recipe_bin = find_recipe(&monorepo_dir)?;
-    let ctx = run_recipe_phase_json_with_inputs(
-        &recipe_bin.path,
-        "install",
-        &recipe_path,
-        &work_dir,
-        &defines,
-        &inputs,
-        &[],
-        None,
-        Some(&recipes_dir),
-    )?;
+    let ctx = invocation.run()?;
 
     select_kernel_bundle(&ctx, &current)?;
-    let vmlinuz = super::outputs::file(&ctx, "kernel")?;
+    let vmlinuz = ctx.file("kernel")?;
     // Modules are a required companion product, even though callers currently
     // consume only the image path from this return type.
-    super::outputs::directory(&ctx, "modules")?;
-    let source = super::outputs::optional_directory(&ctx, "source")?;
-    let version = super::outputs::metadata_string(&ctx, "kernel_version")?.to_owned();
+    ctx.directory("modules")?;
+    let source = ctx.optional_directory("source")?;
+    let version = ctx.metadata_string("kernel_version")?.to_owned();
     Ok(LinuxPaths {
         source,
         vmlinuz,
@@ -80,10 +67,9 @@ pub fn linux_for_distro(repo_root: &Path, distro_id: &str) -> Result<LinuxPaths>
 
 /// Select the explicit immutable bundle returned by Recipe for development
 /// consumers. Existing physical artifact trees are retained, never overwritten.
-#[cfg(unix)]
-pub fn select_kernel_bundle(ctx: &serde_json::Value, destination: &Path) -> Result<()> {
-    let bundle = super::outputs::directory(ctx, "bundle")?;
-    super::outputs::file(ctx, "kernel")?;
-    super::outputs::directory(ctx, "modules")?;
+pub fn select_kernel_bundle(ctx: &RecipeResult, destination: &Path) -> Result<()> {
+    let bundle = ctx.directory("bundle")?;
+    ctx.file("kernel")?;
+    ctx.directory("modules")?;
     super::outputs::select_directory(&bundle, destination)
 }

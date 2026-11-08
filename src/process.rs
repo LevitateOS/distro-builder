@@ -1,337 +1,551 @@
-//! Centralized command execution with consistent error handling.
+//! The one way the builder runs host programs, and the host programs it needs.
 //!
-//! This module provides a unified API for running external commands,
-//! ensuring all commands capture stderr and provide useful error messages.
+//! Every child started through [`Cmd`] gets the builder's environment plus what the
+//! call sets or removes, dies with the builder ([`die_with_parent`]), and is reported by
+//! how it ended: its exit code, or the signal that killed it. A program that cannot be
+//! started is reported as not found, not executable or not a valid executable.
+//!
+//! [`HOST_TOOLS`] is the one list of host programs the build, the base lock and the
+//! scenarios need, with the package that provides each on dnf and apt hosts. A release
+//! build checks it before any work ([`check_host_tools`]); `cargo xtask doctor` and CI
+//! read the same list.
 
-use anyhow::{bail, Context, Result};
-use std::path::Path;
+use anyhow::{anyhow, bail, Result};
+use std::ffi::OsStr;
+use std::io;
+use std::os::unix::process::{CommandExt, ExitStatusExt};
+use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
 
-/// Result of a command execution.
-#[derive(Debug, Clone)]
-pub struct CommandResult {
-    /// Exit status of the command.
-    pub status: ExitStatus,
-    /// Captured stdout as a string.
-    pub stdout: String,
-    /// Captured stderr as a string.
-    pub stderr: String,
-}
-
-impl CommandResult {
-    /// Returns true if the command exited successfully.
-    pub fn success(&self) -> bool {
-        self.status.success()
-    }
-
-    /// Get the exit code, or -1 if terminated by signal.
-    pub fn code(&self) -> i32 {
-        self.status.code().unwrap_or(-1)
-    }
-
-    /// Get a human-readable exit description.
-    /// Returns "exit code N" for normal exits, or "killed by SIGNAL" for signal termination.
-    pub fn exit_description(&self) -> String {
-        if let Some(code) = self.status.code() {
-            format!("exit code {}", code)
-        } else {
-            #[cfg(unix)]
-            {
-                use std::os::unix::process::ExitStatusExt;
-                if let Some(signal) = self.status.signal() {
-                    let signal_name = match signal {
-                        1 => "SIGHUP",
-                        2 => "SIGINT",
-                        3 => "SIGQUIT",
-                        6 => "SIGABRT",
-                        9 => "SIGKILL",
-                        11 => "SIGSEGV",
-                        13 => "SIGPIPE",
-                        14 => "SIGALRM",
-                        15 => "SIGTERM",
-                        _ => "unknown signal",
-                    };
-                    return format!("killed by {} (signal {})", signal_name, signal);
-                }
-            }
-            "terminated by signal".to_string()
-        }
-    }
-
-    /// Get stdout, trimmed of whitespace.
-    pub fn stdout_trimmed(&self) -> &str {
-        self.stdout.trim()
-    }
-
-    /// Get stderr, trimmed of whitespace.
-    pub fn stderr_trimmed(&self) -> &str {
-        self.stderr.trim()
-    }
-}
-
-/// Builder for configuring command execution.
-pub struct Cmd {
-    program: String,
-    args: Vec<String>,
-    current_dir: Option<std::path::PathBuf>,
-    /// If true, don't fail on non-zero exit.
-    allow_fail: bool,
-    /// Custom error message prefix.
-    error_prefix: Option<String>,
-}
-
-impl Cmd {
-    /// Create a new command builder.
-    pub fn new(program: impl AsRef<str>) -> Self {
-        Self {
-            program: program.as_ref().to_string(),
-            args: Vec::new(),
-            current_dir: None,
-            allow_fail: false,
-            error_prefix: None,
-        }
-    }
-
-    /// Add a single argument.
-    pub fn arg(mut self, arg: impl AsRef<str>) -> Self {
-        self.args.push(arg.as_ref().to_string());
-        self
-    }
-
-    /// Add multiple arguments.
-    pub fn args<I, S>(mut self, args: I) -> Self
-    where
-        I: IntoIterator<Item = S>,
-        S: AsRef<str>,
-    {
-        for arg in args {
-            self.args.push(arg.as_ref().to_string());
-        }
-        self
-    }
-
-    /// Add a path as an argument.
-    pub fn arg_path(mut self, path: &Path) -> Self {
-        self.args.push(path.to_string_lossy().into_owned());
-        self
-    }
-
-    /// Set the working directory.
-    pub fn dir(mut self, dir: &Path) -> Self {
-        self.current_dir = Some(dir.to_path_buf());
-        self
-    }
-
-    /// Allow non-zero exit codes without failing.
-    pub fn allow_fail(mut self) -> Self {
-        self.allow_fail = true;
-        self
-    }
-
-    /// Set a custom error message prefix.
-    pub fn error_msg(mut self, msg: impl AsRef<str>) -> Self {
-        self.error_prefix = Some(msg.as_ref().to_string());
-        self
-    }
-
-    /// Run the command and capture output.
-    pub fn run(self) -> Result<CommandResult> {
-        let mut cmd = Command::new(&self.program);
-        cmd.args(&self.args);
-
-        if let Some(ref dir) = self.current_dir {
-            cmd.current_dir(dir);
-        }
-
-        let output = cmd
-            .output()
-            .with_context(|| format!("Failed to execute '{}'. Is it installed?", self.program))?;
-
-        let result = CommandResult {
-            status: output.status,
-            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-        };
-
-        if !self.allow_fail && !result.success() {
-            let prefix = self
-                .error_prefix
-                .unwrap_or_else(|| format!("'{}' failed", self.program));
-
-            let stderr = result.stderr_trimmed();
-            let exit_desc = result.exit_description();
-            if stderr.is_empty() {
-                bail!("{} ({})", prefix, exit_desc);
-            } else {
-                bail!("{} ({}):\n{}", prefix, exit_desc, stderr);
-            }
-        }
-
-        Ok(result)
-    }
-
-    /// Run the command with inherited stdio (interactive/streaming).
-    ///
-    /// Output goes directly to the terminal. Use for long-running commands
-    /// where the user should see progress (e.g., kernel builds).
-    pub fn run_interactive(self) -> Result<ExitStatus> {
-        let mut cmd = Command::new(&self.program);
-        cmd.args(&self.args);
-        cmd.stdin(Stdio::inherit());
-        cmd.stdout(Stdio::inherit());
-        cmd.stderr(Stdio::inherit());
-
-        if let Some(ref dir) = self.current_dir {
-            cmd.current_dir(dir);
-        }
-
-        let status = cmd
-            .status()
-            .with_context(|| format!("Failed to execute '{}'. Is it installed?", self.program))?;
-
-        if !self.allow_fail && !status.success() {
-            let prefix = self
-                .error_prefix
-                .unwrap_or_else(|| format!("'{}' failed", self.program));
-            let exit_desc = exit_description_from_status(&status);
-            bail!("{} ({})", prefix, exit_desc);
-        }
-
-        Ok(status)
-    }
-}
-
-/// Get a human-readable exit description from an ExitStatus.
-fn exit_description_from_status(status: &ExitStatus) -> String {
-    if let Some(code) = status.code() {
-        format!("exit code {}", code)
-    } else {
-        #[cfg(unix)]
-        {
-            use std::os::unix::process::ExitStatusExt;
-            if let Some(signal) = status.signal() {
-                let signal_name = match signal {
-                    1 => "SIGHUP",
-                    2 => "SIGINT",
-                    3 => "SIGQUIT",
-                    6 => "SIGABRT",
-                    9 => "SIGKILL",
-                    11 => "SIGSEGV",
-                    13 => "SIGPIPE",
-                    14 => "SIGALRM",
-                    15 => "SIGTERM",
-                    _ => "unknown signal",
-                };
-                return format!("killed by {} (signal {})", signal_name, signal);
-            }
-        }
-        "terminated by signal".to_string()
-    }
-}
-
-// =============================================================================
-// Convenience functions
-// =============================================================================
-
-/// Run a command with arguments. Fails with stderr on error.
-///
-/// # Example
-/// ```ignore
-/// let result = run("ls", &["-la", "/tmp"])?;
-/// println!("Files:\n{}", result.stdout);
-/// ```
-pub fn run<I, S>(program: &str, args: I) -> Result<CommandResult>
-where
-    I: IntoIterator<Item = S>,
-    S: AsRef<str>,
-{
-    let mut cmd = Cmd::new(program);
-    for arg in args {
-        cmd = cmd.arg(arg);
-    }
-    cmd.run()
-}
-
-/// Run a command in a specific directory.
-pub fn run_in<I, S>(program: &str, args: I, dir: &Path) -> Result<CommandResult>
-where
-    I: IntoIterator<Item = S>,
-    S: AsRef<str>,
-{
-    let mut cmd = Cmd::new(program).dir(dir);
-    for arg in args {
-        cmd = cmd.arg(arg);
-    }
-    cmd.run()
-}
-
-/// Run a shell command via `sh -c`.
-///
-/// # Example
-/// ```ignore
-/// let result = shell("echo hello && echo world")?;
-/// ```
-pub fn shell(command: &str) -> Result<CommandResult> {
-    run("sh", ["-c", command])
-}
-
-/// Run a shell command in a specific directory.
-pub fn shell_in(command: &str, dir: &Path) -> Result<CommandResult> {
-    run_in("sh", ["-c", command], dir)
-}
-
-/// Check if a program exists in PATH.
-///
-/// Returns the full path if found, None otherwise.
-pub fn which(program: &str) -> Option<String> {
-    let result = Cmd::new("which").arg(program).allow_fail().run().ok()?;
-
-    if result.success() {
-        let path = result.stdout_trimmed();
-        if !path.is_empty() {
-            return Some(path.to_string());
-        }
-    }
-    None
-}
-
-/// Check if a program exists in PATH (bool version).
-pub fn exists(program: &str) -> bool {
-    which(program).is_some()
-}
-
-// =============================================================================
-// Path utilities
-// =============================================================================
-
-/// Ensure a path exists, returning an error if it doesn't.
-///
-/// # Example
-/// ```ignore
-/// ensure_exists(&kernel_path, "kernel")?;
-/// ```
-pub fn ensure_exists(path: &Path, description: &str) -> Result<()> {
-    if !path.exists() {
-        bail!("{} not found at {}", description, path.display());
+/// Makes the calling process receive SIGTERM when its parent exits, so no step
+/// outlives the build that started it (and keeps holding its locks).
+pub fn die_with_parent() -> io::Result<()> {
+    // SAFETY: PR_SET_PDEATHSIG only sets an attribute of the calling process.
+    if unsafe { libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM) } != 0 {
+        return Err(io::Error::last_os_error());
     }
     Ok(())
 }
 
-/// Find the first existing path from a list of candidates.
-///
-/// Returns `None` if no paths exist.
-///
-/// # Example
-/// ```ignore
-/// let boot_file = find_first_existing(&[
-///     rootfs.join("usr/lib/systemd/boot/efi/systemd-bootx64.efi"),
-///     Path::new("/usr/lib/systemd/boot/efi/systemd-bootx64.efi").to_path_buf(),
-/// ]);
-/// ```
-pub fn find_first_existing<P: AsRef<Path>>(paths: &[P]) -> Option<&P> {
-    paths.iter().find(|p| p.as_ref().exists())
+/// How a child ended: `exit code N`, or `killed by SIGNAME (signal N)`.
+pub fn exit_description(status: ExitStatus) -> String {
+    if let Some(code) = status.code() {
+        return format!("exit code {code}");
+    }
+    let Some(signal) = status.signal() else {
+        return status.to_string();
+    };
+    let name = match signal {
+        libc::SIGHUP => "SIGHUP",
+        libc::SIGINT => "SIGINT",
+        libc::SIGQUIT => "SIGQUIT",
+        libc::SIGABRT => "SIGABRT",
+        libc::SIGKILL => "SIGKILL",
+        libc::SIGSEGV => "SIGSEGV",
+        libc::SIGPIPE => "SIGPIPE",
+        libc::SIGALRM => "SIGALRM",
+        libc::SIGTERM => "SIGTERM",
+        _ => "a signal",
+    };
+    format!("killed by {name} (signal {signal})")
+}
+
+/// The full path of `program` on PATH.
+pub fn which(program: &str) -> Option<PathBuf> {
+    which::which(program).ok()
+}
+
+/// A child's captured output.
+#[derive(Debug)]
+pub struct Output {
+    pub stdout: String,
+    pub stderr: String,
+}
+
+/// A host program to run.
+pub struct Cmd {
+    command: Command,
+    program: String,
+    dir: Option<PathBuf>,
+    error_prefix: Option<String>,
+    stdout_to_stderr: bool,
+}
+
+impl Cmd {
+    pub fn new(program: impl AsRef<OsStr>) -> Self {
+        let mut command = Command::new(program.as_ref());
+        // SAFETY: the hook only calls prctl, which is async-signal-safe.
+        unsafe { command.pre_exec(die_with_parent) };
+        Self {
+            command,
+            program: program.as_ref().to_string_lossy().into_owned(),
+            dir: None,
+            error_prefix: None,
+            stdout_to_stderr: false,
+        }
+    }
+
+    pub fn arg(mut self, arg: impl AsRef<OsStr>) -> Self {
+        self.command.arg(arg);
+        self
+    }
+
+    pub fn args<I, S>(mut self, args: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
+        self.command.args(args);
+        self
+    }
+
+    pub fn dir(mut self, dir: &Path) -> Self {
+        self.command.current_dir(dir);
+        self.dir = Some(dir.to_path_buf());
+        self
+    }
+
+    pub fn env(mut self, key: impl AsRef<OsStr>, value: impl AsRef<OsStr>) -> Self {
+        self.command.env(key, value);
+        self
+    }
+
+    pub fn env_remove(mut self, key: impl AsRef<OsStr>) -> Self {
+        self.command.env_remove(key);
+        self
+    }
+
+    /// What failed, for the error when the child fails (default: `'<program>' failed`).
+    pub fn error_msg(mut self, msg: impl Into<String>) -> Self {
+        self.error_prefix = Some(msg.into());
+        self
+    }
+
+    /// Send the child's stdout to the builder's stderr, for children whose output is
+    /// progress, so it never mixes with what a command prints as its result.
+    pub fn stdout_to_stderr(mut self) -> Self {
+        self.stdout_to_stderr = true;
+        self
+    }
+
+    /// Run with output captured; fails with the child's stderr unless it succeeds.
+    pub fn run(mut self) -> Result<Output> {
+        self.check_dir()?;
+        let output = self
+            .command
+            .stdin(Stdio::null())
+            .output()
+            .map_err(|error| self.spawn_error(error))?;
+        let output_text = Output {
+            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        };
+        if !output.status.success() {
+            let stderr = output_text.stderr.trim();
+            let failed = self.failed(output.status);
+            if stderr.is_empty() {
+                bail!("{failed}");
+            }
+            bail!("{failed}:\n{stderr}");
+        }
+        Ok(output_text)
+    }
+
+    /// Run with the terminal's stdin and stderr (and stdout, unless sent to stderr).
+    pub fn run_interactive(mut self) -> Result<()> {
+        self.check_dir()?;
+        if self.stdout_to_stderr {
+            self.command.stdout(Stdio::from(io::stderr()));
+        }
+        let status = self
+            .command
+            .status()
+            .map_err(|error| self.spawn_error(error))?;
+        if !status.success() {
+            bail!("{}", self.failed(status));
+        }
+        Ok(())
+    }
+
+    fn check_dir(&self) -> Result<()> {
+        match &self.dir {
+            Some(dir) if !dir.is_dir() => bail!(
+                "cannot run '{}': its working directory '{}' does not exist",
+                self.program,
+                dir.display()
+            ),
+            _ => Ok(()),
+        }
+    }
+
+    fn failed(&self, status: ExitStatus) -> String {
+        let prefix = self
+            .error_prefix
+            .clone()
+            .unwrap_or_else(|| format!("'{}' failed", self.program));
+        format!("{prefix} ({})", exit_description(status))
+    }
+
+    fn spawn_error(&self, error: io::Error) -> anyhow::Error {
+        let program = &self.program;
+        let why = match error.kind() {
+            io::ErrorKind::NotFound if program.contains('/') => "does not exist".to_string(),
+            io::ErrorKind::NotFound => "is not on PATH".to_string(),
+            io::ErrorKind::PermissionDenied => "is not executable (permission denied)".to_string(),
+            _ if error.raw_os_error() == Some(libc::ENOEXEC) => {
+                "is not a valid executable (exec format error)".to_string()
+            }
+            _ => format!("could not be started: {error}"),
+        };
+        match &self.error_prefix {
+            Some(prefix) => anyhow!("{prefix}: '{program}' {why}"),
+            None => anyhow!("'{program}' {why}"),
+        }
+    }
 }
 
 // =============================================================================
-// Tests
+// Host prerequisites
 // =============================================================================
+
+/// What a host program is needed for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HostNeed {
+    /// Building products and release ISOs.
+    Build,
+    /// `cargo xtask base lock` (resolving and verifying the Fedora base packages).
+    BaseLock,
+    /// Booting and logging in to scenario VMs.
+    Scenarios,
+}
+
+/// A host's package manager.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HostFamily {
+    Dnf,
+    Apt,
+}
+
+impl HostFamily {
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "dnf" => Some(Self::Dnf),
+            "apt" => Some(Self::Apt),
+            _ => None,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Dnf => "dnf",
+            Self::Apt => "apt",
+        }
+    }
+
+    /// This host's family, from `ID` and `ID_LIKE` in `/etc/os-release`.
+    pub fn detect() -> Option<Self> {
+        let text = std::fs::read_to_string("/etc/os-release").ok()?;
+        let ids: Vec<&str> = text
+            .lines()
+            .filter_map(|line| line.strip_prefix("ID=").or(line.strip_prefix("ID_LIKE=")))
+            .flat_map(|value| value.trim_matches('"').split_whitespace())
+            .collect();
+        if ids.iter().any(|id| ["fedora", "rhel", "centos"].contains(id)) {
+            Some(Self::Dnf)
+        } else if ids.iter().any(|id| ["debian", "ubuntu"].contains(id)) {
+            Some(Self::Apt)
+        } else {
+            None
+        }
+    }
+}
+
+/// A host program, what needs it, and the packages that provide it, or `upstream`
+/// for one not installed from the host's packages.
+#[derive(Debug)]
+pub struct HostTool {
+    pub program: &'static str,
+    pub purpose: &'static str,
+    pub needs: &'static [HostNeed],
+    pub dnf: &'static [&'static str],
+    pub apt: &'static [&'static str],
+    pub upstream: Option<&'static str>,
+}
+
+impl HostTool {
+    pub fn packages(&self, family: HostFamily) -> &'static [&'static str] {
+        match family {
+            HostFamily::Dnf => self.dnf,
+            HostFamily::Apt => self.apt,
+        }
+    }
+
+    /// The command that installs it on a `family` host (both families' packages
+    /// when the family is unknown).
+    pub fn fix(&self, family: Option<HostFamily>) -> String {
+        if let Some(upstream) = self.upstream {
+            return format!("install {} from {upstream}", self.program);
+        }
+        match family {
+            Some(family) => {
+                format!("sudo {} install {}", family.name(), self.packages(family).join(" "))
+            }
+            None => format!(
+                "install {} (dnf: {}; apt: {})",
+                self.program,
+                self.dnf.join(" "),
+                self.apt.join(" ")
+            ),
+        }
+    }
+
+    /// Where it is on PATH, or why it cannot be used.
+    pub fn status(&self) -> Result<PathBuf, String> {
+        let path = which(self.program).ok_or_else(|| format!("not on PATH ({})", self.purpose))?;
+        if self.program == "mkfs.erofs" {
+            erofs_features(&path)?;
+        }
+        Ok(path)
+    }
+}
+
+use HostNeed::{BaseLock, Build, Scenarios};
+
+/// Every host program the build, the base lock and the scenarios run.
+pub const HOST_TOOLS: &[HostTool] = &[
+    HostTool {
+        program: "cargo",
+        purpose: "builds Recipe, the install tools, recinit and reciso",
+        needs: &[Build],
+        dnf: &[],
+        apt: &[],
+        upstream: Some("rustup (https://rustup.rs)"),
+    },
+    HostTool {
+        program: "git",
+        purpose: "lists a tool crate's files for its offline source",
+        needs: &[Build],
+        dnf: &["git"],
+        apt: &["git"],
+        upstream: None,
+    },
+    HostTool {
+        program: "bun",
+        purpose: "compiles the TUI apps",
+        needs: &[Build],
+        dnf: &[],
+        apt: &[],
+        upstream: Some("https://bun.sh"),
+    },
+    HostTool {
+        program: "curl",
+        purpose: "downloads busybox and the Fedora repository indexes",
+        needs: &[Build, BaseLock],
+        dnf: &["curl"],
+        apt: &["curl"],
+        upstream: None,
+    },
+    HostTool {
+        program: "mkfs.erofs",
+        purpose: "writes the rootfs and overlay images (erofs-utils 1.8+, with zstd and --tar)",
+        needs: &[Build],
+        dnf: &["erofs-utils"],
+        apt: &["erofs-utils"],
+        upstream: None,
+    },
+    HostTool {
+        program: "fsck.erofs",
+        purpose: "extracts a parent product's rootfs image",
+        needs: &[Build],
+        dnf: &["erofs-utils"],
+        apt: &["erofs-utils"],
+        upstream: None,
+    },
+    HostTool {
+        program: "readelf",
+        purpose: "recinit finds the libraries of initramfs binaries",
+        needs: &[Build],
+        dnf: &["binutils"],
+        apt: &["binutils"],
+        upstream: None,
+    },
+    HostTool {
+        program: "xz",
+        purpose: "decompresses kernel modules and repository indexes",
+        needs: &[Build, BaseLock],
+        dnf: &["xz"],
+        apt: &["xz-utils"],
+        upstream: None,
+    },
+    HostTool {
+        program: "gzip",
+        purpose: "decompresses kernel modules and repository indexes",
+        needs: &[Build, BaseLock],
+        dnf: &["gzip"],
+        apt: &["gzip"],
+        upstream: None,
+    },
+    HostTool {
+        program: "zstd",
+        purpose: "decompresses kernel modules and repository indexes",
+        needs: &[Build, BaseLock],
+        dnf: &["zstd"],
+        apt: &["zstd"],
+        upstream: None,
+    },
+    HostTool {
+        program: "ukify",
+        purpose: "builds the UKIs",
+        needs: &[Build],
+        dnf: &["systemd-ukify", "systemd-boot-unsigned"],
+        apt: &["systemd-ukify", "systemd-boot-efi"],
+        upstream: None,
+    },
+    HostTool {
+        program: "xorriso",
+        purpose: "writes the ISOs and the scenarios' boot injection media",
+        needs: &[Build, Scenarios],
+        dnf: &["xorriso"],
+        apt: &["xorriso"],
+        upstream: None,
+    },
+    HostTool {
+        program: "mkfs.fat",
+        purpose: "makes the ISO's EFI partition image",
+        needs: &[Build],
+        dnf: &["dosfstools"],
+        apt: &["dosfstools"],
+        upstream: None,
+    },
+    HostTool {
+        program: "mmd",
+        purpose: "fills the ISO's EFI partition image",
+        needs: &[Build],
+        dnf: &["mtools"],
+        apt: &["mtools"],
+        upstream: None,
+    },
+    HostTool {
+        program: "mcopy",
+        purpose: "fills the ISO's EFI partition image",
+        needs: &[Build],
+        dnf: &["mtools"],
+        apt: &["mtools"],
+        upstream: None,
+    },
+    HostTool {
+        program: "sha512sum",
+        purpose: "checksums the ISO",
+        needs: &[Build],
+        dnf: &["coreutils"],
+        apt: &["coreutils"],
+        upstream: None,
+    },
+    HostTool {
+        program: "rpmkeys",
+        purpose: "verifies the Fedora base packages' signatures",
+        needs: &[BaseLock],
+        dnf: &["rpm"],
+        apt: &["rpm"],
+        upstream: None,
+    },
+    HostTool {
+        program: "virsh",
+        purpose: "scenario VMs run under libvirt",
+        needs: &[Scenarios],
+        dnf: &["libvirt-client", "libvirt-daemon-kvm"],
+        apt: &["libvirt-clients", "libvirt-daemon", "qemu-system-x86", "ovmf"],
+        upstream: None,
+    },
+    HostTool {
+        program: "passt",
+        purpose: "user networking and the SSH forward of scenario VMs",
+        needs: &[Scenarios],
+        dnf: &["passt"],
+        apt: &["passt"],
+        upstream: None,
+    },
+    HostTool {
+        program: "qemu-img",
+        purpose: "scenario disk images",
+        needs: &[Scenarios],
+        dnf: &["qemu-img"],
+        apt: &["qemu-utils"],
+        upstream: None,
+    },
+    HostTool {
+        program: "ssh",
+        purpose: "logs in to scenario guests",
+        needs: &[Scenarios],
+        dnf: &["openssh-clients"],
+        apt: &["openssh-client"],
+        upstream: None,
+    },
+    HostTool {
+        program: "ssh-keygen",
+        purpose: "creates the repo SSH key",
+        needs: &[Scenarios],
+        dnf: &["openssh-clients"],
+        apt: &["openssh-client"],
+        upstream: None,
+    },
+];
+
+/// Fail, naming every one, if a host program `need` requires is missing or unusable.
+pub fn check_host_tools(need: HostNeed) -> Result<()> {
+    let family = HostFamily::detect();
+    let problems: Vec<String> = HOST_TOOLS
+        .iter()
+        .filter(|tool| tool.needs.contains(&need))
+        .filter_map(|tool| {
+            let why = tool.status().err()?;
+            Some(format!("  {}: {why}\n    fix: {}", tool.program, tool.fix(family)))
+        })
+        .collect();
+    if !problems.is_empty() {
+        bail!(
+            "this host lacks what {} needs:\n{}",
+            match need {
+                Build => "a build",
+                BaseLock => "the base lock",
+                Scenarios => "the scenarios",
+            },
+            problems.join("\n")
+        );
+    }
+    Ok(())
+}
+
+/// The packages that provide every host program, for a `family` host.
+pub fn host_packages(family: HostFamily) -> Vec<&'static str> {
+    let mut packages: Vec<&str> = HOST_TOOLS
+        .iter()
+        .flat_map(|tool| tool.packages(family).iter().copied())
+        .collect();
+    packages.sort_unstable();
+    packages.dedup();
+    packages
+}
+
+/// mkfs.erofs must compress with zstd and import a tar stream (`--tar=f`): erofs-utils
+/// 1.8 or newer. An older one would fail only after the multi-GB tar is written.
+fn erofs_features(mkfs: &Path) -> Result<(), String> {
+    let help = Cmd::new(mkfs)
+        .arg("--help")
+        .run()
+        .map_err(|error| format!("{error:#}"))?
+        .stdout;
+    let missing: Vec<&str> = [("--tar=", "--tar"), ("zstd", "zstd")]
+        .into_iter()
+        .filter(|(text, _)| !help.contains(text))
+        .map(|(_, feature)| feature)
+        .collect();
+    if missing.is_empty() {
+        return Ok(());
+    }
+    Err(format!(
+        "{} lacks {}: erofs-utils 1.8 or newer is required",
+        mkfs.display(),
+        missing.join(" and ")
+    ))
+}

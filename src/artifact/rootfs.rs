@@ -40,7 +40,7 @@ use anyhow::{bail, Context, Result};
 use std::fs;
 use std::path::Path;
 
-use crate::process::{self, Cmd};
+use crate::process::Cmd;
 
 /// Create an EROFS image from a directory.
 ///
@@ -83,18 +83,6 @@ pub fn create_erofs(
         bail!("Source path is not a directory: {}", source_dir.display());
     }
 
-    // Check tool availability
-    if !process::exists("mkfs.erofs") {
-        bail!(
-            "mkfs.erofs not found. Install erofs-utils:\n\
-             On Fedora: sudo dnf install erofs-utils\n\
-             On Ubuntu: sudo apt install erofs-utils\n\
-             On Arch: sudo pacman -S erofs-utils\n\
-             \n\
-             NOTE: erofs-utils 1.5+ required for lz4hc, 1.8+ for zstd."
-        );
-    }
-
     // Ensure output directory exists
     if let Some(parent) = output.parent() {
         fs::create_dir_all(parent)
@@ -119,9 +107,9 @@ pub fn create_erofs(
         .args(["-C", &chunk_size.to_string()])
         .arg("--tar=f")
         .arg("-T0")
-        .arg_path(output)
-        .arg_path(archive.path())
-        .error_msg("mkfs.erofs failed importing target metadata; erofs-utils with full tar import is required")
+        .arg(output)
+        .arg(archive.path())
+        .error_msg("mkfs.erofs importing the rootfs tar")
         .run_interactive()?;
 
     // Print size

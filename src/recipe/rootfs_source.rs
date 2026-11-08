@@ -2,7 +2,7 @@ use anyhow::{bail, Context, Result};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use super::{find_recipe, recipe_work_dir};
+use super::{recipe_work_dir, Invocation};
 
 #[derive(Debug, Clone)]
 pub struct RootfsSourceRecipeSpec {
@@ -35,45 +35,26 @@ pub fn materialize_rootfs_from_recipe(
         );
     }
 
-    let recipe_bin = find_recipe(repo_root).context("resolving recipe binary for rootfs source")?;
-    let recipes_path = recipe_path.parent().ok_or_else(|| {
-        anyhow::anyhow!(
-            "rootfs source recipe has no parent directory: '{}'",
-            recipe_path.display()
-        )
-    })?;
-
-    let mut defines: Vec<(&str, &str)> = Vec::with_capacity(spec.defines.len());
+    let mut invocation = Invocation::new(repo_root, "install", &recipe_path, build_dir)
+        .memory_mib(spec.memory_mib)
+        .storage_max_objects(spec.storage_max_objects);
     for (key, value) in &spec.defines {
-        defines.push((key.as_str(), value.as_str()));
+        invocation = invocation.define(key, value);
     }
-
-    let inputs: Vec<(&str, &Path)> = spec
-        .inputs
-        .iter()
-        .map(|(name, path)| (name.as_str(), path.as_path()))
-        .collect();
-    let ctx = super::run_recipe_phase_json_impl(
-        &recipe_bin.path,
-        "install",
-        &recipe_path,
-        build_dir,
-        &defines,
-        Some(recipes_path),
-        &inputs,
-        &spec.network_hosts,
-        spec.memory_mib,
-        false,
-        spec.storage_max_objects,
-    )
-    .with_context(|| {
+    for (name, path) in &spec.inputs {
+        invocation = invocation.input(name, path);
+    }
+    for host in &spec.network_hosts {
+        invocation = invocation.network_host(host);
+    }
+    let ctx = invocation.run().with_context(|| {
         format!(
             "materializing rootfs source via '{}'",
             recipe_path.display()
         )
     })?;
 
-    super::outputs::directory(&ctx, "rootfs").with_context(|| {
+    ctx.directory("rootfs").with_context(|| {
         format!(
             "rootfs source recipe '{}' output contract",
             recipe_path.display()
@@ -109,30 +90,21 @@ pub fn preseed_rootfs_source(
             build_dir.display()
         )
     })?;
-    let recipe_bin =
-        find_recipe(repo_root).context("resolving recipe binary for rootfs source preseed")?;
-    let ctx = super::run_recipe_phase_json_impl(
-        &recipe_bin.path,
-        "install",
-        &recipe_path,
-        &build_dir,
-        &[],
-        recipe_path.parent(),
-        &[],
-        network_hosts,
-        memory_mib,
-        refresh,
-        None,
-    )
-    .with_context(|| format!("preseeding rootfs source via '{}'", recipe_path.display()))?;
+    let mut invocation = Invocation::new(repo_root, "install", &recipe_path, &build_dir)
+        .memory_mib(memory_mib)
+        .force_acquire(refresh);
+    for host in network_hosts {
+        invocation = invocation.network_host(host);
+    }
+    let ctx = invocation
+        .run()
+        .with_context(|| format!("preseeding rootfs source via '{}'", recipe_path.display()))?;
     let outputs: BTreeMap<String, PathBuf> = required_outputs
         .iter()
         .map(|(name, kind)| {
             let path = match kind {
-                distro_contract::RecipeOutputKind::File => super::outputs::file(&ctx, name),
-                distro_contract::RecipeOutputKind::Directory => {
-                    super::outputs::directory(&ctx, name)
-                }
+                distro_contract::RecipeOutputKind::File => ctx.file(name),
+                distro_contract::RecipeOutputKind::Directory => ctx.directory(name),
             }?;
             Ok((name.clone(), path))
         })

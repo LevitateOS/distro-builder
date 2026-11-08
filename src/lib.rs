@@ -21,6 +21,3 @@ pub use pipeline::products::{
     prepare_installed_boot_product, prepare_live_boot_product, prepare_live_tools_product,
     BaseProductLayout, DerivedProductLayout, LiveBootProductSpec, OverlayLayout,
 };
-
-// Re-export process utilities
-pub use process::{ensure_exists, find_first_existing, Cmd, CommandResult};

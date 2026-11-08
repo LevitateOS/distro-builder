@@ -57,25 +57,14 @@ pub(crate) fn create_live_overlay(
     let shadow = rootfs.join("etc/shadow");
     let recipe = repo.join("distro/builder/recipes/live-overlay.rhai");
     let work = crate::recipe::recipe_work_dir(repo, distro_id)?.join(dir_name);
-    let bin = crate::recipe::find_recipe(repo)?;
-    let ctx = crate::recipe::run_recipe_phase_json_with_inputs(
-        &bin.path,
-        "install",
-        &recipe,
-        &work,
-        &[],
-        &[
-            ("config", &config),
-            ("serial_profile", &serial_profile),
-            ("assets", &assets),
-            ("shadow", &shadow),
-        ],
-        &[],
-        None,
-        recipe.parent(),
-    )
-    .context("preparing the live overlay with Recipe")?;
-    let published = crate::recipe::outputs::directory(&ctx, "overlay")?;
+    let published = crate::recipe::Invocation::new(repo, "install", &recipe, &work)
+        .input("config", &config)
+        .input("serial_profile", &serial_profile)
+        .input("assets", &assets)
+        .input("shadow", &shadow)
+        .run()
+        .context("preparing the live overlay with Recipe")?
+        .directory("overlay")?;
     let destination = crate::pipeline::io::create_empty_overlay_dir(output_dir, dir_name)?;
     levitate_recipe::target::merge_tree(&published, &destination)?;
     Ok(destination)

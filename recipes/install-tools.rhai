@@ -40,7 +40,7 @@ fn is_built(ctx) {
 
 fn build(ctx) {
     let work = ctx.runtime.paths.build;
-    let rustflags = "-C linker=/usr/lib/rustlib/x86_64-unknown-linux-gnu/bin/rust-lld -C linker-flavor=ld.lld -C link-arg=--threads=1";
+    let rustflags = "-C linker=/usr/lib/rustlib/x86_64-unknown-linux-gnu/bin/rust-lld -C linker-flavor=ld.lld";
     if ctx.name == "recipe" { rustflags += " -C link-arg=" + renameat2_object(work); }
     exec_checked("cargo", ["build", "--release", "--locked", "--offline", "--bin", ctx.name,
         "--target", ctx.rust_target,

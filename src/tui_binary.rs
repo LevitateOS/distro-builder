@@ -6,36 +6,24 @@
 //! binary per layer keeps that to a single copy. It runs the app named by the command it
 //! was started as (`argv[0]`), like busybox.
 //!
-//! The build's inputs are declared: the bun version ([`BUN_VERSION`], which the host's
-//! bun must be), the runtime for the image's libc (the variant's profile), fetched once
-//! into `.artifacts/cache` and checked against its pinned hash, so nothing from the
-//! build host's bun lands on the image; the apps as the root JavaScript workspace has
-//! them installed (the build never installs it); and an entry file at a fixed place in
-//! the checkout that imports each app by relative path, so neither the checkout's nor
-//! the temp dir's location reaches the binary.
+//! Rust selects the source closure, apps, target libc and image paths. The
+//! `tui-binary` recipe owns frozen dependency acquisition, compilation and
+//! publication; its `bun-toolchain` dependency owns the verified compiler and
+//! target runtime. No host Bun installation or node_modules cache is required.
 
-use anyhow::{bail, Context, Result};
-use crate::process::Cmd;
 use crate::tui_apps::{TuiApp, Workspace};
+use anyhow::{Context, Result, bail};
 use distro_contract::install_ux::BIN_DIR;
 use distro_contract::profile::Libc;
 use distro_contract::{Profile, SYSTEM_TUI_APPS};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::os::unix::fs::PermissionsExt;
+use std::path::Path;
 
 /// The install screen's binary (live-tools overlay).
 pub(crate) const INSTALL_BINARY: &str = "usr/local/libexec/install-tui";
 /// The installed system's binary (system rootfs).
 pub(crate) const SYSTEM_BINARY: &str = "usr/local/libexec/system-tui";
-
-/// The bun that builds the binary, and whose runtime it embeds.
-const BUN_VERSION: &str = "1.4.2";
-/// `bun-v<BUN_VERSION>`'s release archive of each runtime target, by SHA-256
-/// (its `SHASUMS256.txt`).
-const RUNTIMES: &[(&str, &str)] = &[
-    ("bun-linux-x64", "36368faef7527875d5ffa52e53cd48021741f2a83eb6208a8dd64068d422a913"),
-    ("bun-linux-x64-musl", "4835eca59d6da70f4674f5642f6e459dcadab773695b2ed9922d131057989742"),
-];
 
 const LIB_DIRS: &[&str] = &["usr/lib", "usr/lib64", "lib", "lib64"];
 
@@ -55,51 +43,30 @@ pub(crate) fn install(
     }
     check_libs(rootfs, libc)?;
     let target = libc.bun_target();
-    check_bun()?;
-    if !repo_root.join("node_modules").is_dir() {
-        bail!(
-            "the TUI apps are built from the installed root JavaScript workspace, and \
-             '{}' has none: run `bun install --frozen-lockfile` there (`cargo xtask check` does)",
-            repo_root.display()
-        );
-    }
-    let runtime = runtime(repo_root, target)?;
-
-    // One entry per runtime target, at the same place in every checkout.
     let stem = Path::new(binary_path)
         .file_name()
         .and_then(|name| name.to_str())
         .context("the TUI binary has a file name")?;
-    let entry_dir = repo_root.join(".artifacts/work").join(stem).join(target);
-    fs::create_dir_all(&entry_dir)
-        .with_context(|| format!("creating '{}'", entry_dir.display()))?;
-    let entry_file = format!("{stem}.ts");
-    let entry = entry_dir.join(&entry_file);
-    fs::write(&entry, entry_source(repo_root, &entry_dir, apps)?)
-        .with_context(|| format!("writing '{}'", entry.display()))?;
-
+    let work = repo_root.join(".artifacts/work").join(stem).join(target);
+    fs::create_dir_all(&work)?;
+    let source = prepare_source(repo_root, &work, apps)?;
+    let target_input = source.path().join("runtime-target");
+    fs::write(&target_input, format!("{target}\n"))?;
+    let result =
+        crate::recipe::Invocation::new(repo_root, "install", "tui-binary", work.join("recipe"))
+            .input("source", source.path())
+            .input("runtime_target", &target_input)
+            .input("bun-toolchain::runtime_target", &target_input)
+            .run()
+            .context("building the TUI layer through Recipe")?;
+    let published = result.file("program")?;
     let binary = layer.join(binary_path);
     if let Some(parent) = binary.parent() {
-        fs::create_dir_all(parent).with_context(|| format!("creating '{}'", parent.display()))?;
+        fs::create_dir_all(parent)?;
     }
-    Cmd::new("bun")
-        .arg("build")
-        .arg(&entry_file)
-        .args(["--compile", "--minify"])
-        .arg(format!("--target={target}"))
-        .arg("--compile-executable-path")
-        .arg(&runtime)
-        .arg("--outfile")
-        .arg(&binary)
-        .dir(&entry_dir)
-        .error_msg(format!(
-            "bun build --compile for {target} (if a module is missing, the workspace \
-             install is stale: run `bun install --frozen-lockfile` at the repo root)"
-        ))
-        .run()?;
-    if !binary.is_file() {
-        bail!("bun build wrote no binary at '{}'", binary.display());
-    }
+    fs::copy(&published, &binary)
+        .with_context(|| format!("copying published TUI program '{}'", published.display()))?;
+    fs::set_permissions(&binary, fs::Permissions::from_mode(0o755))?;
 
     let bin_dir = layer.join(BIN_DIR);
     fs::create_dir_all(&bin_dir).with_context(|| format!("creating '{}'", bin_dir.display()))?;
@@ -118,7 +85,7 @@ pub(crate) fn install(
 /// Puts the installed system's TUI apps (`SYSTEM_TUI_APPS`) into the system `rootfs`,
 /// which every product builds on. Each app's tools must be in the rootfs itself.
 pub(crate) fn install_system(repo_root: &Path, rootfs: &Path, profile: &Profile) -> Result<()> {
-    use crate::pipeline::live_tools::{ToolLayer, LIVE_TOOLS};
+    use crate::pipeline::live_tools::{LIVE_TOOLS, ToolLayer};
     let workspace = Workspace::load(repo_root)?;
     let apps = SYSTEM_TUI_APPS
         .iter()
@@ -139,72 +106,90 @@ pub(crate) fn install_system(repo_root: &Path, rootfs: &Path, profile: &Profile)
             }
         }
     }
-    install(repo_root, rootfs, rootfs, SYSTEM_BINARY, profile.libc, &apps)
-        .context("building the installed system's TUI apps")
+    install(
+        repo_root,
+        rootfs,
+        rootfs,
+        SYSTEM_BINARY,
+        profile.libc,
+        &apps,
+    )
+    .context("building the installed system's TUI apps")
 }
 
-/// The host's bun is the declared one: it writes the bundle the runtime runs.
-fn check_bun() -> Result<()> {
-    let version = Cmd::new("bun")
-        .arg("--version")
-        .error_msg("bun --version (the TUI apps are built with bun: https://bun.sh)")
-        .run()?;
-    let version = version.stdout.trim();
-    if version != BUN_VERSION {
-        bail!(
-            "the TUI apps are built with bun {BUN_VERSION}, and the host's is {version}: \
-             install bun {BUN_VERSION} (`bun upgrade --version {BUN_VERSION}` or \
-             https://bun.sh), or move BUN_VERSION and its runtime hashes in tui_binary.rs"
-        );
+/// A plain source snapshot: workspace manifests and authored files, without
+/// host dependency/build caches. Compiler/package facts remain in the recipes.
+fn prepare_source(repo_root: &Path, work: &Path, apps: &[&TuiApp]) -> Result<tempfile::TempDir> {
+    let source = tempfile::Builder::new()
+        .prefix("tui-source-")
+        .tempdir_in(work)?;
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&fs::read(repo_root.join("package.json"))?)?;
+    for file in ["package.json", "bun.lock"] {
+        let path = repo_root.join(file);
+        if !fs::symlink_metadata(&path)?.file_type().is_file() {
+            bail!("TUI source {file} must be a regular file");
+        }
+        fs::copy(path, source.path().join(file))?;
     }
-    Ok(())
-}
-
-/// The bun runtime for `target`, fetched once from bun's release into
-/// `.artifacts/cache/bun/<version>/` and checked against its pinned hash.
-fn runtime(repo_root: &Path, target: &str) -> Result<PathBuf> {
-    let Some((_, sha256)) = RUNTIMES.iter().find(|(name, _)| *name == target) else {
-        bail!("no bun runtime for target {target} is pinned in tui_binary.rs");
-    };
-    let dir = repo_root.join(".artifacts/cache/bun").join(BUN_VERSION);
-    let executable = dir.join(target).join("bun");
-    if executable.is_file() {
-        return Ok(executable);
+    let members = manifest
+        .get("workspaces")
+        .and_then(serde_json::Value::as_array)
+        .context("the JavaScript workspace declares explicit member paths")?;
+    for member in members {
+        let member = member
+            .as_str()
+            .context("workspace member is a path string")?;
+        let relative = Path::new(member);
+        if relative.as_os_str().is_empty()
+            || !relative
+                .components()
+                .all(|c| matches!(c, std::path::Component::Normal(_)))
+        {
+            bail!("TUI source needs explicit relative workspace paths: {member}");
+        }
+        let root = repo_root.join(relative);
+        if !fs::symlink_metadata(&root)?.file_type().is_dir() {
+            bail!("workspace member {member} must be a real directory");
+        }
+        for entry in walkdir::WalkDir::new(&root)
+            .follow_links(false)
+            .into_iter()
+            .filter_entry(|entry| {
+                !matches!(
+                    entry.file_name().to_str(),
+                    Some(".git" | ".artifacts" | "node_modules" | "target" | "dist" | ".astro")
+                )
+            })
+        {
+            let entry = entry?;
+            let target = source.path().join(entry.path().strip_prefix(repo_root)?);
+            if entry.file_type().is_dir() {
+                fs::create_dir_all(target)?;
+            } else if entry.file_type().is_file() {
+                fs::copy(entry.path(), target)?;
+            } else if entry.file_type().is_symlink() {
+                // Keep authored links (including fixture command aliases) as
+                // links; never read through them into host files or caches.
+                let link = fs::read_link(entry.path())?;
+                let resolved = entry.path().canonicalize()?;
+                if link.is_absolute() || !resolved.starts_with(root.canonicalize()?) {
+                    bail!(
+                        "TUI source link escapes its workspace member: '{}'",
+                        entry.path().display()
+                    );
+                }
+                std::os::unix::fs::symlink(link, target)?;
+            } else {
+                bail!("unsupported TUI source entry '{}'", entry.path().display());
+            }
+        }
     }
-    fs::create_dir_all(&dir).with_context(|| format!("creating '{}'", dir.display()))?;
-    let archive = dir.join(format!("{target}.zip"));
-    let url = format!(
-        "https://github.com/oven-sh/bun/releases/download/bun-v{BUN_VERSION}/{target}.zip"
-    );
-    Cmd::new("curl")
-        .args(["--fail", "--location", "--silent", "--show-error", "--output"])
-        .arg(&archive)
-        .arg(&url)
-        .error_msg(format!("downloading {url}"))
-        .run()?;
-    let sums = Cmd::new("sha256sum")
-        .arg(&archive)
-        .error_msg("sha256sum of the bun runtime")
-        .run()?;
-    let actual = sums.stdout.split_whitespace().next().unwrap_or_default();
-    if actual != *sha256 {
-        fs::remove_file(&archive).ok();
-        bail!("{url} has SHA-256 {actual}, not the pinned {sha256}");
-    }
-    // The archive holds `<target>/bun`.
-    Cmd::new("unzip")
-        .args(["-q", "-o"])
-        .arg(&archive)
-        .arg(format!("{target}/bun"))
-        .arg("-d")
-        .arg(&dir)
-        .error_msg(format!("unpacking {}", archive.display()))
-        .run()?;
-    fs::remove_file(&archive).with_context(|| format!("removing '{}'", archive.display()))?;
-    if !executable.is_file() {
-        bail!("{url} holds no {target}/bun");
-    }
-    Ok(executable)
+    fs::write(
+        source.path().join("entry.ts"),
+        entry_source(repo_root, repo_root, apps)?,
+    )?;
+    Ok(source)
 }
 
 /// The shared libraries the bun build for `libc` links are in `rootfs`.
@@ -235,6 +220,7 @@ fn entry_source(repo_root: &Path, entry_dir: &Path, apps: &[&TuiApp]) -> Result<
         .map(|_| "..")
         .collect::<Vec<_>>()
         .join("/");
+    let up = if up.is_empty() { "." } else { &up };
     let mut source = String::from(
         "// Written by distro-builder (tui_binary.rs).\nimport { basename } from \"node:path\";\n\n\
          const apps: Record<string, () => Promise<unknown>> = {\n",
@@ -242,7 +228,11 @@ fn entry_source(repo_root: &Path, entry_dir: &Path, apps: &[&TuiApp]) -> Result<
     for app in apps {
         let path = app.dir.join(&app.entry);
         let relative = path.strip_prefix(repo_root).with_context(|| {
-            format!("the TUI app '{}' is outside '{}'", path.display(), repo_root.display())
+            format!(
+                "the TUI app '{}' is outside '{}'",
+                path.display(),
+                repo_root.display()
+            )
         })?;
         source.push_str(&format!(
             "\t{}: () => import({}),\n",

@@ -330,14 +330,6 @@ pub const HOST_TOOLS: &[HostTool] = &[
         upstream: None,
     },
     HostTool {
-        program: "bun",
-        purpose: "compiles the TUI apps",
-        needs: &[Build],
-        dnf: &[],
-        apt: &[],
-        upstream: Some("https://bun.sh"),
-    },
-    HostTool {
         program: "curl",
         purpose: "downloads busybox and the Fedora repository indexes",
         needs: &[Build, BaseLock],

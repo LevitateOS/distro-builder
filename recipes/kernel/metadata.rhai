@@ -11,14 +11,14 @@
 fn pins() {
     #{
         levitate: #{
-            line: "lts",
-            version: "6.12.116",
-            sha256: "cb3ed3dfdd47e6ade49dc933db334fd86e24cadee920da612c262b0e9b6a511b",
-        },
-        acorn: #{
             line: "latest",
             version: "7.3.3",
             sha256: "79c66dde66cd96877fcde8f7d36aec946b1f423d2b97b5a7b1751b75c764f3d1",
+        },
+        acorn: #{
+            line: "lts",
+            version: "6.12.116",
+            sha256: "cb3ed3dfdd47e6ade49dc933db334fd86e24cadee920da612c262b0e9b6a511b",
         },
     }
 }

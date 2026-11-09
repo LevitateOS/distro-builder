@@ -17,8 +17,8 @@ fn pins() {
         },
         acorn: #{
             line: "lts",
-            version: "6.12.116",
-            sha256: "cb3ed3dfdd47e6ade49dc933db334fd86e24cadee920da612c262b0e9b6a511b",
+            version: "6.18.62",
+            sha256: "490a7aedf1b355c565d3a6c05333ccccb5da82064eca46b590448a7099d7d651",
         },
     }
 }

@@ -5,7 +5,7 @@
 // command.
 
 fn release() { "v3.24" }
-fn locked_on() { "2026-11-08" }
+fn locked_on() { "2026-11-10" }
 fn mirror() { "https://dl-cdn.alpinelinux.org/alpine/v3.24" }
 
 // The key Alpine signs the release's packages with: [file name, PEM].
@@ -262,6 +262,7 @@ fn packages() {
         ["pipewire-pulse", "pipewire-pulse-1.6.8-r4", "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/pipewire-pulse-1.6.8-r4.apk", "d48518b5cf4475d9d98c38d23186347ecf5575f786751608c9bb0c3966b1939c"],
         ["pipewire-pulse-openrc", "pipewire-pulse-openrc-1.6.8-r4", "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/pipewire-pulse-openrc-1.6.8-r4.apk", "226895c3e2891531b81e743ea341990a041d0d6a59e1bf624637ab8a5ab8278d"],
         ["pipewire-udev", "pipewire-udev-1.6.8-r4", "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/pipewire-udev-1.6.8-r4.apk", "3ecb52b701bd65b95dd803b04c7dfceeb086adf7f0c7fcc40c9b7bcaa9b7b86b"],
+        ["pixman", "pixman-0.46.4-r0", "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/pixman-0.46.4-r0.apk", "378550cbe348dda9b0733014375dba87a89f0077c5f3dbeba7dce8dbcdda707e"],
         ["pkgconf", "pkgconf-2.5.1-r0", "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/pkgconf-2.5.1-r0.apk", "20cc47b76b82e9424a35ecc4fdd7bd904ef49ada1684214910fae31bc0cab737"],
         ["pm-utils", "pm-utils-1.4.1-r5", "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/pm-utils-1.4.1-r5.apk", "7ef6a109f393c11381d8b05d4b607ed172322b8cf9119e430b9f9a686d4f9046"],
         ["polkit-common", "polkit-common-127-r2", "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/polkit-common-127-r2.apk", "27b7069a0d4d5a6b09f362e54bcfa1ee8d0af9e371bb5e29cbc340295a6ef9c2"],

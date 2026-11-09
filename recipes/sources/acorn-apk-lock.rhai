@@ -5,7 +5,7 @@
 // command.
 
 fn release() { "v3.24" }
-fn locked_on() { "2026-11-08" }
+fn locked_on() { "2026-11-10" }
 fn mirror() { "https://dl-cdn.alpinelinux.org/alpine/v3.24" }
 
 // The key Alpine signs the release's packages with: [file name, PEM].
@@ -170,7 +170,6 @@ fn packages() {
         ["pciutils-libs", "pciutils-libs-3.15.0-r0", "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/pciutils-libs-3.15.0-r0.apk", "2905bb60e9bc41d208d62c7f6b238140117dde44254b0acc6e42834ede8e815c"],
         ["pcre2", "pcre2-10.49-r0", "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/pcre2-10.49-r0.apk", "2919897914820f42a17a8d7d37df310d2dfad1c82ebe5f539cc5c765f916752a"],
         ["pcsc-lite-libs", "pcsc-lite-libs-2.4.0-r4", "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/pcsc-lite-libs-2.4.0-r4.apk", "f01c9af6f32a01dc385e7959dd2215711ab1037afe45f0cbf34efb19c7cb39ac"],
-        ["pixman", "pixman-0.46.4-r0", "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/pixman-0.46.4-r0.apk", "378550cbe348dda9b0733014375dba87a89f0077c5f3dbeba7dce8dbcdda707e"],
         ["procps-ng", "procps-ng-4.0.6-r0", "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/procps-ng-4.0.6-r0.apk", "2510d07b3c029e7cdba1a6981fa17ac5a7b6c31e1e36df4327f46dd3aa8822eb"],
         ["readline", "readline-8.3.3-r1", "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/readline-8.3.3-r1.apk", "766911ecb986a6c5cf0841a6b556cd1e9dbbf22b3559726de32416486cd15c81"],
         ["runuser", "runuser-2.42.3-r1", "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/runuser-2.42.3-r1.apk", "75b2c148fe1f954e3ed070ffd3201dfe91a37092679c07428bdb4a8981c7b62a"],
@@ -197,13 +196,10 @@ fn packages() {
         ["util-linux-openrc", "util-linux-openrc-2.42.3-r1", "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/util-linux-openrc-2.42.3-r1.apk", "d384905f75e93d5a1ea540c84f84584163431752e82dbba25ed4d3e7030b8ee3"],
         ["utmps-libs", "utmps-libs-0.1.3.3-r0", "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/utmps-libs-0.1.3.3-r0.apk", "497f0f1cb51f0e6c1acc338fded0dc7722b1d43ea17bdb749f0d556794f8b2d8"],
         ["uuidgen", "uuidgen-2.42.3-r1", "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/uuidgen-2.42.3-r1.apk", "ef678e883e1a975db58e684619951b85434d10664aac31e832eb0925f15e56bb"],
-        ["vim", "vim-9.2.1202-r0", "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/vim-9.2.1202-r0.apk", "922cdfce26e19a6413bbbd7110b7aa9460c7445caca41cf433341b243ad6cece"],
-        ["vim-common", "vim-common-9.2.1202-r0", "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/vim-common-9.2.1202-r0.apk", "1565a62139d4049e7ade4fbbf58964d99ec7f33b78a8328061b426364ca2c251"],
         ["wipefs", "wipefs-2.42.3-r1", "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/wipefs-2.42.3-r1.apk", "ea16da0e34dfedba70b4f3f9392bf28fb678439aac8f9503850ce79a05fc8628"],
         ["wireless-regdb", "wireless-regdb-2025.10.07-r0", "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/wireless-regdb-2025.10.07-r0.apk", "1c0ea2a3f34fdb7b3466fbb273e0a89c693c98f3524db87d2a10d5023a5f3cee"],
         ["wpa_supplicant", "wpa_supplicant-2.11-r4", "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/wpa_supplicant-2.11-r4.apk", "6b3dc3546634cebd64570162b6b399582a83d6d00635d7436804e39a7850a0ef"],
         ["wpa_supplicant-openrc", "wpa_supplicant-openrc-2.11-r4", "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/wpa_supplicant-openrc-2.11-r4.apk", "0241a61765f1ff2416b034f8f4a6fb225aafc43df06beaee4a6c9a711b95dfa4"],
-        ["xxd", "xxd-9.2.1202-r0", "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/xxd-9.2.1202-r0.apk", "22e8c267798e6b874b3efad6dee73048a5eef9ef993955af4ab4489186ceae8a"],
         ["xz-libs", "xz-libs-5.8.4-r0", "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/xz-libs-5.8.4-r0.apk", "ab362dd515ead04c31a6c302163248da7aa4813e283c971e6dd3f789b453a1d9"],
         ["zlib", "zlib-1.4-r0", "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/zlib-1.4-r0.apk", "7b05bc778b8b25cd880835b40114182bd4d1581717504d0129c810c0a14291cb"],
         ["zstd-libs", "zstd-libs-1.5.7-r2", "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/zstd-libs-1.5.7-r2.apk", "23c6065b0049b2406441564bcf0032515a43f78e80d76fcb85535a3803ef5d4e"],

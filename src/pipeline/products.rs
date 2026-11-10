@@ -186,6 +186,11 @@ fn check_installable(root: &Path, contract: &ConformanceContract, flavour: Flavo
     if found != os_release(contract, flavour) {
         bail!("{} is not the contract's identity and profile of the {flavour} system", path.display());
     }
+    // A desktop system from before the desktop apps existed is not the
+    // current one: a parent image without them must be rebuilt.
+    if flavour == Flavour::Desktop {
+        crate::desktop_apps::check(root)?;
+    }
     Ok(())
 }
 

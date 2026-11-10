@@ -453,11 +453,59 @@ fn apply(root, inputs, init) {
 // The desktop system: what the desktop packages' install scripts and triggers
 // would have done (their caches; their accounts are the backend's
 // package_effects), the user session's services, and the boot into the
-// display manager, which takes the first virtual console (`login_consoles`).
+// display manager, which takes the first virtual console (`login_consoles`),
+// and the variant's wallpapers.
 fn desktop_system(root, inputs, init, display_manager) {
     desktop_caches(root, os_release_field(inputs, "REC_LIBC"));
+    wallpaper(root, inputs);
     session_services(root, init);
     graphical(root, init, display_manager);
+}
+
+// The variant's wallpapers (the builder's `wallpaper_light` and
+// `wallpaper_dark` inputs, 3840x2160 JPEGs) as a wallpaper package under the
+// OS's name, and the default background of the desktop (REC_DESKTOP) for
+// every user who has not chosen another.
+fn wallpaper(root, inputs) {
+    let name = pretty_name(inputs);
+    let package = "usr/share/wallpapers/" + name;
+    // Plasma reads an image's size from its file name, and shows the
+    // images_dark one under a dark colour scheme.
+    let dark = package + "/contents/images_dark/3840x2160.jpg";
+    for image in [[package + "/contents/images/3840x2160.jpg", "wallpaper_light"], [dark, "wallpaper_dark"]] {
+        mkdir(dirname(join_path(root, image[0])));
+        copy_file(join_path(inputs, image[1]), join_path(root, image[0]));
+        target_mode(root, image[0], 0o644);
+    }
+    put(root, package + "/metadata.json",
+        "{\"KPlugin\": {\"Id\": \"" + name + "\", \"Name\": \"" + name + "\"}}\n", 0o644);
+    let desktop = os_release_field(inputs, "REC_DESKTOP");
+    if desktop == "plasma" {
+        // Fedora's Global Theme shows the package "Fedora", a link to
+        // "Default" (desktop-backgrounds-kde), which pointed at Fedora's own.
+        if !exists(join_path(root, "usr/share/wallpapers/Fedora")) {
+            throw "the Plasma packages no longer take their wallpaper from /usr/share/wallpapers/Default";
+        }
+        link(root, "usr/share/wallpapers/Default", name);
+    } else if desktop == "lxqt" {
+        // pcmanfm-qt draws the desktop and reads one whole settings file, the
+        // first on the configuration path: the packaged one, with our
+        // wallpaper, in /etc/xdg ahead of it. LXQt does not follow a light or
+        // dark look, so it shows the dark one; the light one is in the package.
+        let packaged = join_path(root, "usr/share/pcmanfm-qt/lxqt/settings.conf");
+        if !is_file(packaged) { throw "the LXQt packages lack pcmanfm-qt's desktop settings"; }
+        let text = "";
+        let set = 0;
+        for line in read_file(packaged).split("\n") {
+            if line.starts_with("Wallpaper=") { line = "Wallpaper=/" + dark; set += 1; }
+            else if line.starts_with("WallpaperMode=") { line = "WallpaperMode=zoom"; set += 1; }
+            text += line + "\n";
+        }
+        if set != 2 { throw "pcmanfm-qt's desktop settings do not name a wallpaper and its mode"; }
+        put(root, "etc/xdg/pcmanfm-qt/lxqt/settings.conf", text, 0o644);
+    } else {
+        throw "no default wallpaper for the desktop " + desktop;
+    }
 }
 
 // The first of `programs` (paths relative to the root) the tree has, or "".

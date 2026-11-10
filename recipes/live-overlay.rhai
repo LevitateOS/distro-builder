@@ -54,6 +54,32 @@ fn live_user(root, c) {
     if d.display_manager != "sddm" { throw "no autologin for the display manager " + d.display_manager; }
     system::put(root, "etc/sddm.conf.d/live-autologin.conf",
         "[Autologin]\nUser=" + user + "\nSession=" + d.session + "\n", 0o644);
+    stay_awake(root, d.session);
+}
+
+// The live desktop session (`session`) neither locks, blanks nor suspends by
+// itself, so an install running in it is never interrupted. Plasma: the
+// screen locker's and PowerDevil's system defaults. LXQt: xscreensaver does
+// not start (its autostart entry, replaced hidden) and the X server never
+// blanks.
+fn stay_awake(root, session) {
+    if session == "plasma" {
+        system::put(root, "etc/xdg/kscreenlockerrc", "[Daemon]\nAutolock=false\nLockOnResume=false\n", 0o644);
+        let power = "";
+        for source in ["AC", "Battery", "LowBattery"] {
+            power += "[" + source + "][SuspendAndShutdown]\nAutoSuspendAction=0\n\n";
+            power += "[" + source + "][Display]\nDimDisplayWhenIdle=false\nTurnOffDisplayWhenIdle=false\n\n";
+        }
+        system::put(root, "etc/xdg/powerdevilrc", power, 0o644);
+    } else if session == "lxqt" {
+        system::put(root, "etc/xdg/autostart/lxqt-xscreensaver-autostart.desktop",
+            "[Desktop Entry]\nType=Application\nName=XScreenSaver\nExec=xscreensaver -no-splash\nHidden=true\n", 0o644);
+        system::put(root, "etc/X11/xorg.conf.d/10-live-no-blank.conf",
+            "Section \"ServerFlags\"\n    Option \"BlankTime\" \"0\"\n    Option \"StandbyTime\" \"0\"\n    Option \"SuspendTime\" \"0\"\n    Option \"OffTime\" \"0\"\nEndSection\n",
+            0o644);
+    } else {
+        throw "no stay-awake settings for the session " + session;
+    }
 }
 
 fn is_built(ctx) { ready(ctx) }

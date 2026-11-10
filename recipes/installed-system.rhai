@@ -461,8 +461,112 @@ fn desktop_system(root, inputs, init, display_manager) {
     start_button(root, inputs);
     desktop_caches(root, os_release_field(inputs, "REC_LIBC"));
     login_screen(root, inputs, display_manager, wallpaper(root, inputs));
+    browser(root, inputs);
+    default_apps(root, inputs);
+    input_defaults(root, inputs);
     session_services(root, init);
+    desktop_services(root, init);
     graphical(root, init, display_manager);
+}
+
+// The system services the desktop's hardware needs that neither start at
+// boot by themselves nor on D-Bus demand (udisks, UPower, bolt and fwupd
+// start on demand): Bluetooth, the Avahi discovery that driverless printing
+// uses, CUPS and power profiles on systemd. OpenRC's desktop adds none yet.
+// A unit's Alias= names are linked as `systemctl enable` would, so D-Bus
+// activation (dbus-org.bluez, dbus-org.freedesktop.Avahi) finds the service.
+fn desktop_services(root, init) {
+    check_init(init);
+    if init != "systemd" { return; }
+    for service in ["bluetooth", "avahi-daemon", "cups", "power-profiles-daemon"] {
+        let file = service_file(init, service);
+        if !is_file(join_path(root, file)) { throw "the desktop system lacks the systemd service " + service; }
+        enable(root, init, service);
+        for line in read_file(join_path(root, file)).split("\n") {
+            if line.starts_with("Alias=") {
+                for alias in trim(line.sub_string(6)).split(" ") {
+                    if alias != "" { link(root, "etc/systemd/system/" + alias, "/" + file); }
+                }
+            }
+        }
+    }
+}
+
+// Firefox as the OS's browser: the distribution it names is the OS (its
+// distribution.ini), the packaged default preferences keep everything but the
+// distribution's start page, and a policy file turns off telemetry, studies,
+// the first-run and what's-new pages, and the browser's own updater (the
+// system updates it). The packaged preferences file is renamed for the OS.
+fn browser(root, inputs) {
+    let libc = os_release_field(inputs, "REC_LIBC");
+    let dir = if libc == "glibc" { "usr/lib64/firefox/" } else { "usr/lib/firefox/" };
+    if !is_file(join_path(root, dir + "distribution/distribution.ini")) { throw "the desktop packages lack Firefox's distribution settings in /" + dir; }
+    let id = os_release_field(inputs, "ID");
+    let name = pretty_name(inputs);
+    put(root, dir + "distribution/distribution.ini",
+        "[Global]\nid=" + id + "\nversion=1.0\nabout=Mozilla Firefox for " + name + "\n\n[Preferences]\napp.distributor=" + id + "\napp.distributor.channel=" + id + "\n",
+        0o644);
+    let prefs = dir + "browser/defaults/preferences/";
+    let packaged = "";
+    for file in ["firefox-redhat-default-prefs.js", "vendor.js"] {
+        if is_file(join_path(root, prefs + file)) { packaged = file; }
+    }
+    if packaged == "" { throw "the desktop packages lack Firefox's default preferences in /" + prefs; }
+    let text = "";
+    for line in read_file(join_path(root, prefs + packaged)).split("\n") {
+        if line.contains("browser.startup.homepage") || line.contains("browser.newtabpage.pinned") { continue; }
+        text += line + "\n";
+    }
+    rm(join_path(root, prefs + packaged));
+    put(root, prefs + id + "-default-prefs.js", text, 0o644);
+    let policies = "{\n  \"policies\": {\n";
+    policies += "    \"DisableTelemetry\": true,\n    \"DisableFirefoxStudies\": true,\n    \"DisableAppUpdate\": true,\n";
+    policies += "    \"DontCheckDefaultBrowser\": true,\n    \"OverrideFirstRunPage\": \"\",\n    \"OverridePostUpdatePage\": \"\",\n";
+    policies += "    \"UserMessaging\": {\"ExtensionRecommendations\": false, \"FeatureRecommendations\": false, \"MoreFromMozilla\": false, \"SkipOnboarding\": true}\n";
+    policies += "  }\n}\n";
+    put(root, dir + "distribution/policies.json", policies, 0o644);
+}
+
+// The default application for each kind of file on the desktop (REC_DESKTOP),
+// for every user who has not chosen another: the system-wide mimeapps.list.
+// A kind with no application in the image is left to the user.
+fn default_apps(root, inputs) {
+    let desktop = os_release_field(inputs, "REC_DESKTOP");
+    let apps = if desktop == "plasma" {
+        #{ browser: "org.mozilla.firefox.desktop", files: "org.kde.dolphin.desktop", text: "org.kde.kwrite.desktop",
+           image: "org.mozilla.firefox.desktop", pdf: "org.mozilla.firefox.desktop", archive: "org.kde.ark.desktop" }
+    } else if desktop == "lxqt" {
+        #{ browser: "firefox.desktop", files: "pcmanfm-qt.desktop", image: "lximage-qt.desktop",
+           pdf: "firefox.desktop", archive: "lxqt-archiver.desktop" }
+    } else { throw "no default applications for the desktop " + desktop };
+    let kinds = #{
+        browser: ["x-scheme-handler/http", "x-scheme-handler/https", "text/html", "application/xhtml+xml"],
+        files: ["inode/directory"],
+        text: ["text/plain"],
+        image: ["image/png", "image/jpeg", "image/gif", "image/webp", "image/svg+xml", "image/bmp", "image/tiff"],
+        pdf: ["application/pdf"],
+        archive: ["application/zip", "application/x-tar", "application/gzip", "application/x-compressed-tar",
+                  "application/x-xz-compressed-tar", "application/x-zstd-compressed-tar",
+                  "application/x-bzip2-compressed-tar", "application/x-7z-compressed", "application/vnd.rar"]
+    };
+    let text = "[Default Applications]\n";
+    for kind in kinds.keys() {
+        let app = apps[kind];
+        if type_of(app) == "()" { continue; }
+        if !is_file(join_path(root, "usr/share/applications/" + app)) { throw "the desktop packages lack the application " + app; }
+        for mime in kinds[kind] { text += mime + "=" + app + ";\n"; }
+    }
+    put(root, "usr/share/applications/mimeapps.list", text, 0o644);
+}
+
+// Touchpads tap to click and scroll naturally. Plasma's KWin sets its own
+// libinput defaults; on X11 (LXQt) the X server's libinput driver reads them
+// from xorg.conf.d.
+fn input_defaults(root, inputs) {
+    if os_release_field(inputs, "REC_DESKTOP") != "lxqt" { return; }
+    put(root, "etc/X11/xorg.conf.d/40-touchpad.conf",
+        "Section \"InputClass\"\n    Identifier \"touchpad defaults\"\n    MatchIsTouchpad \"on\"\n    Driver \"libinput\"\n    Option \"Tapping\" \"on\"\n    Option \"NaturalScrolling\" \"true\"\nEndSection\n",
+        0o644);
 }
 
 // The variant's mark (the builder's `logo_*` inputs) as the icon
@@ -572,6 +676,9 @@ fn login_screen(root, inputs, display_manager, background) {
         theme = "breeze";
         if !is_file(join_path(root, themes + theme + "/theme.conf")) { throw "the Plasma packages lack SDDM's Breeze theme"; }
         put(root, themes + theme + "/theme.conf.user", conf, 0o644);
+        // Fedora's copy is not offered at all.
+        let fedora = join_path(root, themes + "01-breeze-fedora");
+        if exists(fedora) { rm(fedora); }
     } else if desktop == "lxqt" {
         // SDDM's own Maldives theme under our name: Alpine's copy does not
         // say it is for the Qt 6 greeter, the only one Alpine has.

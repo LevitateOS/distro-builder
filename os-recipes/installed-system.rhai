@@ -326,6 +326,19 @@ fn os_release_field(inputs, field) {
     }
     throw "the os_release input has no " + field;
 }
+// The value of `field` in the builder's `os_release` input without its
+// quotes, or "" when it has none (HOME_URL is there only for an OS with a
+// website).
+fn os_release_optional(inputs, field) {
+    for line in read_file(join_path(inputs, "os_release")).split("\n") {
+        if line.starts_with(field + "=") {
+            let value = trim(line.sub_string(field.len() + 1));
+            value.replace("\"", "");
+            return value;
+        }
+    }
+    ""
+}
 // Which system the tree is (REC_FLAVOUR): "base", or "desktop", the base
 // system with the variant's desktop packages.
 fn flavour(inputs) { os_release_field(inputs, "REC_FLAVOUR") }
@@ -464,6 +477,10 @@ fn desktop_system(root, inputs, init, display_manager) {
     browser(root, inputs);
     default_apps(root, inputs);
     input_defaults(root, inputs);
+    look_defaults(root, inputs);
+    menu_entries(root, inputs);
+    no_hibernation(root, init);
+    desktop_polkit(root, inputs);
     session_services(root, init);
     desktop_services(root, init);
     graphical(root, init, display_manager);
@@ -525,7 +542,8 @@ fn firewall_zone(root) {
 // distribution.ini), the packaged default preferences keep everything but the
 // distribution's start page, and a policy file turns off telemetry, studies,
 // the first-run and what's-new pages, and the browser's own updater (the
-// system updates it). The packaged preferences file is renamed for the OS.
+// system updates it), and opens the OS's website (HOME_URL) at start where
+// it has one. The packaged preferences file is renamed for the OS.
 fn browser(root, inputs) {
     let libc = os_release_field(inputs, "REC_LIBC");
     let dir = if libc == "glibc" { "usr/lib64/firefox/" } else { "usr/lib/firefox/" };
@@ -551,13 +569,19 @@ fn browser(root, inputs) {
     let policies = "{\n  \"policies\": {\n";
     policies += "    \"DisableTelemetry\": true,\n    \"DisableFirefoxStudies\": true,\n    \"DisableAppUpdate\": true,\n";
     policies += "    \"DontCheckDefaultBrowser\": true,\n    \"OverrideFirstRunPage\": \"\",\n    \"OverridePostUpdatePage\": \"\",\n";
+    let home = os_release_optional(inputs, "HOME_URL");
+    if home != "" {
+        policies += "    \"Homepage\": {\"URL\": \"" + home + "\", \"StartPage\": \"homepage\"},\n";
+    }
     policies += "    \"UserMessaging\": {\"ExtensionRecommendations\": false, \"FeatureRecommendations\": false, \"MoreFromMozilla\": false, \"SkipOnboarding\": true}\n";
     policies += "  }\n}\n";
     put(root, dir + "distribution/policies.json", policies, 0o644);
 }
 
 // The default application for each kind of file on the desktop (REC_DESKTOP),
-// for every user who has not chosen another: the system-wide mimeapps.list.
+// for every user who has not chosen another: the system-wide mimeapps.list in
+// /etc/xdg, which comes before the packages' lists (Fedora's
+// kde-mimeapps.list included).
 // A kind with no application in the image is left to the user.
 fn default_apps(root, inputs) {
     let desktop = os_release_field(inputs, "REC_DESKTOP");
@@ -585,7 +609,7 @@ fn default_apps(root, inputs) {
         if !is_file(join_path(root, "usr/share/applications/" + app)) { throw "the desktop packages lack the application " + app; }
         for mime in kinds[kind] { text += mime + "=" + app + ";\n"; }
     }
-    put(root, "usr/share/applications/mimeapps.list", text, 0o644);
+    put(root, "etc/xdg/mimeapps.list", text, 0o644);
 }
 
 // Touchpads tap to click and scroll naturally. Plasma's KWin sets its own
@@ -596,6 +620,82 @@ fn input_defaults(root, inputs) {
     put(root, "etc/X11/xorg.conf.d/40-touchpad.conf",
         "Section \"InputClass\"\n    Identifier \"touchpad defaults\"\n    MatchIsTouchpad \"on\"\n    Driver \"libinput\"\n    Option \"Tapping\" \"on\"\n    Option \"NaturalScrolling\" \"true\"\nEndSection\n",
         0o644);
+}
+
+// The cursor theme of the desktop (REC_DESKTOP): Breeze's on Plasma, Adwaita's
+// with LXQt's GTK look.
+fn cursor_theme(desktop) {
+    if desktop == "plasma" { "breeze_cursors" } else if desktop == "lxqt" { "Adwaita" } else { throw "no cursor theme for the desktop " + desktop }
+}
+
+// The desktop's look for every user who has not chosen another, until the
+// variants' own themes exist: one cursor theme for X, GTK, Qt and the login
+// screen (the `default` icon theme, which every toolkit falls back to);
+// Plasma dark, with Fedora's dark Global Theme (Breeze Dark colours and
+// icons; its wallpaper is the variant's, through wallpaper()), and the About
+// page showing the variant's mark and website; LXQt light, as its packaged
+// settings already are (Fusion widgets, Breeze icons), with GTK apps
+// (Firefox, Mousepad, Simple Scan) in Adwaita with the same icons, cursor and
+// font.
+fn look_defaults(root, inputs) {
+    let desktop = os_release_field(inputs, "REC_DESKTOP");
+    let cursor = cursor_theme(desktop);
+    if !is_dir(join_path(root, "usr/share/icons/" + cursor + "/cursors")) { throw "the desktop packages lack the cursor theme " + cursor; }
+    put(root, "usr/share/icons/default/index.theme", "[Icon Theme]\nInherits=" + cursor + "\n", 0o644);
+    if desktop == "plasma" {
+        let look = "org.fedoraproject.fedoradark.desktop";
+        if !is_dir(join_path(root, "usr/share/plasma/look-and-feel/" + look)) { throw "the Plasma packages lack the Global Theme " + look; }
+        put(root, "etc/xdg/kdeglobals",
+            "[KDE]\nLookAndFeelPackage=" + look + "\n\n[General]\nColorScheme=BreezeDark\n\n[Icons]\nTheme=breeze-dark\n", 0o644);
+        let about = "[General]\nLogoPath=/usr/share/icons/hicolor/scalable/apps/distributor-logo-" + os_release_field(inputs, "ID") + ".svg\nVariant=Desktop\n";
+        let home = os_release_optional(inputs, "HOME_URL");
+        if home != "" { about += "Website=" + home + "\n"; }
+        put(root, "etc/xdg/kcm-about-distrorc", about, 0o644);
+    } else {
+        let gtk = "[Settings]\ngtk-theme-name=Adwaita\ngtk-icon-theme-name=breeze\ngtk-cursor-theme-name=" + cursor + "\ngtk-font-name=Sans 11\n";
+        put(root, "etc/gtk-3.0/settings.ini", gtk, 0o644);
+        put(root, "etc/gtk-4.0/settings.ini", gtk, 0o644);
+    }
+}
+
+// Menu entries of the packages that do nothing useful here, hidden (still
+// there for whoever runs them): on LXQt, CUPS's web page (Print Settings
+// does the job), Hibernate (no_hibernation) and the bare XScreenSaver daemon
+// (its settings stay). Plasma's menu has none.
+fn menu_entries(root, inputs) {
+    if os_release_field(inputs, "REC_DESKTOP") != "lxqt" { return; }
+    for name in ["cups.desktop", "lxqt-hibernate.desktop", "xscreensaver.desktop"] {
+        let path = "usr/share/applications/" + name;
+        if !is_file(join_path(root, path)) { throw "the desktop packages no longer ship the menu entry " + name; }
+        let text = read_file(join_path(root, path));
+        if !text.contains("[Desktop Entry]\n") || text.contains("\nNoDisplay=") { throw "the menu entry " + name + " is not one this recipe can hide"; }
+        text.replace("[Desktop Entry]\n", "[Desktop Entry]\nNoDisplay=true\n");
+        write_file(join_path(root, path), text);
+    }
+}
+
+// No hibernation: recinit's initramfs does not resume from a hibernation
+// image, so logind (systemd) or elogind (OpenRC) does not offer it, and the
+// desktops hide it. Suspend and lid close keep their defaults (suspend).
+fn no_hibernation(root, init) {
+    check_init(init);
+    let dir = if init == "systemd" { "etc/systemd/sleep.conf.d/" } else { "etc/elogind/sleep.conf.d/" };
+    put(root, dir + "10-no-hibernation.conf",
+        "[Sleep]\nAllowHibernation=no\nAllowSuspendThenHibernate=no\nAllowHybridSleep=no\n", 0o644);
+}
+
+// What a user at the machine (an active local session) does without the
+// administrator's password beyond the packages' own defaults, which already
+// allow mounting removable drives, connecting to networks and suspending:
+// setting the time zone, and saving a network for every user (a Wi-Fi
+// password the system keeps).
+fn desktop_polkit(root, inputs) {
+    let rules = "// The desktop system (installed-system.rhai): what a user at the machine does without the administrator's password.\n";
+    rules += "polkit.addRule(function(action, subject) {\n    if (subject.active && subject.local &&\n";
+    rules += "            (action.id == \"org.freedesktop.timedate1.set-timezone\" ||\n";
+    rules += "             action.id == \"org.freedesktop.NetworkManager.settings.modify.system\")) {\n";
+    rules += "        return polkit.Result.YES;\n    }\n});\n";
+    put(root, "etc/polkit-1/rules.d/50-" + os_release_field(inputs, "ID") + "-desktop.rules", rules, 0o644);
 }
 
 // The variant's mark (the builder's `logo_*` inputs) as the icon
@@ -691,7 +791,8 @@ fn wallpaper(root, inputs) {
 }
 
 // The login screen: the display manager's theme of the desktop (REC_DESKTOP)
-// with `background`, the dark wallpaper, behind it.
+// with `background`, the dark wallpaper, behind it, and the desktop's cursor
+// theme.
 fn login_screen(root, inputs, display_manager, background) {
     if display_manager != "sddm" { throw "no login screen for the display manager " + display_manager; }
     let themes = "usr/share/sddm/themes/";
@@ -731,7 +832,8 @@ fn login_screen(root, inputs, display_manager, background) {
     } else {
         throw "no login screen for the desktop " + desktop;
     }
-    put(root, "etc/sddm.conf.d/10-theme.conf", "[Theme]\nCurrent=" + theme + "\n", 0o644);
+    put(root, "etc/sddm.conf.d/10-theme.conf",
+        "[Theme]\nCurrent=" + theme + "\nCursorTheme=" + cursor_theme(desktop) + "\n", 0o644);
 }
 
 // The first of `programs` (paths relative to the root) the tree has, or "".

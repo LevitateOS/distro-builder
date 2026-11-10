@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use distro_contract::install_ux::{LIVE_DESKTOP_PASSWORD_HASH, LIVE_DESKTOP_USER};
+use distro_contract::install_ux::{LIVE_DESKTOP_PASSWORD, LIVE_DESKTOP_PASSWORD_HASH, LIVE_DESKTOP_USER};
 use distro_contract::profile::{Flavour, InitSystem};
 use distro_contract::{ProductId, Variant};
 use serde::Serialize;
@@ -37,13 +37,19 @@ pub(crate) struct LiveSession {
 }
 
 /// The live desktop's autologin: the user the display manager logs into
-/// `session` without asking, and the user's password for the privilege tool.
+/// `session` without asking, and the user's password for the privilege tool
+/// (`privilege`, which the desktop's "Install" launcher runs the install
+/// screen through; the launcher's entry shows `password` and is named
+/// `<os_id>-install`).
 #[derive(Debug, Serialize)]
 struct LiveDesktop {
     user: &'static str,
+    password: &'static str,
     password_hash: &'static str,
     session: &'static str,
     display_manager: String,
+    os_id: String,
+    privilege: &'static str,
 }
 
 impl LiveSession {
@@ -66,9 +72,12 @@ impl LiveSession {
             services: contract.live_service_units(),
             desktop: (product.flavour() == Flavour::Desktop).then(|| LiveDesktop {
                 user: LIVE_DESKTOP_USER,
+                password: LIVE_DESKTOP_PASSWORD,
                 password_hash: LIVE_DESKTOP_PASSWORD_HASH,
                 session: contract.profile.desktop.session(),
                 display_manager: contract.desktop.display_manager.clone(),
+                os_id: contract.identity.os_id.clone(),
+                privilege: contract.profile.privilege.as_str(),
             }),
             live_media_dir: recinit::live::LIVE_MEDIA_DIR,
             role_file: recinit::live::PAYLOAD_ROLE_FILE,

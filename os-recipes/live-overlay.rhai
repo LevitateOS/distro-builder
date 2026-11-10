@@ -55,6 +55,23 @@ fn live_user(root, c) {
     system::put(root, "etc/sddm.conf.d/live-autologin.conf",
         "[Autologin]\nUser=" + user + "\nSession=" + d.session + "\n", 0o644);
     stay_awake(root, d.session);
+    if c.launcher != () { install_launcher(root, c); }
+}
+
+// "Install <OS>" in the live desktop's menu: the desktop's terminal runs the
+// install screen (`c.launcher`) through the privilege tool, which asks for
+// the live user's password; the entry's description says what it is. The
+// variant's own install icon is still to be drawn; the icon theme's
+// installer icon stands in.
+fn install_launcher(root, c) {
+    let d = c.desktop;
+    let terminal = if d.session == "plasma" { "konsole -e " + d.privilege + " " + c.launcher }
+        else if d.session == "lxqt" { "qterminal -e \"" + d.privilege + " " + c.launcher + "\"" }
+        else { throw "no terminal for the session " + d.session };
+    let entry = "[Desktop Entry]\nType=Application\nName=Install " + c.os_name + "\n";
+    entry += "Comment=Install " + c.os_name + " on this computer (the password is \"" + d.password + "\")\n";
+    entry += "Exec=" + terminal + "\nIcon=system-software-install\nTerminal=false\nCategories=System;\nKeywords=install;installer;setup;\n";
+    system::put(root, "usr/share/applications/" + d.os_id + "-install.desktop", entry, 0o644);
 }
 
 // The live desktop session (`session`) neither locks, blanks nor suspends by

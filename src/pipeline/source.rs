@@ -14,7 +14,9 @@ use crate::recipe::rootfs_source::{materialize_rootfs_from_recipe, RootfsSourceR
 
 /// The `flavour` system's `/etc/os-release`: its identity and distro profile,
 /// from the contract, and its flavour. The system recipe writes it
-/// (`installed-system.rhai`), and reads the flavour from it.
+/// (`installed-system.rhai`), and reads the flavour from it. `LOGO` names the
+/// icon the desktop system installs the variant's mark as
+/// (`distributor-logo-<os_id>`); `HOME_URL` is there when the OS has a website.
 pub(crate) fn os_release(contract: &ConformanceContract, flavour: Flavour) -> String {
     let identity = &contract.identity;
     let quoted = |value: &str| {
@@ -27,13 +29,20 @@ pub(crate) fn os_release(contract: &ConformanceContract, flavour: Flavour) -> St
         }
         text + "\""
     };
+    let home_url = identity
+        .home_url
+        .as_deref()
+        .map(|url| format!("HOME_URL={}\n", quoted(url)))
+        .unwrap_or_default();
     format!(
-        "NAME={}\nID={}\nVERSION_ID={}\nVERSION={}\nPRETTY_NAME={}\n{}{}",
+        "NAME={}\nID={}\nVERSION_ID={}\nVERSION={}\nPRETTY_NAME={}\nLOGO=distributor-logo-{}\n{}{}{}",
         quoted(&identity.os_name),
         identity.os_id,
         quoted(&identity.os_version),
         quoted(&identity.os_version),
         quoted(&identity.os_name),
+        identity.os_id,
+        home_url,
         contract.profile.os_release_lines(),
         flavour.os_release_line(),
     )

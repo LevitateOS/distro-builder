@@ -119,9 +119,10 @@ case "${1:-}" in
         if [ -r /etc/machine-id ]; then id=$(cat /etc/machine-id); fi
         case "$id" in *[!0-9a-f]*|''|00000000000000000000000000000000) valid=no ;; *) valid=yes ;; esac
         if [ "$valid" = yes ] && [ "${#id}" -eq 32 ]; then exit 0; fi
-        case " $(cat /proc/cmdline) " in
-            *" recab.immutable "*) echo "machine identity must be seeded before immutable boot" >&2; exit 1 ;;
-        esac
+        if [ ! -w /etc ]; then
+            echo "machine identity must be seeded before immutable boot" >&2
+            exit 1
+        fi
         case "$init" in
             systemd) systemd-machine-id-setup ;;
             openrc)

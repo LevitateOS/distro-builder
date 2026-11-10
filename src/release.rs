@@ -118,6 +118,28 @@ pub fn assemble(variant: &Variant, product: ProductId, dir: &Path, kernel: &Path
     let what = step("adding the kernel modules to the rootfs");
     add_modules(&rootfs, &modules, &release).context(what)?;
 
+    let what = step("binding the kernel to its installed module tree");
+    {
+        use sha2::{Digest, Sha256};
+        use std::io::Read;
+        let mut image = fs::File::open(kernel.join(KERNEL_IMAGE_PATH))?;
+        let mut hash = Sha256::new();
+        let mut buffer = [0u8; 128 * 1024];
+        loop {
+            let n = image.read(&mut buffer)?;
+            if n == 0 {
+                break;
+            }
+            hash.update(&buffer[..n]);
+        }
+        let binding = serde_json::json!({"version":1,"release":release,"kernel_digest":format!("{:x}",hash.finalize()),"modules_digest":recinit::installed::modules_digest(&rootfs.join("usr/lib/modules").join(&release)).context(what.clone())?});
+        fs::create_dir_all(rootfs.join("usr/lib/recab"))?;
+        fs::write(
+            rootfs.join("usr/lib/recab/kernel.json"),
+            serde_json::to_vec(&binding)?,
+        )?;
+    }
+
     let what = step("writing the rootfs image");
     let rootfs_image = dir.join(&names.rootfs);
     crate::build_erofs_default(&rootfs, &rootfs_image).context(what)?;

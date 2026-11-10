@@ -115,12 +115,19 @@ case "${1:-}" in
         esac
         ;;
     machine-id)
+        id=
+        if [ -r /etc/machine-id ]; then id=$(cat /etc/machine-id); fi
+        case "$id" in *[!0-9a-f]*|''|00000000000000000000000000000000) valid=no ;; *) valid=yes ;; esac
+        if [ "$valid" = yes ] && [ "${#id}" -eq 32 ]; then exit 0; fi
+        case " $(cat /proc/cmdline) " in
+            *" recab.immutable "*) echo "machine identity must be seeded before immutable boot" >&2; exit 1 ;;
+        esac
         case "$init" in
             systemd) systemd-machine-id-setup ;;
             openrc)
                 id=
                 if [ -e /etc/machine-id ]; then id=$(cat /etc/machine-id); fi
-                case "$id" in *[!0-9a-f]*|'') valid=no ;; *) valid=yes ;; esac
+                case "$id" in *[!0-9a-f]*|''|00000000000000000000000000000000) valid=no ;; *) valid=yes ;; esac
                 if [ "$valid" = yes ] && [ "${#id}" -eq 32 ]; then exit 0; fi
                 od -An -N16 -tx1 /dev/urandom | tr -d ' \n' > /etc/machine-id
                 printf '\n' >> /etc/machine-id
@@ -130,6 +137,7 @@ case "${1:-}" in
         esac
         ;;
     service)
+        case "$2" in sshd|sshd.service) ssh-keygen -A || exit 1 ;; esac
         case "$init" in
             systemd) SYSTEMD_OFFLINE=1 systemctl enable "$2" ;;
             openrc) rc-update add "$2" default ;;

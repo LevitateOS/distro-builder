@@ -65,7 +65,11 @@ pub fn ginux_binary(repo: &Path) -> Result<&'static Path> {
         return Ok(path);
     }
     let dir = repo.join(GINUX_DIR);
-    let target_dir = dir.join("target");
+    // Beside the builder's own builds when they have a target directory of their
+    // own (a build run as root keeps root's files out of tools/ginux).
+    let target_dir = std::env::var_os("CARGO_TARGET_DIR")
+        .map(|target| PathBuf::from(target).join("ginux"))
+        .unwrap_or_else(|| dir.join("target"));
     eprintln!("  building ginux (cargo build -p ginux-init --bin ginux --release in {GINUX_DIR})");
     Cmd::new("cargo")
         .args(["build", "-q", "-p", "ginux-init", "--bin", "ginux", "--release", "--target", GINUX_TARGET])

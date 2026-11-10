@@ -122,6 +122,8 @@ pub struct Invocation<'a> {
     recipe: PathBuf,
     work: PathBuf,
     args: Vec<OsString>,
+    root: Option<(String, PathBuf)>,
+    worker: Option<PathBuf>,
 }
 
 impl<'a> Invocation<'a> {
@@ -137,7 +139,25 @@ impl<'a> Invocation<'a> {
             recipe: recipe.into(),
             work: work.into(),
             args: Vec::new(),
+            root: None,
+            worker: None,
         }
+    }
+
+    /// Runs this recipe in another root than Recipe's usual one: the image
+    /// `rootfs` (an assembled root tar), named by `reference`
+    /// (`oci:NAME@sha256:DIGEST`, the digest of that tar). The desktop apps
+    /// are compiled this way, in a root made of the variant's own packages.
+    pub fn root(mut self, reference: impl Into<String>, rootfs: impl Into<PathBuf>) -> Self {
+        self.root = Some((reference.into(), rootfs.into()));
+        self
+    }
+
+    /// The Recipe binary that runs inside the root, when the builder's own
+    /// cannot: a root with another C library needs the static one.
+    pub fn worker(mut self, worker: impl Into<PathBuf>) -> Self {
+        self.worker = Some(worker.into());
+        self
     }
 
     fn flag(mut self, flag: &str, value: impl Into<OsString>) -> Self {
@@ -222,8 +242,9 @@ impl<'a> Invocation<'a> {
             }
         }
         let ginux = ginux_binary(self.repo)?;
-        cmd = cmd.env("GINUX_BIN", ginux).env("RECIPE_WORKER_BIN", bin);
-        for (name, value) in [("GINUX_BIN", ginux), ("RECIPE_WORKER_BIN", bin)] {
+        let worker = self.worker.as_deref().unwrap_or(bin);
+        cmd = cmd.env("GINUX_BIN", ginux).env("RECIPE_WORKER_BIN", worker);
+        for (name, value) in [("GINUX_BIN", ginux), ("RECIPE_WORKER_BIN", worker)] {
             if let Some(ambient) = std::env::var_os(name).filter(|ambient| Path::new(ambient) != value) {
                 eprintln!("    {name}={} (the builder's own; ignoring {})", value.display(), Path::new(&ambient).display());
             } else {
@@ -231,9 +252,18 @@ impl<'a> Invocation<'a> {
             }
         }
         for name in LAUNCHER_ENV {
+            // This invocation's own root replaces the ambient one.
+            if self.root.is_some() && name.starts_with("GINUX_ROOT") {
+                continue;
+            }
             if let Some(value) = std::env::var_os(name) {
                 eprintln!("    {name}={}", Path::new(&value).display());
             }
+        }
+        if let Some((reference, rootfs)) = &self.root {
+            cmd = cmd.env("GINUX_ROOT", reference).env("GINUX_ROOTFS", rootfs);
+            eprintln!("    GINUX_ROOT={reference} (this recipe's own root)");
+            eprintln!("    GINUX_ROOTFS={}", rootfs.display());
         }
         cmd.run_interactive()?;
 

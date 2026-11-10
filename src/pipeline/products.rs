@@ -162,6 +162,10 @@ fn prepare_system(variant: &Variant, flavour: Flavour, rootfs: &Path) -> Result<
     add_tools(&variant.repo_root, rootfs, ToolLayer::Rootfs, &variant.id, &variant.contract.profile)?;
     crate::tui_binary::install_system(&variant.repo_root, rootfs, &variant.contract.profile)
         .with_context(|| format!("adding the installed system's TUI apps for {}", variant.id))?;
+    if flavour == Flavour::Desktop {
+        crate::desktop_apps::install_system(variant, rootfs)
+            .with_context(|| format!("adding the desktop apps for {}", variant.id))?;
+    }
     check_installable(rootfs, &variant.contract, flavour).with_context(|| {
         format!(
             "the rootfs recipe's tree {} predates the current system recipe; remove it to rebuild it",

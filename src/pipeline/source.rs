@@ -69,6 +69,17 @@ pub fn preseed_recipe(variant: &Variant, flavour: Flavour) -> PathBuf {
     )
 }
 
+/// The preseed recipe that downloads the apps-build lock (what compiling the
+/// desktop apps needs beyond the base), and the recipe that makes the root
+/// they are compiled in.
+pub fn apps_build_preseed_recipe(variant: &Variant) -> PathBuf {
+    resolve_repo_path(&variant.repo_root, &variant.contract.desktop.apps_build_preseed_recipe_script)
+}
+
+pub fn apps_build_root_recipe(variant: &Variant) -> PathBuf {
+    resolve_repo_path(&variant.repo_root, &variant.contract.desktop.apps_build_root_recipe_script)
+}
+
 /// Runs the variant's rootfs recipe and returns the tree it publishes: the
 /// whole installable `flavour` system. Each flavour has its own build
 /// directory, so building one never invalidates the other.

@@ -60,6 +60,9 @@ fn preseed_record(flavour: Flavour) -> &'static str {
     }
 }
 
+/// Where the outputs of the apps-build lock's preseed are recorded.
+const APPS_BUILD_RECORD: &str = "apps-build-source-inputs.json";
+
 /// Run an explicitly declared acquisition recipe (the preseed of `flavour`'s
 /// lock) and validate selected products. Materialization never calls this
 /// implicitly.
@@ -68,6 +71,27 @@ pub fn preseed_rootfs_source(
     distro_id: &str,
     recipe_script: &Path,
     flavour: Flavour,
+    refresh: bool,
+) -> Result<BTreeMap<String, PathBuf>> {
+    preseed(repo_root, distro_id, recipe_script, preseed_record(flavour), refresh)
+}
+
+/// The same for the apps-build lock: what compiling the desktop apps needs
+/// beyond the base. It goes with the desktop flavour's acquisition.
+pub fn preseed_apps_build(
+    repo_root: &Path,
+    distro_id: &str,
+    recipe_script: &Path,
+    refresh: bool,
+) -> Result<BTreeMap<String, PathBuf>> {
+    preseed(repo_root, distro_id, recipe_script, APPS_BUILD_RECORD, refresh)
+}
+
+fn preseed(
+    repo_root: &Path,
+    distro_id: &str,
+    recipe_script: &Path,
+    record: &str,
     refresh: bool,
 ) -> Result<BTreeMap<String, PathBuf>> {
     let recipe_path = resolve_recipe_path(repo_root, recipe_script);
@@ -108,7 +132,7 @@ pub fn preseed_rootfs_source(
         })
         .collect::<Result<_>>()
         .with_context(|| format!("preseed recipe '{}' output contract", recipe_path.display()))?;
-    save_preseed_outputs(&build_dir.join(preseed_record(flavour)), &recipe_path, &outputs)?;
+    save_preseed_outputs(&build_dir.join(record), &recipe_path, &outputs)?;
     Ok(outputs)
 }
 
@@ -144,13 +168,29 @@ pub(crate) fn preseed_inputs(
     recipe: &Path,
     flavour: Flavour,
 ) -> Result<BTreeMap<String, PathBuf>> {
+    recorded_inputs(repo, distro, recipe, preseed_record(flavour), &flavour.to_string())
+}
+
+/// The recorded outputs of the apps-build lock's preseed (`recipe`), which
+/// the apps-build root recipe takes as inputs.
+pub(crate) fn apps_build_inputs(repo: &Path, distro: &str, recipe: &Path) -> Result<BTreeMap<String, PathBuf>> {
+    recorded_inputs(repo, distro, recipe, APPS_BUILD_RECORD, "apps-build")
+}
+
+fn recorded_inputs(
+    repo: &Path,
+    distro: &str,
+    recipe: &Path,
+    record: &str,
+    flavour: &str,
+) -> Result<BTreeMap<String, PathBuf>> {
     let required = levitate_recipe::needs::declaration(
         recipe,
         Some(&repo.join("distro/builder/os-recipes")),
     )?
     .needs
     .outputs;
-    let record_path = recipe_work_dir(repo, distro)?.join(preseed_record(flavour));
+    let record_path = recipe_work_dir(repo, distro)?.join(record);
     let bytes = std::fs::read(&record_path).with_context(|| {
         format!(
             "no declared {flavour} rootfs source inputs at {}; run explicit preseed acquisition for the {flavour} lock",

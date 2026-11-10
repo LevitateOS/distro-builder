@@ -33,6 +33,7 @@ pub fn system_sources_digest(repo: &Path, distro_id: &str) -> Result<String> {
         "distro/contract",
         "distro/profile",
         "tui",
+        "gui",
         "recipes",
     ]
     .iter()

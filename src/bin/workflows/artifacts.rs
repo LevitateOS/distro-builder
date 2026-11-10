@@ -3,7 +3,7 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use distro_builder::product::ProductId;
 use distro_contract::profile::Flavour;
-use distro_builder::recipe::rootfs_source::preseed_rootfs_source;
+use distro_builder::recipe::rootfs_source::{preseed_apps_build, preseed_rootfs_source};
 use distro_builder::{build_erofs_default, build_overlayfs_default, PreparedProduct};
 
 pub(crate) fn build_prepared_product_erofs_cmd(prepared_dir: &Path) -> Result<()> {
@@ -12,6 +12,9 @@ pub(crate) fn build_prepared_product_erofs_cmd(prepared_dir: &Path) -> Result<()
     let overlay_dir = manifest.overlay(prepared_dir);
     let rootfs_output = prepared_dir.join(&manifest.rootfs_erofs);
     let overlay_output = prepared_dir.join(&manifest.overlay_erofs);
+
+    levitate_recipe::target::finalize(&rootfs_source_dir)
+        .context("finalizing the prepared system's intended metadata")?;
 
     build_erofs_default(&rootfs_source_dir, &rootfs_output).with_context(|| {
         format!("building the {} rootfs EROFS", manifest.product)
@@ -65,6 +68,17 @@ pub(crate) fn preseed_rootfs_source_cmd(
     println!("{flavour} rootfs source preseed ready for {distro_id}:");
     for (name, path) in paths {
         println!("  {name}: {}", path.display());
+    }
+    // The desktop system carries the desktop apps, which are compiled in a
+    // root of the variant's own packages: its downloads go with the desktop's.
+    if flavour == Flavour::Desktop {
+        let recipe_script = distro_builder::apps_build_preseed_recipe(&bundle);
+        let paths = preseed_apps_build(&bundle.repo_root, distro_id, &recipe_script, refresh)
+            .with_context(|| format!("preseeding what compiling the desktop apps needs for '{distro_id}'"))?;
+        println!("apps-build preseed ready for {distro_id}:");
+        for (name, path) in paths {
+            println!("  {name}: {}", path.display());
+        }
     }
     Ok(())
 }

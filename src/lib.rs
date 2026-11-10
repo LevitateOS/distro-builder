@@ -10,6 +10,7 @@ pub mod product;
 pub mod release;
 pub mod tui_apps;
 pub(crate) mod tui_binary;
+pub(crate) mod desktop_apps;
 pub mod process;
 pub mod recipe;
 
@@ -20,4 +21,4 @@ pub use pipeline::io::latest_release_rootfs;
 pub use pipeline::planner::{parent_releases_to_build, parent_rootfs_image};
 pub use pipeline::sources::system_sources_digest;
 pub use pipeline::products::{prepare_product, PreparedProduct};
-pub use pipeline::source::{materialize_rootfs_source, preseed_recipe};
+pub use pipeline::source::{apps_build_preseed_recipe, materialize_rootfs_source, preseed_recipe};

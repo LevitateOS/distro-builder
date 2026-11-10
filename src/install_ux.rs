@@ -14,7 +14,7 @@
 //! has no use for the install screen. Paths are relative to a layer's root.
 
 use anyhow::{bail, Context, Result};
-use distro_contract::install_ux::{APPS, BIN_DIR, CONSOLES, DOCS, DOCS_PAGE, HUB, SHELL};
+use distro_contract::install_ux::{APPS, BIN_DIR, CONSOLES, DOCS, DOCS_PAGE, DOCS_PANE, HUB, SHELL};
 use distro_contract::Profile;
 use std::path::Path;
 
@@ -77,7 +77,7 @@ impl<'a> Screen<'a> {
             argv
         };
         let mut docs = command(self.docs);
-        docs.extend([self.docs.page_arg()?.to_string(), DOCS_PAGE.to_string()]);
+        docs.extend([DOCS_PANE.to_string(), self.docs.page_arg()?.to_string(), DOCS_PAGE.to_string()]);
         Ok([command(self.hub), docs])
     }
 }

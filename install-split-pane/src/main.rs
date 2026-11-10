@@ -1,10 +1,11 @@
 //! install-split: the install screen's terminal host.
 //!
-//! Two panes side by side, the install hub on the left and the docs on the right,
-//! each running a program in its own PTY, drawn through a vt100 emulator, over a
-//! footer that lists the host's keys. Every other key goes to the focused pane. A
-//! pane whose program exits, or whose PTY fails, stays on screen with the reason and
-//! restarts on Enter; the host itself ends only when the user quits. A pane's
+//! Two panes side by side with no frame, the install hub on the left and the docs on
+//! the right, each running a program in its own PTY, drawn through a vt100 emulator.
+//! The pane without the keyboard is drawn dimmer. The bottom row lists the host's
+//! keys as keycaps. Every other key goes to the focused pane. A pane whose program
+//! exits, or whose PTY fails, stays on screen and the bottom row gives the reason and
+//! offers Enter to restart it; the host itself ends only when the user quits. A pane's
 //! clipboard writes (OSC 52) go on to the host's own terminal, which the emulator
 //! would drop.
 
@@ -34,7 +35,7 @@ use ratatui::{
     layout::{Position, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
-    widgets::{Block, Borders, Paragraph},
+    widgets::Paragraph,
     Frame, Terminal,
 };
 
@@ -56,6 +57,19 @@ const HOST_KEYS: &[(HostKey, char, &str, &str)] = &[
     (HostKey::Switch, ']', "Ctrl-]", "switch pane"),
     (HostKey::Quit, 'q', "Ctrl-q", "quit"),
 ];
+
+/// The colours of the key bar, from tui/kit/core/src/theme/palette.ts (the TypeScript
+/// theme is not available to this crate): `ink` is the dark surface, `rule` the
+/// keycap's cell, `paper` the key's text, `lichen` the labels, `night` the screen
+/// surface a dimmed pane fades toward, `sand` a pane's notice.
+const INK: Color = Color::Rgb(0x14, 0x22, 0x1a);
+const RULE: Color = Color::Rgb(0x3a, 0x4b, 0x40);
+const PAPER: Color = Color::Rgb(0xf2, 0xee, 0xe4);
+const LICHEN: Color = Color::Rgb(0x9a, 0xa8, 0x9d);
+const NIGHT: Color = Color::Rgb(0x0d, 0x17, 0x11);
+const SAND: Color = Color::Rgb(0xe4, 0xcb, 0xa6);
+/// How far a pane without the keyboard fades toward its background, in percent.
+const DIM_PERCENT: u16 = 45;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum HostKey {
@@ -622,48 +636,101 @@ fn draw(frame: &mut Frame, panes: &[Pane; 2], focus: Side) {
     for pane in panes {
         let area = layout.panes[pane.side.index()];
         let focused = pane.side == focus;
-        let mut title = pane.side.title().to_string();
-        if let Some(reason) = &pane.ended {
-            title.push_str(&format!(" ({reason}) Enter restarts"));
-        }
-        let border = if focused {
-            Style::default()
-                .fg(Color::Green)
-                .add_modifier(Modifier::BOLD)
-        } else {
-            Style::default()
-        };
-        let block = Block::default()
-            .title(title)
-            .borders(Borders::ALL)
-            .border_style(border);
-        let inner = block.inner(area);
         let screen = pane.parser.screen();
         frame.render_widget(
-            Paragraph::new(Text::from(screen_lines(screen, inner.height, inner.width)))
-                .block(block),
+            Paragraph::new(Text::from(screen_lines(
+                screen,
+                area.height,
+                area.width,
+                !focused,
+            ))),
             area,
         );
         if focused && pane.process.is_some() && !screen.hide_cursor() {
             let (row, col) = screen.cursor_position();
-            if row < inner.height && col < inner.width {
-                frame.set_cursor_position(Position::new(inner.x + col, inner.y + row));
+            if row < area.height && col < area.width {
+                frame.set_cursor_position(Position::new(area.x + col, area.y + row));
             }
         }
     }
-    let footer = HOST_KEYS
-        .iter()
-        .map(|(_, _, key, action)| format!("{key} {action}"))
-        .collect::<Vec<_>>()
-        .join(" | ");
-    frame.render_widget(
-        Paragraph::new(format!("{} pane | {footer}", focus.title()))
-            .style(Style::default().fg(Color::DarkGray)),
-        layout.footer,
-    );
+    draw_key_bar(frame, layout.footer, panes);
 }
 
-fn screen_lines(screen: &vt100::Screen, max_rows: u16, max_cols: u16) -> Vec<Line<'static>> {
+/// The bottom row on the dark surface: the host's keys as keycaps at the right, and
+/// at the left what a pane whose program ended says, with Enter to restart it.
+fn draw_key_bar(frame: &mut Frame, area: Rect, panes: &[Pane; 2]) {
+    let buffer = frame.buffer_mut();
+    let surface = Style::default().fg(LICHEN).bg(INK);
+    for x in area.left()..area.right() {
+        buffer[(x, area.y)].set_symbol(" ").set_style(surface);
+    }
+    let cap = Style::default().fg(PAPER).bg(RULE);
+    let mut keys: Vec<(String, &str)> = Vec::new();
+    for (_, _, key, action) in HOST_KEYS {
+        keys.push((format!(" {key} "), action));
+    }
+    let width: usize = keys
+        .iter()
+        .map(|(cap, action)| cap.chars().count() + 1 + action.chars().count() + 2)
+        .sum::<usize>()
+        .saturating_sub(2);
+    let mut x = area.right().saturating_sub(width as u16).max(area.left());
+    let keys_start = x;
+    for (index, (key, action)) in keys.iter().enumerate() {
+        if index > 0 {
+            x = put(buffer, x, area, "  ", surface);
+        }
+        x = put(buffer, x, area, key, cap);
+        x = put(buffer, x, area, &format!(" {action}"), surface);
+    }
+    let notice: Vec<String> = panes
+        .iter()
+        .filter_map(|pane| {
+            pane.ended
+                .as_ref()
+                .map(|reason| format!("{} ended ({reason})", pane.side.title()))
+        })
+        .collect();
+    if notice.is_empty() {
+        return;
+    }
+    let room = usize::from(keys_start.saturating_sub(area.left())).saturating_sub(3);
+    let mut text = format!("{}.  Enter restarts", notice.join(", "));
+    if text.chars().count() > room {
+        text = text.chars().take(room.saturating_sub(1)).collect::<String>() + "…";
+    }
+    if room > 1 {
+        put(
+            buffer,
+            area.left() + 1,
+            area,
+            &text,
+            Style::default().fg(SAND).bg(INK),
+        );
+    }
+}
+
+/// Writes `text` on the bar's row from column `x`, stopping at the bar's end, and
+/// returns the column after it.
+fn put(
+    buffer: &mut ratatui::buffer::Buffer,
+    x: u16,
+    area: Rect,
+    text: &str,
+    style: Style,
+) -> u16 {
+    let room = usize::from(area.right().saturating_sub(x));
+    let text: String = text.chars().take(room).collect();
+    let (end, _) = buffer.set_stringn(x, area.y, &text, room, style);
+    end
+}
+
+fn screen_lines(
+    screen: &vt100::Screen,
+    max_rows: u16,
+    max_cols: u16,
+    dim: bool,
+) -> Vec<Line<'static>> {
     let (rows, cols) = screen.size();
     let cols = cols.min(max_cols);
     (0..rows.min(max_rows))
@@ -678,7 +745,7 @@ fn screen_lines(screen: &vt100::Screen, max_rows: u16, max_cols: u16) -> Vec<Lin
                 if cell.is_wide_continuation() {
                     continue;
                 }
-                let style = cell_style(cell);
+                let style = cell_style(cell, dim);
                 if run_style != Some(style) {
                     if let Some(previous) = run_style {
                         spans.push(Span::styled(std::mem::take(&mut run), previous));
@@ -698,11 +765,18 @@ fn screen_lines(screen: &vt100::Screen, max_rows: u16, max_cols: u16) -> Vec<Lin
         .collect()
 }
 
-fn cell_style(cell: &vt100::Cell) -> Style {
+/// A cell's style; when `dim`, its foreground faded toward its background (the
+/// screen surface where the cell sets none; a default foreground counts as paper).
+fn cell_style(cell: &vt100::Cell, dim: bool) -> Style {
     let mut fg = color(cell.fgcolor());
     let mut bg = color(cell.bgcolor());
     if cell.inverse() {
         std::mem::swap(&mut fg, &mut bg);
+    }
+    if dim {
+        let toward = bg.and_then(rgb_of).unwrap_or(rgb_of(NIGHT).unwrap_or_default());
+        let from = fg.and_then(rgb_of).unwrap_or(rgb_of(PAPER).unwrap_or_default());
+        fg = Some(fade(from, toward));
     }
     let mut style = Style::default();
     if let Some(fg) = fg {
@@ -721,6 +795,59 @@ fn cell_style(cell: &vt100::Cell) -> Style {
         style = style.add_modifier(Modifier::UNDERLINED);
     }
     style
+}
+
+/// `from` moved `DIM_PERCENT` of the way to `toward`.
+fn fade(from: (u8, u8, u8), toward: (u8, u8, u8)) -> Color {
+    let mix = |a: u8, b: u8| {
+        let (a, b) = (i32::from(a), i32::from(b));
+        (a + (b - a) * i32::from(DIM_PERCENT) / 100) as u8
+    };
+    Color::Rgb(
+        mix(from.0, toward.0),
+        mix(from.1, toward.1),
+        mix(from.2, toward.2),
+    )
+}
+
+/// The RGB of a colour the emulator reports (xterm's palette for indexed ones).
+fn rgb_of(color: Color) -> Option<(u8, u8, u8)> {
+    match color {
+        Color::Rgb(r, g, b) => Some((r, g, b)),
+        Color::Indexed(idx) => Some(match idx {
+            0..=15 => {
+                const BASE: [(u8, u8, u8); 16] = [
+                    (0, 0, 0),
+                    (205, 0, 0),
+                    (0, 205, 0),
+                    (205, 205, 0),
+                    (0, 0, 238),
+                    (205, 0, 205),
+                    (0, 205, 205),
+                    (229, 229, 229),
+                    (127, 127, 127),
+                    (255, 0, 0),
+                    (0, 255, 0),
+                    (255, 255, 0),
+                    (92, 92, 255),
+                    (255, 0, 255),
+                    (0, 255, 255),
+                    (255, 255, 255),
+                ];
+                BASE[usize::from(idx)]
+            }
+            16..=231 => {
+                let n = idx - 16;
+                let level = |v: u8| if v == 0 { 0 } else { 55 + v * 40 };
+                (level(n / 36), level(n / 6 % 6), level(n % 6))
+            }
+            _ => {
+                let grey = 8 + (idx - 232) * 10;
+                (grey, grey, grey)
+            }
+        }),
+        _ => None,
+    }
 }
 
 fn color(color: vt100::Color) -> Option<Color> {

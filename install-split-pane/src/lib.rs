@@ -1,5 +1,5 @@
-//! The install screen's layout: two bordered panes side by side, the install hub on
-//! the left and the docs on the right, over a one-row footer.
+//! The install screen's layout: two panes side by side with no frame, the install hub
+//! on the left and the docs on the right, over a one-row key bar.
 //!
 //! The split pane owns the screen's geometry: it draws with this layout and sizes
 //! each child's terminal from it, its smoke check runs the panes at these sizes, and
@@ -11,8 +11,9 @@ use ratatui::layout::{Constraint, Direction, Layout, Rect};
 pub const PANE_PERCENT: u16 = 50;
 
 pub struct ScreenLayout {
-    /// Left (hub) and right (docs) pane areas, borders included.
+    /// Left (hub) and right (docs) pane areas; each is its child's whole terminal.
     pub panes: [Rect; 2],
+    /// The bottom row, where the host's keys and a pane's notice go.
     pub footer: Rect,
 }
 
@@ -34,12 +35,9 @@ pub fn screen_layout(area: Rect) -> ScreenLayout {
     }
 }
 
-/// The terminal a pane's child sees: the pane minus its one-cell border.
+/// The terminal a pane's child sees: the whole pane, as no frame is drawn.
 pub fn pane_terminal_size(pane: Rect) -> (u16, u16) {
-    (
-        pane.width.saturating_sub(2).max(1),
-        pane.height.saturating_sub(2).max(1),
-    )
+    (pane.width.max(1), pane.height.max(1))
 }
 
 /// The hub's and the docs' terminal sizes on a `columns`×`rows` console.

@@ -5,11 +5,18 @@
 // BIN names the binary (default recstrap); INSTALL_PATH where it goes in the
 // package tree (default usr/bin/<BIN>). recab also packages its trial service,
 // which it writes itself for the image's init system (INIT_SYSTEM, the
-// variant's profile). recipe, the package manager, also packages the
-// directories its state lives in. The named program output is published by
-// Recipe for the consumer to install.
+// variant's profile). recipe also packages its public catalog and the same
+// pinned runtime image/launcher the builder selected, supplied as typed inputs.
+// The named program output is published by Recipe for the consumer to install.
 const RECIPE_API = 2;
-const NEEDS = #{ inputs: #{ source: "directory" }, outputs: #{ program: "file", rootfs: "directory" } };
+const NEEDS = #{
+    inputs: #{ source: "directory", catalog: "directory?", launcher: "file?", runtime_image: "file?", runtime_reference: "file?" },
+    outputs: #{ program: "file", rootfs: "directory" },
+    // Packaging Recipe retains compiler outputs while copying its selected
+    // runtime tar (the current compiler image is about 1.3 GiB).
+    memory_mib: 8192,
+    storage_max_bytes: 6442450944,
+};
 let bin = if is_def_var("BIN") { BIN } else { "recstrap" };
 let rust_target = "x86_64-unknown-linux-musl";
 let ctx = #{
@@ -24,11 +31,13 @@ let ctx = #{
 };
 
 fn is_acquired(ctx) {
+    if ctx.name == "recipe" { recipe_inputs(ctx); }
     if is_file(join_path(ctx.source, "Cargo.toml")) { return ready(ctx); }
     needs_work(ctx, ctx.name + " source input is missing")
 }
 
 fn acquire(ctx) {
+    if ctx.name == "recipe" { recipe_inputs(ctx); }
     if is_file(join_path(ctx.source, "Cargo.toml")) { return ctx; }
     throw "Import an offline standalone source tree with --input source=PATH";
 }
@@ -73,10 +82,9 @@ fn renameat2_object(work) {
     object
 }
 
-// Root's recipe catalog, retained state and image cache live on /var, shared
-// by both A/B slots, so these directories survive a system update. This does
-// not activate packages or preserve published outputs elsewhere. Recipe's
-// defaults point here from root's home, which the image replaces. Every
+// Root's override catalog, retained state, active packages and image cache live
+// on /var, shared by both A/B slots. Recipe's defaults point here from root's
+// home, which the image replaces. Every
 // directory of this tree replaces the rootfs's metadata when merged, so root's
 // home keeps a private mode.
 fn recipe_state(root) {
@@ -92,10 +100,60 @@ fn recipe_state(root) {
     ln_force("/var/cache/recipe", join_path(root, "root/.cache/recipe"));
 }
 
+fn recipe_inputs(ctx) {
+    let inputs = ctx.runtime.paths.inputs;
+    if !is_dir(join_path(inputs, "catalog")) { throw "Recipe packaging requires the public catalog input"; }
+    for name in ["launcher", "runtime_image", "runtime_reference"] {
+        if !is_file(join_path(inputs, name)) { throw "Recipe packaging requires input " + name; }
+    }
+}
+
+fn recipe_runtime(ctx) {
+    recipe_inputs(ctx);
+    let inputs = ctx.runtime.paths.inputs;
+    let root = ctx.rootfs;
+    let reference = trim(read_file(join_path(inputs, "runtime_reference")));
+    let digest = reference.split("@sha256:")[1];
+    // Check the exact imported tar that will ship, not just its pathname.
+    verify_sha256(join_path(inputs, "runtime_image"), digest);
+    let runtime = join_path(root, "usr/share/recipe/runtime");
+    mkdir(runtime);
+    copy_file(join_path(inputs, "runtime_image"), join_path(runtime, "rootfs.tar"));
+    chmod(join_path(runtime, "rootfs.tar"), 0o644);
+    write_file(join_path(runtime, "root-reference"), reference + "\n");
+    chmod(join_path(runtime, "root-reference"), 0o644);
+    let launcher = join_path(root, "usr/libexec/recipe/ginux");
+    mkdir(dirname(launcher));
+    copy_file(join_path(inputs, "launcher"), launcher);
+    chmod(launcher, 0o755);
+    // The image supplies defaults; an administrator's /var catalog stays intact.
+    let catalog = join_path(root, "usr/share/recipe/recipes");
+    mkdir(catalog);
+    copy_tree_contents(join_path(inputs, "catalog"), catalog);
+    let profile = join_path(root, "etc/profile.d/recipe.sh");
+    mkdir(dirname(profile));
+    write_file(profile,
+        "# Recipe-managed software persists independently of the OS image.\n" +
+        "case \":$PATH:\" in *:/var/lib/recipe/profile/bin:*) ;; *) PATH=\"/var/lib/recipe/profile/bin:$PATH\" ;; esac\n" +
+        "recipe_user_bin=\"${XDG_DATA_HOME:-$HOME/.local/share}/recipe/profile/bin\"\n" +
+        "case \":$PATH:\" in *:\"$recipe_user_bin\":*) ;; *) PATH=\"$recipe_user_bin:$PATH\" ;; esac\n" +
+        "export PATH\nunset recipe_user_bin\n");
+    chmod(profile, 0o644);
+}
+
 fn is_installed(ctx) {
     if !is_file(ctx.program) { return needs_work(ctx, ctx.name + " output is missing"); }
     if !is_file(join_path(ctx.rootfs, ctx.install_path)) {
         return needs_work(ctx, "installed package tree is missing");
+    }
+    if ctx.name == "recipe" {
+        for path in ["usr/libexec/recipe/ginux", "usr/share/recipe/runtime/rootfs.tar",
+                     "usr/share/recipe/runtime/root-reference", "etc/profile.d/recipe.sh"] {
+            if !is_file(join_path(ctx.rootfs, path)) { return needs_work(ctx, "Recipe runtime is missing " + path); }
+        }
+        if !is_dir(join_path(ctx.rootfs, "usr/share/recipe/recipes")) {
+            return needs_work(ctx, "Recipe's public catalog is missing");
+        }
     }
     ctx.outputs = #{program: ctx.program, rootfs: ctx.rootfs};
     ready(ctx)
@@ -111,7 +169,10 @@ fn install(ctx) {
         if ctx.init_system == "" { throw "recab packages its trial service for an init system: pass INIT_SYSTEM"; }
         exec_checked(ctx.program, ["install-unit", "--root", ctx.rootfs, "--init", ctx.init_system, "--bin", "/" + ctx.install_path]);
     }
-    if ctx.name == "recipe" { recipe_state(ctx.rootfs); }
+    if ctx.name == "recipe" {
+        recipe_state(ctx.rootfs);
+        recipe_runtime(ctx);
+    }
     ctx.outputs = #{program: ctx.program, rootfs: ctx.rootfs};
     ctx
 }

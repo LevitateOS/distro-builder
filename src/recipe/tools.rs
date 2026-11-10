@@ -361,11 +361,24 @@ pub(crate) fn build_tool_tree(
         .join(binary)
         .join(init);
     let install_path = format!("usr/bin/{binary}");
-    super::Invocation::new(repo, "install", &recipe, &work)
+    let mut invocation = super::Invocation::new(repo, "install", &recipe, &work)
         .define("BIN", binary)
         .define("INSTALL_PATH", &install_path)
         .define("INIT_SYSTEM", init)
-        .input("source", source.path())
-        .run()?
-        .directory("rootfs")
+        .input("source", source.path());
+    // The package manager ships the same pinned runtime the builder uses.
+    // Explicit inputs give the recipe no ambient access to the host image.
+    let reference_file = tempfile::NamedTempFile::new()?;
+    if package == "levitate-recipe" {
+        let reference = levitate_recipe::runtime::root_reference()?;
+        levitate_recipe::runtime::root_digest(&reference)?;
+        let image = levitate_recipe::runtime::rootfs_path(&reference)?;
+        fs::write(reference_file.path(), format!("{reference}\n"))?;
+        invocation = invocation
+            .input("catalog", &repo.join("recipes"))
+            .input("launcher", super::ginux_binary(repo)?)
+            .input("runtime_image", &image)
+            .input("runtime_reference", reference_file.path());
+    }
+    invocation.run()?.directory("rootfs")
 }

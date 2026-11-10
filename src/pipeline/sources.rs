@@ -33,6 +33,7 @@ pub fn system_sources_digest(repo: &Path, distro_id: &str) -> Result<String> {
         "distro/contract",
         "distro/profile",
         "tui",
+        "recipes",
     ]
     .iter()
     .map(PathBuf::from)
@@ -45,6 +46,11 @@ pub fn system_sources_digest(repo: &Path, distro_id: &str) -> Result<String> {
     let ginux = crate::recipe::ginux_binary(&repo)?;
     hasher.update(b"ginux launcher\0");
     hasher.update(fs::read(ginux).with_context(|| format!("reading '{}'", ginux.display()))?);
+    hasher.update([0]);
+    // This pinned tar ships with Recipe in the installed system. Recipe verifies
+    // the selected input's bytes against this reference before publishing it.
+    hasher.update(b"recipe runtime image\0");
+    hasher.update(levitate_recipe::runtime::root_reference()?.as_bytes());
     hasher.update([0]);
     // The workspace's manifest and locks pick the tools' and TUI's dependencies.
     for file in ["Cargo.toml", "Cargo.lock", "package.json", "bun.lock"] {

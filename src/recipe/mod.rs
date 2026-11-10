@@ -198,6 +198,8 @@ impl<'a> Invocation<'a> {
         let os_recipes_path = self.repo.join("distro/builder/os-recipes");
 
         let mut cmd = Cmd::new(bin)
+            // OS composition consumes products without activating host packages.
+            .arg("--no-activate")
             .arg(self.phase)
             .arg(recipe)
             .arg("--build-dir")

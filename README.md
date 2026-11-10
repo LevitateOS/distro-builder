@@ -37,9 +37,15 @@ in a base or desktop image, including desktop applications, belong to that
 image's lifecycle. recab owns staging and switching installed system images.
 
 The workspace's top-level [`recipes/`](../../recipes/README.md) is the separate
-catalog for user-managed software. It currently has no application recipes;
-live-system activation and the user package update/removal workflow remain work
-on Recipe. It is not the builder's default search path.
+catalog for user-managed software. The Recipe tool package copies it into
+`/usr/share/recipe/recipes`, alongside the builder's selected pinned Ginux root
+image and static launcher. Root's override catalog and active package profile
+remain under `/var/lib/recipe`, shared across A/B system updates. Login shells
+add both the system and per-user Recipe profile's `bin` to `PATH`.
+
+The builder always passes `--no-activate`: it consumes recipe outputs to compose
+images, without activating packages on the build host. The user catalog is not
+the builder's recipe search path.
 
 Both collections use the same API 2 Rhai format and the same engine in
 `tools/recipe`. The directory split identifies the consumer and lifecycle; it

@@ -19,10 +19,6 @@ let ctx = #{name: "live-overlay", config: config,
 // The rendered guest file the builder passed as input `name`.
 fn input(c, name) { read_file(join_path(c.inputs, name)) }
 
-// The groups of the devices a desktop session uses, besides wheel (the
-// privilege tool's admin group); the live user joins those the system has.
-fn session_groups() { ["wheel", "video", "input", "audio", "netdev", "plugdev"] }
-
 // The live desktop's user (`c.desktop`): the desktop does not run as root,
 // so the display manager logs this account in without asking, through its
 // autologin (the same /etc/sddm.conf.d drop-in on every init). It is in
@@ -44,7 +40,7 @@ fn live_user(root, c) {
     for line in input(c, "group").split("\n") {
         if line == "" { continue; }
         let fields = line.split(":");
-        if fields.len() == 4 && session_groups().contains(fields[0]) {
+        if fields.len() == 4 && d.groups.contains(fields[0]) {
             line += if fields[3] == "" { user } else { "," + user };
         }
         group += line + "\n";

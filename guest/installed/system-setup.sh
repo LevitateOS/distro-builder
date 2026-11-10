@@ -9,7 +9,7 @@ missing_profile() {
     echo "/etc/os-release has no $1: the system was built without a distro profile (rebuild it with the current builder)" >&2
     exit 2
 }
-REC_INIT='' REC_PACKAGES=''
+REC_INIT='' REC_PACKAGES='' REC_DESKTOP=''
 [ -r /etc/os-release ] || missing_profile REC_INIT
 . /etc/os-release
 init=$REC_INIT packages=$REC_PACKAGES
@@ -55,6 +55,31 @@ case "${1:-}" in
                 ;;
             *) echo "unsupported init system: $init" >&2; exit 2 ;;
         esac
+        ;;
+    x11-keyboard)
+        # A desktop system's keyboard layout ($2, variant $3): the X server's
+        # and the login screen's (xorg.conf.d, which systemd-localed also
+        # reads), and on Plasma the default of every user's session.
+        layout=$2 variant=${3:-}
+        mkdir -p /etc/X11/xorg.conf.d
+        conf=/etc/X11/xorg.conf.d/00-keyboard.conf
+        printf 'Section "InputClass"\n    Identifier "system-keyboard"\n    MatchIsKeyboard "on"\n    Option "XkbLayout" "%s"\n' "$layout" > "$conf"
+        if [ -n "$variant" ]; then printf '    Option "XkbVariant" "%s"\n' "$variant" >> "$conf"; fi
+        printf 'EndSection\n' >> "$conf"
+        chmod 0644 "$conf"
+        if [ "$REC_DESKTOP" = plasma ]; then
+            mkdir -p /etc/xdg
+            printf '[Layout]\nLayoutList=%s\nUse=true\n' "$layout" > /etc/xdg/kxkbrc
+            if [ -n "$variant" ]; then printf 'VariantList=%s\n' "$variant" >> /etc/xdg/kxkbrc; fi
+            chmod 0644 /etc/xdg/kxkbrc
+        fi
+        ;;
+    autologin)
+        # A desktop system's display manager (SDDM) logs user $2 in to
+        # session $3 at every boot without asking.
+        mkdir -p /etc/sddm.conf.d
+        printf '[Autologin]\nUser=%s\nSession=%s\n' "$2" "$3" > /etc/sddm.conf.d/20-autologin.conf
+        chmod 0644 /etc/sddm.conf.d/20-autologin.conf
         ;;
     hostname)
         printf '%s\n' "$2" > /etc/hostname
@@ -111,5 +136,5 @@ case "${1:-}" in
             *) echo "unsupported init system: $init" >&2; exit 2 ;;
         esac
         ;;
-    *) echo "usage: recipe-system-setup timezone|locale|keymap|hostname|user|machine-id|service ..." >&2; exit 2 ;;
+    *) echo "usage: recipe-system-setup timezone|locale|keymap|x11-keyboard|hostname|user|autologin|machine-id|service ..." >&2; exit 2 ;;
 esac

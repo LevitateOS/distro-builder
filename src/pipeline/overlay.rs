@@ -50,6 +50,10 @@ struct LiveDesktop {
     display_manager: String,
     os_id: String,
     privilege: &'static str,
+    /// The groups the user joins where the system has them: the admin group
+    /// and the desktop session's (`distro_profile::DESKTOP_SESSION_GROUPS`, as
+    /// recsetup gives an installed desktop's users).
+    groups: Vec<&'static str>,
 }
 
 impl LiveSession {
@@ -78,6 +82,9 @@ impl LiveSession {
                 display_manager: contract.desktop.display_manager.clone(),
                 os_id: contract.identity.os_id.clone(),
                 privilege: contract.profile.privilege.as_str(),
+                groups: std::iter::once(distro_profile::ADMIN_GROUP)
+                    .chain(distro_profile::DESKTOP_SESSION_GROUPS.iter().copied())
+                    .collect(),
             }),
             live_media_dir: recinit::live::LIVE_MEDIA_DIR,
             role_file: recinit::live::PAYLOAD_ROLE_FILE,

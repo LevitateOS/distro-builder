@@ -454,10 +454,10 @@ fn apply(root, inputs, init) {
 // would have done (their caches; their accounts are the backend's
 // package_effects), the user session's services, and the boot into the
 // display manager, which takes the first virtual console (`login_consoles`),
-// and the variant's wallpapers.
+// and the variant's wallpapers, on the desktop and on the login screen.
 fn desktop_system(root, inputs, init, display_manager) {
     desktop_caches(root, os_release_field(inputs, "REC_LIBC"));
-    wallpaper(root, inputs);
+    login_screen(root, inputs, display_manager, wallpaper(root, inputs));
     session_services(root, init);
     graphical(root, init, display_manager);
 }
@@ -465,7 +465,8 @@ fn desktop_system(root, inputs, init, display_manager) {
 // The variant's wallpapers (the builder's `wallpaper_light` and
 // `wallpaper_dark` inputs, 3840x2160 JPEGs) as a wallpaper package under the
 // OS's name, and the default background of the desktop (REC_DESKTOP) for
-// every user who has not chosen another.
+// every user who has not chosen another. Returns the dark one's path in the
+// system.
 fn wallpaper(root, inputs) {
     let name = pretty_name(inputs);
     let package = "usr/share/wallpapers/" + name;
@@ -506,6 +507,48 @@ fn wallpaper(root, inputs) {
     } else {
         throw "no default wallpaper for the desktop " + desktop;
     }
+    "/" + dark
+}
+
+// The login screen: the display manager's theme of the desktop (REC_DESKTOP)
+// with `background`, the dark wallpaper, behind it.
+fn login_screen(root, inputs, display_manager, background) {
+    if display_manager != "sddm" { throw "no login screen for the display manager " + display_manager; }
+    let themes = "usr/share/sddm/themes/";
+    let conf = "[General]\nbackground=" + background + "\n";
+    let desktop = os_release_field(inputs, "REC_DESKTOP");
+    let theme = "";
+    if desktop == "plasma" {
+        // KDE's Breeze theme, which shows no logo, in place of Fedora's copy
+        // of it with Fedora's logo and background. A theme.conf.user beside
+        // a theme's theme.conf overrides it.
+        theme = "breeze";
+        if !is_file(join_path(root, themes + theme + "/theme.conf")) { throw "the Plasma packages lack SDDM's Breeze theme"; }
+        put(root, themes + theme + "/theme.conf.user", conf, 0o644);
+    } else if desktop == "lxqt" {
+        // SDDM's own Maldives theme under our name: Alpine's copy does not
+        // say it is for the Qt 6 greeter, the only one Alpine has.
+        theme = os_release_field(inputs, "ID");
+        let packaged = themes + "maldives/";
+        if !is_file(join_path(root, packaged + "metadata.desktop")) { throw "the LXQt packages lack SDDM's Maldives theme"; }
+        for file in ["Main.qml", "angle-down.png", "rectangle.png"] {
+            mkdir(join_path(root, themes + theme));
+            copy_file(join_path(root, packaged + file), join_path(root, themes + theme + "/" + file));
+            target_mode(root, themes + theme + "/" + file, 0o644);
+        }
+        let metadata = "";
+        for line in read_file(join_path(root, packaged + "metadata.desktop")).split("\n") {
+            if line.starts_with("Name=") { line = "Name=" + pretty_name(inputs); }
+            else if line.starts_with("Theme-Id=") { line = "Theme-Id=" + theme; }
+            else if line.starts_with("Screenshot=") || line.starts_with("QtVersion=") || line == "" { continue; }
+            metadata += line + "\n";
+        }
+        put(root, themes + theme + "/metadata.desktop", metadata + "QtVersion=6\n", 0o644);
+        put(root, themes + theme + "/theme.conf", conf, 0o644);
+    } else {
+        throw "no login screen for the desktop " + desktop;
+    }
+    put(root, "etc/sddm.conf.d/10-theme.conf", "[Theme]\nCurrent=" + theme + "\n", 0o644);
 }
 
 // The first of `programs` (paths relative to the root) the tree has, or "".

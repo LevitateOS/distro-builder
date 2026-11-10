@@ -13,7 +13,10 @@ mod workflows;
 use workflows::{artifacts, build};
 
 fn main() -> ExitCode {
-    let args: Result<Vec<String>, _> = std::env::args_os().skip(1).map(|arg| arg.into_string()).collect();
+    let args: Result<Vec<String>, _> = std::env::args_os()
+        .skip(1)
+        .map(|arg| arg.into_string())
+        .collect();
     let args = match args {
         Ok(args) => args,
         Err(arg) => return usage_error(&format!("argument {arg:?} is not UTF-8")),
@@ -44,6 +47,26 @@ fn run(repo: &Path, command: Command) -> Result<()> {
     // If the launcher dies (cancel, abort), this build dies with it.
     process::die_with_parent().context("arming the parent-death signal for distro-builder")?;
     match command {
+        Command::ReleaseManifest {
+            distro,
+            flavour,
+            root,
+            directory,
+            signing_key,
+        } => {
+            let variant = distro_contract::load(repo, &distro)?;
+            let manifest = distro_builder::release_manifest::write(
+                &variant,
+                flavour,
+                &root,
+                &directory,
+                &directory.join(recinit::live::KERNEL_ISO_PATH),
+                &directory.join(recinit::live::INITRAMFS_INSTALLED_ISO_PATH),
+                signing_key.as_deref(),
+            )?;
+            println!("{}", manifest.path.display());
+            Ok(())
+        }
         Command::ReleaseBuild { product, distro } => {
             process::check_host_tools(HostNeed::Build)?;
             build::ensure_release_prerequisites(repo, &distro, product)?;
@@ -54,14 +77,18 @@ fn run(repo: &Path, command: Command) -> Result<()> {
             distro,
             output,
         } => artifacts::prepare_product_cmd(repo, product, &distro, &output),
-        Command::ProductErofs { prepared } => artifacts::build_prepared_product_erofs_cmd(&prepared),
+        Command::ProductErofs { prepared } => {
+            artifacts::build_prepared_product_erofs_cmd(&prepared)
+        }
         Command::PrepareToolSource { package, output } => {
             distro_builder::recipe::tools::prepare_tool_source_into(repo, &package, &output)?;
             println!("{}", output.display());
             Ok(())
         }
-        Command::PreseedRootfsSource { distro, flavour, refresh } => {
-            artifacts::preseed_rootfs_source_cmd(repo, &distro, flavour, refresh)
-        }
+        Command::PreseedRootfsSource {
+            distro,
+            flavour,
+            refresh,
+        } => artifacts::preseed_rootfs_source_cmd(repo, &distro, flavour, refresh),
     }
 }

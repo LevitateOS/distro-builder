@@ -42,9 +42,10 @@ Recipe tool package ships it as a source: `/usr/share/recipe/sources/levitate.to
 says where it is fetched from, and `/usr/share/recipe/sources/levitate/` is a
 copy at the pinned commit, with its published `index.json`, that Recipe uses
 until it has fetched a newer index. It sits alongside the builder's selected
-pinned Ginux root image and static launcher. Root's override catalog and active package profile
-remain under `/var/lib/recipe`, shared across A/B system updates. Login shells
-add both the system and per-user Recipe profile's `bin` to `PATH`.
+pinned Ginux root image and static launcher. Root's override catalog remains under `/var/lib/recipe`. On immutable A/B
+installs, Recipe package commands target recab's inactive preparation, and system
+software is selected under the booted slot's `/usr/lib/recipe/profile`. Login
+shells add that profile and ordinary users' independent profiles to `PATH`.
 
 The builder always passes `--no-activate`: it consumes recipe outputs to compose
 images, without activating packages on the build host. The user catalog is not
@@ -133,3 +134,37 @@ Licensed under either of:
 - MIT license ([LICENSE-MIT](LICENSE-MIT) or http://opensource.org/licenses/MIT)
 
 at your option.
+
+## Release manifest
+
+Release assembly emits `release.json`, `system-inventory.json` and, when
+configured, `release.sig` beside its existing outputs. The ISO carries the exact
+same manifest/inventory/signature as the online bundle; payload members use its
+`boot/` and `live/` layout. The image writer records intended metadata from the
+actual tar input and binds it to the resulting EROFS image. Release emission
+refuses missing/stale image provenance, a changed prepared tree or mismatched
+kernel, modules, initramfs, identity or runtime protocol.
+
+To emit/verify metadata for **already produced** artifacts, without starting a
+system build:
+
+```sh
+distro-builder --repo-root /path/to/LevitateOS release manifest \
+  levitate base /path/to/prepared/rootfs-source /path/to/release
+```
+
+The release directory must contain the rootfs image, its image-writer provenance,
+`system-sources.sha256`, `boot/vmlinuz` and `boot/initramfs-installed.img`. The
+prepared tree must still match the image. An older image without provenance is
+not silently blessed by supplying matching filenames.
+
+Configure release ordering and optional source/trust in the variant's `[release]`
+contract. The checked-in development channels have no production endpoint/key.
+Signed emission requires `--signing-key /private/release.pk8`; full release
+assembly reads that explicit path from `RECAB_RELEASE_SIGNING_KEY`. The key must
+match the configured distribution public key. Key custody and actual online
+publishing remain release operations; P08 adds discovery/acquisition.
+
+The format and trust rules are in
+[the shared release contract](../contract/docs/releases.md). Full new distro,
+ISO and kernel builds have not been run for P07.

@@ -64,7 +64,11 @@ fn shared_tokens() -> [String; 5] {
 /// own quiet switches.
 fn quiet_tokens(init: InitSystem) -> &'static [&'static str] {
     match init {
-        InitSystem::Systemd => &["loglevel=3", "systemd.show_status=0", "rd.systemd.show_status=0"],
+        InitSystem::Systemd => &[
+            "loglevel=3",
+            "systemd.show_status=0",
+            "rd.systemd.show_status=0",
+        ],
         InitSystem::Openrc => &["loglevel=3"],
     }
 }
@@ -73,7 +77,11 @@ fn quiet_tokens(init: InitSystem) -> &'static [&'static str] {
 /// `root=LABEL=` before it): the shared tokens, the quiet ones (except for
 /// the debug role), then the role's word.
 pub fn kernel_cmdline(init: InitSystem, role: BootRole) -> Vec<String> {
-    let quiet: &[&str] = if role == BootRole::Debug { &[] } else { quiet_tokens(init) };
+    let quiet: &[&str] = if role == BootRole::Debug {
+        &[]
+    } else {
+        quiet_tokens(init)
+    };
     shared_tokens()
         .into_iter()
         .chain(quiet.iter().map(|token| token.to_string()))
@@ -91,7 +99,12 @@ const BUSYBOX_RECIPE: &str = "distro/builder/os-recipes/busybox-static.rhai";
 /// Builds `product`'s release ISO in `dir`, its release run's directory, with
 /// the kernel in `kernel` (`runs::kernel_dir`), and returns the ISO's path.
 /// Every step's error names the step and the product.
-pub fn assemble(variant: &Variant, product: ProductId, dir: &Path, kernel: &Path) -> Result<PathBuf> {
+pub fn assemble(
+    variant: &Variant,
+    product: ProductId,
+    dir: &Path,
+    kernel: &Path,
+) -> Result<PathBuf> {
     if !product.is_release() {
         bail!("{product} is prepared, not built into a release ISO");
     }
@@ -108,7 +121,10 @@ pub fn assemble(variant: &Variant, product: ProductId, dir: &Path, kernel: &Path
     let release = kernel_release(kernel).context(what)?;
     let modules = kernel.join(KERNEL_MODULES_DIR).join(&release);
     if !modules.is_dir() {
-        bail!("the {release} kernel has no modules at {}", modules.display());
+        bail!(
+            "the {release} kernel has no modules at {}",
+            modules.display()
+        );
     }
 
     let what = step("preparing the product");
@@ -141,6 +157,7 @@ pub fn assemble(variant: &Variant, product: ProductId, dir: &Path, kernel: &Path
     }
 
     let what = step("writing the rootfs image");
+    levitate_recipe::target::finalize(&rootfs).context("finalizing intended release metadata")?;
     let rootfs_image = dir.join(&names.rootfs);
     crate::build_erofs_default(&rootfs, &rootfs_image).context(what)?;
 
@@ -155,7 +172,11 @@ pub fn assemble(variant: &Variant, product: ProductId, dir: &Path, kernel: &Path
             busybox_path: busybox.clone(),
             output: initramfs_live.clone(),
             iso_label: identity.iso_label.clone(),
-            boot_banner: format!("{} {} initramfs starting...", identity.os_name, product.title()),
+            boot_banner: format!(
+                "{} {} initramfs starting...",
+                identity.os_name,
+                product.title()
+            ),
             gzip_level: recinit::DEFAULT_GZIP_LEVEL,
         },
         false,
@@ -184,13 +205,26 @@ pub fn assemble(variant: &Variant, product: ProductId, dir: &Path, kernel: &Path
     let overlay_image = dir.join(&names.overlay);
     crate::build_overlayfs_default(&prepared.overlay(dir), &overlay_image).context(what)?;
 
+    let what = step("publishing the installed-system release manifest");
+    let signing_key = std::env::var_os("RECAB_RELEASE_SIGNING_KEY").map(PathBuf::from);
+    let release_manifest = crate::release_manifest::write(
+        variant,
+        product.flavour(),
+        &rootfs,
+        dir,
+        &kernel.join(KERNEL_IMAGE_PATH),
+        &initramfs_installed,
+        signing_key.as_deref(),
+    )
+    .context(what)?;
+
     let what = step("writing the ISO");
     let iso = dir.join(names.iso(product));
     let menu = format!("{} {}", identity.os_name, product.title());
     let mut config = reciso::IsoConfig::new(
-        kernel.join(KERNEL_IMAGE_PATH),
+        release_manifest.inputs.kernel(),
         &initramfs_live,
-        &rootfs_image,
+        release_manifest.inputs.rootfs(),
         &identity.iso_label,
         &iso,
     );
@@ -213,9 +247,22 @@ pub fn assemble(variant: &Variant, product: ProductId, dir: &Path, kernel: &Path
         &identity.os_version,
     ));
     config.extra_files = vec![(
-        initramfs_installed,
+        release_manifest.inputs.initramfs(),
         recinit::live::INITRAMFS_INSTALLED_ISO_PATH.to_string(),
     )];
+    config.extra_files.push((
+        release_manifest.inputs.manifest_path(),
+        distro_contract::release::MANIFEST.into(),
+    ));
+    config.extra_files.push((
+        release_manifest.inputs.inventory_path(),
+        distro_contract::release::INVENTORY.into(),
+    ));
+    if let Some(signature) = release_manifest.inputs.signature_path() {
+        config
+            .extra_files
+            .push((signature, distro_contract::release::SIGNATURE.into()));
+    }
     config.systemd_boot = rootfs.join(SYSTEMD_BOOT_EFI);
     let iso = reciso::create_iso(&config, &|message| println!("  {message}")).context(what)?;
 
@@ -245,7 +292,10 @@ fn add_modules(rootfs: &Path, modules: &Path, release: &str) -> Result<()> {
     }
     crate::copy_dir_recursive(modules, &dest)?;
     if !dest.join("modules.dep").is_file() {
-        bail!("the kernel's modules {} have no modules.dep", modules.display());
+        bail!(
+            "the kernel's modules {} have no modules.dep",
+            modules.display()
+        );
     }
     Ok(())
 }
@@ -253,9 +303,14 @@ fn add_modules(rootfs: &Path, modules: &Path, release: &str) -> Result<()> {
 /// The static busybox the initramfs run, from its recipe.
 pub fn busybox(variant: &Variant) -> Result<PathBuf> {
     let repo = &variant.repo_root;
-    Invocation::new(repo, "install", repo.join(BUSYBOX_RECIPE), recipe_work_dir(repo, &variant.id)?)
-        .run()?
-        .file("busybox")
+    Invocation::new(
+        repo,
+        "install",
+        repo.join(BUSYBOX_RECIPE),
+        recipe_work_dir(repo, &variant.id)?,
+    )
+    .run()?
+    .file("busybox")
 }
 
 /// Lists the run directory's files with their sizes.
@@ -265,14 +320,20 @@ fn print_summary(dir: &Path) -> Result<()> {
         let entry = entry?;
         let metadata = entry.metadata()?;
         if metadata.is_file() {
-            files.push((entry.file_name().to_string_lossy().into_owned(), metadata.len()));
+            files.push((
+                entry.file_name().to_string_lossy().into_owned(),
+                metadata.len(),
+            ));
         }
     }
     files.sort();
     let width = files.iter().map(|(name, _)| name.len()).max().unwrap_or(0);
     println!("Artifacts in {}:", dir.display());
     for (name, bytes) in files {
-        println!("  {name:<width$}  {:>8.1} MiB", bytes as f64 / (1024.0 * 1024.0));
+        println!(
+            "  {name:<width$}  {:>8.1} MiB",
+            bytes as f64 / (1024.0 * 1024.0)
+        );
     }
     Ok(())
 }

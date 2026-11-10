@@ -8,6 +8,7 @@ pub use pipeline::kernel;
 pub(crate) mod pipeline;
 pub mod product;
 pub mod release;
+pub mod release_manifest;
 pub mod tui_apps;
 pub(crate) mod tui_binary;
 pub(crate) mod desktop_apps;

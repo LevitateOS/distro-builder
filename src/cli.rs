@@ -11,6 +11,14 @@ use distro_contract::ProductId;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
+    /// Describe and verify existing release artifacts; never build them.
+    ReleaseManifest {
+        distro: String,
+        flavour: Flavour,
+        root: PathBuf,
+        directory: PathBuf,
+        signing_key: Option<PathBuf>,
+    },
     /// Build `product`'s release ISO for `distro`, after any parent release it lacks.
     ReleaseBuild { product: ProductId, distro: String },
     /// Prepare `product`'s rootfs source and overlay for `distro` in `output`.
@@ -41,6 +49,7 @@ pub fn usage() -> String {
     format!(
         "Usage: distro-builder --repo-root <dir> <command>\n\n\
          Commands:\n  \
+         release manifest <distro> <base|desktop> <root> <dir> [--signing-key PKCS8]  verify/package existing release artifacts\n  \
          release build <product> <distro>                   build a release ISO ({releases})\n  \
          product prepare <product> <distro> <dir>           prepare a product's rootfs and overlay ({products})\n  \
          transform build product-erofs <prepared_dir>       write a prepared product's EROFS images\n  \
@@ -59,6 +68,25 @@ impl Command {
             args.extend(words.iter().map(|word| word.as_ref().to_os_string()));
         };
         match self {
+            Self::ReleaseManifest {
+                distro,
+                flavour,
+                root,
+                directory,
+                signing_key,
+            } => {
+                push(&[
+                    &"release",
+                    &"manifest",
+                    distro,
+                    &flavour.as_str(),
+                    root,
+                    directory,
+                ]);
+                if let Some(key) = signing_key {
+                    push(&[&"--signing-key", key]);
+                }
+            }
             Self::ReleaseBuild { product, distro } => {
                 push(&[&"release", &"build", &product.name(), distro])
             }
@@ -127,6 +155,20 @@ pub fn parse(args: &[String]) -> Result<(PathBuf, Command), Usage> {
     };
     let words: Vec<&str> = rest.iter().map(String::as_str).collect();
     let command = match words.as_slice() {
+        ["release", "manifest", id, flavour, root, dir, flags @ ..] => {
+            let signing_key = match flags {
+                [] => None,
+                ["--signing-key", key] => Some(PathBuf::from(key)),
+                _ => return usage("expected --signing-key <PKCS8>".into()),
+            };
+            Command::ReleaseManifest {
+                distro: distro(id)?,
+                flavour: flavour.parse().map_err(Usage)?,
+                root: root.into(),
+                directory: dir.into(),
+                signing_key,
+            }
+        }
         ["release", "build", name, id] => {
             let product = product(name)?;
             if !product.is_release() {
@@ -153,11 +195,17 @@ pub fn parse(args: &[String]) -> Result<(PathBuf, Command), Usage> {
             output: output.into(),
         },
         ["artifact", "preseed-rootfs-source", id, flags @ ..]
-            if flags.iter().all(|flag| ["--desktop", "--refresh"].contains(flag)) =>
+            if flags
+                .iter()
+                .all(|flag| ["--desktop", "--refresh"].contains(flag)) =>
         {
             Command::PreseedRootfsSource {
                 distro: distro(id)?,
-                flavour: if flags.contains(&"--desktop") { Flavour::Desktop } else { Flavour::Base },
+                flavour: if flags.contains(&"--desktop") {
+                    Flavour::Desktop
+                } else {
+                    Flavour::Base
+                },
                 refresh: flags.contains(&"--refresh"),
             }
         }

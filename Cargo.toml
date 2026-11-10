@@ -6,6 +6,7 @@ description = "Shared infrastructure for building LevitateOS and AcornOS ISOs"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
+recab = { path = "../../tools/recab" }
 recqemu = { path = "../../tools/recqemu" }
 anyhow = "1.0"
 distro-contract = { path = "../contract" }

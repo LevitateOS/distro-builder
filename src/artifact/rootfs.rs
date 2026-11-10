@@ -69,15 +69,41 @@ pub fn create_erofs(
     let mut archive = tempfile::NamedTempFile::new_in(output.parent().unwrap_or(Path::new(".")))?;
     levitate_recipe::target::write_tar(source_dir, archive.as_file_mut())?;
     archive.as_file().sync_all()?;
+    use std::os::fd::AsRawFd;
+    let pinned_archive = format!(
+        "/proc/{}/fd/{}",
+        std::process::id(),
+        archive.as_file().as_raw_fd()
+    );
     Cmd::new("mkfs.erofs")
         .args(["-z", &compression_arg])
         .args(["-C", &chunk_size.to_string()])
         .arg("--tar=f")
         .arg("-T0")
         .arg(output)
-        .arg(archive.path())
+        .arg(pinned_archive)
         .error_msg("mkfs.erofs importing the rootfs tar")
         .run_interactive()?;
+
+    // Record the exact image-writer input, preserving logical target metadata.
+    // Release emission uses this binding without needing the host kernel to
+    // understand the target kernel's EROFS compression algorithms.
+    use std::io::{Seek, SeekFrom};
+    archive.as_file_mut().seek(SeekFrom::Start(0))?;
+    let inventory = distro_contract::release::SystemInventory::from_tar(archive.as_file_mut())?;
+    use sha2::{Digest, Sha256};
+    let mut image = fs::File::open(output)?;
+    let mut hash = Sha256::new();
+    std::io::copy(&mut image, &mut hash)?;
+    let provenance = distro_contract::release::RootfsProvenance {
+        schema_version: 1,
+        rootfs_sha256: format!("{:x}", hash.finalize()),
+        inventory,
+    };
+    distro_contract::runs::write_atomic(
+        &distro_contract::release::provenance_path(output),
+        &serde_json::to_vec(&provenance)?,
+    )?;
 
     // Print size
     let metadata = fs::metadata(output)?;

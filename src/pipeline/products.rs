@@ -156,6 +156,9 @@ pub fn prepare_product(variant: &Variant, product: ProductId, dir: &Path) -> Res
 fn prepare_system(variant: &Variant, flavour: Flavour, rootfs: &Path) -> Result<()> {
     let source = materialize_rootfs_source(variant, flavour)?;
     levitate_recipe::target::merge_tree(&source, rootfs)?;
+    let update_source=rootfs.join(distro_contract::release::SOURCE_CONFIG);
+    fs::create_dir_all(update_source.parent().unwrap())?;
+    fs::write(&update_source,serde_json::to_vec(&variant.contract.release)?)?;
     let role = rootfs.join(recinit::live::PAYLOAD_ROLE_FILE);
     fs::write(&role, format!("{}\n", recinit::live::ROLE_ROOTFS))
         .with_context(|| format!("writing {}", role.display()))?;

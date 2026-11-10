@@ -133,10 +133,17 @@ fn recipe_runtime(ctx) {
     let profile = join_path(root, "etc/profile.d/recipe.sh");
     mkdir(dirname(profile));
     write_file(profile,
-        "# Recipe-managed software persists independently of the OS image.\n" +
-        "case \":$PATH:\" in *:/var/lib/recipe/profile/bin:*) ;; *) PATH=\"/var/lib/recipe/profile/bin:$PATH\" ;; esac\n" +
-        "recipe_user_bin=\"${XDG_DATA_HOME:-$HOME/.local/share}/recipe/profile/bin\"\n" +
-        "case \":$PATH:\" in *:\"$recipe_user_bin\":*) ;; *) PATH=\"$recipe_user_bin:$PATH\" ;; esac\n" +
+        "# System software belongs to the booted generation; user profiles remain independent.\n" +
+        "if [ -f /usr/lib/recab/immutable ]; then\n" +
+        "    case \":$PATH:\" in *:/usr/lib/recipe/profile/bin:*) ;; *) PATH=\"/usr/lib/recipe/profile/bin:$PATH\" ;; esac\n" +
+        "    recipe_user_bin=\n" +
+        "elif [ \"$(id -u)\" -eq 0 ]; then\n" +
+        "    recipe_user_bin=/var/lib/recipe/profile/bin\n" +
+        "else\n" +
+        "    recipe_user_bin=\"${XDG_DATA_HOME:-$HOME/.local/share}/recipe/profile/bin\"\n" +
+        "fi\n" +
+        "if [ \"$(id -u)\" -ne 0 ]; then recipe_user_bin=\"${XDG_DATA_HOME:-$HOME/.local/share}/recipe/profile/bin\"; fi\n" +
+        "if [ -n \"$recipe_user_bin\" ]; then case \":$PATH:\" in *:\"$recipe_user_bin\":*) ;; *) PATH=\"$recipe_user_bin:$PATH\" ;; esac; fi\n" +
         "export PATH\nunset recipe_user_bin\n");
     chmod(profile, 0o644);
 }

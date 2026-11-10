@@ -5,18 +5,19 @@ use distro_builder::product::ProductId;
 
 use distro_contract::runs;
 
-/// Build the releases `product` is built on that have no rootfs yet.
+/// Build the releases `product` is built on that are missing or were built
+/// from older sources than the checkout's.
 pub(crate) fn ensure_release_prerequisites(
     repo_root: &Path,
     distro_id: &str,
     product: ProductId,
 ) -> Result<()> {
     let variant = distro_contract::load(repo_root, distro_id)?;
-    let missing =
-        distro_builder::missing_parent_releases(repo_root, distro_id, &variant.contract, product)?;
-    for parent in missing {
+    let parents =
+        distro_builder::parent_releases_to_build(repo_root, distro_id, &variant.contract, product)?;
+    for parent in parents {
         println!(
-            "[release:iso:{product}:{distro_id}] materializing missing parent release '{parent}'..."
+            "[release:iso:{product}:{distro_id}] building parent release '{parent}' (missing, or built from older sources)..."
         );
         build_one(repo_root, distro_id, parent)?;
     }

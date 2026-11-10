@@ -18,6 +18,7 @@ use crate::pipeline::io::{create_empty_overlay_dir, extract_erofs_rootfs};
 use crate::pipeline::live_tools::{add_tools, ToolLayer};
 use crate::pipeline::overlay::{create_live_overlay, LiveSession};
 use crate::pipeline::source::{materialize_rootfs_source, os_release};
+use crate::pipeline::sources;
 
 /// The prepared product's rootfs tree, beside its overlay tree.
 const ROOTFS_SOURCE_DIR: &str = "rootfs-source";
@@ -90,12 +91,24 @@ pub fn prepare_product(variant: &Variant, product: ProductId, dir: &Path) -> Res
 
     let rootfs = create_empty_overlay_dir(dir, ROOTFS_SOURCE_DIR)?;
     let flavour = product.flavour();
+    // The sources the system is built from now; a parent's rootfs must have
+    // been built from the same.
+    let current = sources::system_sources_digest(&variant.repo_root, &variant.id)
+        .context("fingerprinting the system's sources")?;
     match product.parent() {
         None => prepare_system(variant, flavour, &rootfs)
             .with_context(|| format!("preparing the {} {flavour} system rootfs", variant.id))?,
         Some(parent) => {
             let image = crate::parent_rootfs_image(&variant.repo_root, &variant.id, contract, product)?
                 .with_context(|| format!("{product} has no parent rootfs image"))?;
+            let built_from = image.parent().and_then(sources::recorded);
+            if built_from.as_deref() != Some(current.as_str()) {
+                bail!(
+                    "the latest {parent} release ({}) was built from older sources than the checkout's \
+                     (its tools, recipes, locks or TUI apps changed since); rebuild {parent}",
+                    image.display()
+                );
+            }
             extract_erofs_rootfs(&image, &rootfs)
                 .with_context(|| format!("extracting the {parent} rootfs {}", image.display()))?;
             check_installable(&rootfs, contract, flavour).with_context(|| {
@@ -121,6 +134,7 @@ pub fn prepare_product(variant: &Variant, product: ProductId, dir: &Path) -> Res
         .with_context(|| format!("writing the install screen for {}", variant.id))?;
     }
     check_live_only(&overlay, &rootfs)?;
+    sources::record(dir, &current)?;
 
     let prepared = PreparedProduct {
         product: product.name().to_string(),

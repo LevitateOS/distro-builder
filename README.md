@@ -29,11 +29,21 @@ Ownership and output locations across the workspace are in the root
 ## Recipe and product verification
 
 The builder links the current `levitate-recipe` library and normally builds its
-CLI from that same workspace source. `RECIPE_BIN` explicitly selects a prepared
-CLI; select its matching `RECIPE_WORKER_BIN` too. The launcher variables forwarded
-to Recipe are `GINUX_BIN`, `GINUX_ROOT`, `GINUX_ROOTFS`, `RECIPE_WORKER_BIN` and
-`RECIPE_FRAME_TIMEOUT_SECS`. Other ambient `RECIPE_*`/`GINUX_*` controls are
-removed. The maintained Ginux/Recipe source pair is recorded in
+CLI from that same workspace source (`RECIPE_BIN` explicitly selects a prepared
+CLI). It builds Ginux's launcher from `tools/ginux` on first use in each run and
+gives every invocation that launcher as `GINUX_BIN` and the CLI it runs as
+`RECIPE_WORKER_BIN`; ambient values of those two are ignored (and logged), so a
+build never runs an older launcher or worker than the checkout. `GINUX_ROOT`,
+`GINUX_ROOTFS` and `RECIPE_FRAME_TIMEOUT_SECS` are forwarded; other ambient
+`RECIPE_*`/`GINUX_*` controls are removed.
+
+Each release records `system-sources.sha256` beside its rootfs: the digest of
+every source its system rootfs is built from (the builder, contract, profile,
+variant, TUI apps and the rootfs tools' crate closures, uncommitted edits
+included). A release build first rebuilds every parent product that is missing
+or whose recorded digest differs from the checkout's, and preparing a product
+refuses such a parent, so live-boot and live-tools always carry the current
+system and tools. The maintained Ginux/Recipe source pair is recorded in
 `docs/ginux-contributions/delivery-sources.json` at the repository root. New local
 consumer corrections still need integration and final-combination acceptance;
 the contribution queue records their disposition.

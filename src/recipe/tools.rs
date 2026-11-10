@@ -187,6 +187,36 @@ fn locked_packages(lock: &str) -> Result<BTreeSet<(String, String, String)>> {
         .collect()
 }
 
+/// The crate directories (relative to the repository) `package`'s source
+/// closure takes: its own and every local dependency's, as `copy_crate` walks
+/// them.
+pub(crate) fn tool_crate_dirs(repo: &Path, package: &str) -> Result<BTreeSet<PathBuf>> {
+    let (_, relative, _) = tool(package)?;
+    let repo = repo.canonicalize()?;
+    let root_manifest: toml::Value = toml::from_str(&fs::read_to_string(repo.join("Cargo.toml"))?)?;
+    let workspace_dependencies = root_manifest
+        .get("workspace")
+        .and_then(|w| w.get("dependencies"))
+        .and_then(toml::Value::as_table);
+    let mut dirs = BTreeSet::new();
+    let mut todo = vec![repo.join(relative)];
+    while let Some(dir) = todo.pop() {
+        let original = dir.canonicalize()?;
+        let relative = original
+            .strip_prefix(&repo)
+            .context("local tool dependency is outside the selected repository")?
+            .to_owned();
+        if !dirs.insert(relative) {
+            continue;
+        }
+        let mut manifest: toml::Value = toml::from_str(&fs::read_to_string(original.join("Cargo.toml"))?)?;
+        let table = manifest.as_table_mut().context("crate manifest must be a table")?;
+        table.remove("dev-dependencies");
+        collect_local_dependencies(table, &original, &repo, workspace_dependencies, &mut todo)?;
+    }
+    Ok(dirs)
+}
+
 fn copy_crate(
     repo: &Path,
     relative: &Path,

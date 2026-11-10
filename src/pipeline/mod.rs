@@ -6,3 +6,4 @@ pub(crate) mod paths;
 pub(crate) mod planner;
 pub(crate) mod products;
 pub(crate) mod source;
+pub(crate) mod sources;

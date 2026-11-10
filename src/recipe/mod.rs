@@ -21,16 +21,18 @@ use std::sync::OnceLock;
 
 use crate::process::Cmd;
 
-/// Recipe's own settings for its launcher and worker, passed to every invocation as
-/// the builder got them. Every other `RECIPE_*`/`GINUX_*` variable is removed, so an
-/// ambient one (a worker's `RECIPE_WORKER`, say) cannot change how Recipe runs.
-const LAUNCHER_ENV: &[&str] = &[
-    "GINUX_BIN",
-    "GINUX_ROOT",
-    "GINUX_ROOTFS",
-    "RECIPE_WORKER_BIN",
-    "RECIPE_FRAME_TIMEOUT_SECS",
-];
+/// Recipe's settings for its image and frame timeout, passed to every invocation as
+/// the builder got them. The launcher (`GINUX_BIN`) and the worker
+/// (`RECIPE_WORKER_BIN`) are the builder's own: the Ginux it builds from
+/// `tools/ginux` and the Recipe binary it runs, so an invocation never runs an older
+/// launcher or worker than the checkout. Every other `RECIPE_*`/`GINUX_*` variable
+/// is removed, so an ambient one (a worker's `RECIPE_WORKER`, say) cannot change how
+/// Recipe runs.
+const LAUNCHER_ENV: &[&str] = &["GINUX_ROOT", "GINUX_ROOTFS", "RECIPE_FRAME_TIMEOUT_SECS"];
+
+/// The Ginux crate's directory, the cargo target it builds for, and its binary.
+const GINUX_DIR: &str = "tools/ginux";
+const GINUX_TARGET: &str = "x86_64-unknown-linux-gnu";
 
 /// The `recipe` binary: `RECIPE_BIN` if set, else the workspace build (built on
 /// first use).
@@ -51,6 +53,32 @@ pub fn binary(repo: &Path) -> Result<&'static Path> {
         }
         None => build(repo)?,
     };
+    Ok(BINARY.get_or_init(|| path))
+}
+
+/// The Ginux launcher every invocation runs: `tools/ginux`'s `ginux` binary,
+/// built (release, as its Makefile builds it) on first use in each process, so it
+/// is always the checkout's.
+pub fn ginux_binary(repo: &Path) -> Result<&'static Path> {
+    static BINARY: OnceLock<PathBuf> = OnceLock::new();
+    if let Some(path) = BINARY.get() {
+        return Ok(path);
+    }
+    let dir = repo.join(GINUX_DIR);
+    let target_dir = dir.join("target");
+    eprintln!("  building ginux (cargo build -p ginux-init --bin ginux --release in {GINUX_DIR})");
+    Cmd::new("cargo")
+        .args(["build", "-q", "-p", "ginux-init", "--bin", "ginux", "--release", "--target", GINUX_TARGET])
+        .arg("--target-dir")
+        .arg(&target_dir)
+        .dir(&dir)
+        .stdout_to_stderr()
+        .error_msg("building ginux")
+        .run_interactive()?;
+    let path = target_dir.join(GINUX_TARGET).join("release/ginux");
+    if !path.is_file() {
+        bail!("cargo built ginux, but it is not at '{}'", path.display());
+    }
     Ok(BINARY.get_or_init(|| path))
 }
 
@@ -184,6 +212,15 @@ impl<'a> Invocation<'a> {
             let control = name.starts_with("RECIPE_") || name.starts_with("GINUX_");
             if control && !LAUNCHER_ENV.contains(&name.as_ref()) {
                 cmd = cmd.env_remove(&key);
+            }
+        }
+        let ginux = ginux_binary(self.repo)?;
+        cmd = cmd.env("GINUX_BIN", ginux).env("RECIPE_WORKER_BIN", bin);
+        for (name, value) in [("GINUX_BIN", ginux), ("RECIPE_WORKER_BIN", bin)] {
+            if let Some(ambient) = std::env::var_os(name).filter(|ambient| Path::new(ambient) != value) {
+                eprintln!("    {name}={} (the builder's own; ignoring {})", value.display(), Path::new(&ambient).display());
+            } else {
+                eprintln!("    {name}={}", value.display());
             }
         }
         for name in LAUNCHER_ENV {

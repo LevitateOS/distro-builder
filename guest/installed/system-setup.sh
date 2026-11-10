@@ -137,6 +137,13 @@ case "${1:-}" in
             *) echo "unsupported init system: $init" >&2; exit 2 ;;
         esac
         ;;
+    host-keys)
+        case "$init" in
+            systemd) [ ! -e /etc/systemd/system/multi-user.target.wants/sshd.service ] || ssh-keygen -A ;;
+            openrc) [ ! -e /etc/runlevels/default/sshd ] || ssh-keygen -A ;;
+            *) echo "unsupported init system: $init" >&2; exit 2 ;;
+        esac
+        ;;
     service)
         case "$2" in sshd|sshd.service) ssh-keygen -A || exit 1 ;; esac
         case "$init" in
@@ -145,5 +152,5 @@ case "${1:-}" in
             *) echo "unsupported init system: $init" >&2; exit 2 ;;
         esac
         ;;
-    *) echo "usage: recipe-system-setup timezone|locale|keymap|x11-keyboard|hostname|user|autologin|machine-id|service ..." >&2; exit 2 ;;
+    *) echo "usage: recipe-system-setup timezone|locale|keymap|x11-keyboard|hostname|user|autologin|machine-id|host-keys|service ..." >&2; exit 2 ;;
 esac

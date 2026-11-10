@@ -22,11 +22,11 @@ fn _asset(spec, target) {
     let assets = #{
         levitate: #{
             repo: "LevitateOS/leviso",
-            sha256: "4c44c04db8cc2b5b495edd8d61f0783f1f6863b37b28083a4172249d63e7f583",
+            sha256: "beff83564b5eba188c62ba780e94e8e4c9b51baa8e708bb7b24c841caf7b67b2",
         },
         acorn: #{
             repo: "LevitateOS/AcornOS",
-            sha256: "60c86254f02e054fe6223e7792d55fce56c3d0823e6293d2c9aa19ad802a6d18",
+            sha256: "c197cb31a695f4dd9f7aa4e95c4f962bafafd9a322beb26092f2f705b58bc019",
         },
     };
     if !assets.contains(target) {

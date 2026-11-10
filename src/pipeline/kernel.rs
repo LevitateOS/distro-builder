@@ -163,6 +163,19 @@ pub fn install(variant: &Variant, source: &Source, force: bool) -> Result<String
     if let Some(target) = &target {
         inputs.push(("target", target));
     }
+    // The bundle `cargo xtask kernel publish` left on this machine: the recipe
+    // takes it as `kernel_archive` (checked against the pinned digest) instead
+    // of downloading the same file.
+    let release = pin(variant)?.release;
+    let published = repo_root
+        .join(".artifacts/kernel")
+        .join(&variant.id)
+        .join(&release)
+        .join("dist")
+        .join(format!("{}-{release}-runtime.tar.xz", variant.id));
+    if matches!(source, Source::Prebuilt) && published.is_file() {
+        inputs.push(("kernel_archive", &published));
+    }
     let mut args: Vec<String> = Vec::new();
     let recipe = match source {
         Source::Prebuilt => {

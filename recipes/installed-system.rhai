@@ -469,16 +469,33 @@ fn desktop_system(root, inputs, init, display_manager) {
     graphical(root, init, display_manager);
 }
 
-// The system services the desktop's hardware needs that neither start at
-// boot by themselves nor on D-Bus demand (udisks, UPower, bolt and fwupd
-// start on demand): Bluetooth, the Avahi discovery that driverless printing
-// uses, CUPS and power profiles on systemd. OpenRC's desktop adds none yet.
-// A unit's Alias= names are linked as `systemctl enable` would, so D-Bus
-// activation (dbus-org.bluez, dbus-org.freedesktop.Avahi) finds the service.
+// The system services the desktop needs that neither start at boot by
+// themselves nor on D-Bus demand (udisks, UPower, bolt and fwupd start on
+// demand): Bluetooth, the Avahi discovery that driverless printing uses, CUPS,
+// the firewall, and power profiles on systemd. systemd starts the VM guest
+// agents from their udev rules when the VM has their port; OpenRC runs
+// `vm-guest-agents`, which starts them only then, so real hardware shows no
+// failed service. A systemd unit's Alias= names are linked as `systemctl
+// enable` would, so D-Bus activation (dbus-org.bluez,
+// dbus-org.freedesktop.Avahi) finds the service.
 fn desktop_services(root, init) {
     check_init(init);
-    if init != "systemd" { return; }
-    for service in ["bluetooth", "avahi-daemon", "cups", "power-profiles-daemon"] {
+    firewall_zone(root);
+    if init == "openrc" {
+        for service in ["bluetooth", "avahi-daemon", "cupsd", "firewalld", "qemu-guest-agent", "spice-vdagentd"] {
+            if !is_file(join_path(root, service_file(init, service))) { throw "the desktop system lacks the OpenRC service " + service; }
+        }
+        for service in ["bluetooth", "avahi-daemon", "cupsd", "firewalld"] { enable(root, init, service); }
+        let agents = "#!/sbin/openrc-run\ndescription=\"Start the VM guest agents when the machine is a VM with their ports\"\n\n";
+        agents += "depend() {\n    need localmount\n    after udev-settle\n}\n\nstart() {\n";
+        agents += "    [ -e /dev/virtio-ports/org.qemu.guest_agent.0 ] && rc-service qemu-guest-agent start\n";
+        agents += "    [ -e /dev/virtio-ports/com.redhat.spice.0 ] && rc-service spice-vdagentd start\n";
+        agents += "    return 0\n}\n";
+        put(root, "etc/init.d/vm-guest-agents", agents, 0o755);
+        enable(root, init, "vm-guest-agents");
+        return;
+    }
+    for service in ["bluetooth", "avahi-daemon", "cups", "firewalld", "power-profiles-daemon"] {
         let file = service_file(init, service);
         if !is_file(join_path(root, file)) { throw "the desktop system lacks the systemd service " + service; }
         enable(root, init, service);
@@ -490,6 +507,18 @@ fn desktop_services(root, init) {
             }
         }
     }
+}
+
+// The firewall's default zone, public, blocks every incoming connection but
+// ssh (whose server is off unless the user enables it) and DHCPv6 replies;
+// the desktop's version also lets mDNS answers in, which Avahi needs to find
+// driverless printers and other devices on the network.
+fn firewall_zone(root) {
+    if !is_file(join_path(root, "usr/lib/firewalld/zones/public.xml")) { throw "the desktop packages lack firewalld's public zone"; }
+    let zone = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<zone>\n  <short>Public</short>\n";
+    zone += "  <description>Incoming connections are refused, except replies, ssh, DHCPv6 and mDNS.</description>\n";
+    zone += "  <service name=\"ssh\"/>\n  <service name=\"dhcpv6-client\"/>\n  <service name=\"mdns\"/>\n  <forward/>\n</zone>\n";
+    put(root, "etc/firewalld/zones/public.xml", zone, 0o644);
 }
 
 // Firefox as the OS's browser: the distribution it names is the OS (its
@@ -781,6 +810,14 @@ fn desktop_caches(root, libc) {
     if is_dir(mime) { cache_program(root, libc, ["update-mime-database"], [mime]); }
     if is_dir(join_path(root, "usr/share/fonts")) {
         cache_program(root, libc, ["fc-cache-64", "fc-cache"], ["--sysroot=" + root, "--system-only"]);
+        // The X server's core font directories (bitmap fonts) are indexed
+        // by fonts.scale and fonts.dir, as mkfontdir would.
+        for dir in shell_output("ls '" + join_path(root, "usr/share/fonts") + "'").split("\n") {
+            let path = join_path(root, "usr/share/fonts/" + trim(dir));
+            if trim(dir) == "" || trim(dir) == "encodings" || tree_files(root, "usr/share/fonts/" + trim(dir), ".pcf.gz").is_empty() { continue; }
+            cache_program(root, libc, ["mkfontscale"], [path]);
+            cache_program(root, libc, ["mkfontscale"], ["-b", "-s", "-l", path]);
+        }
     }
     let icons = join_path(root, "usr/share/icons");
     if is_dir(icons) {

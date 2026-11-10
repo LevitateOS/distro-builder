@@ -90,6 +90,19 @@ fn package_effects(ctx, root) {
         system_user(root, "sddm", "video", "/var/lib/sddm");
     }
     if names.contains("pipewire") { system_group(root, "pipewire"); }
+    // Avahi's avahi (avahi-daemon drops to it), CUPS's lpadmin group (lp
+    // comes with alpine-baselayout), libgphoto2's camera group, and SANE's
+    // scanner group with the saned network scanning account in it.
+    if names.contains("avahi") { system_account(root, "avahi", "/dev/null"); }
+    if names.contains("cups") { system_group(root, "lpadmin"); }
+    if names.contains("libgphoto2") { system_group(root, "camera"); }
+    if names.contains("sane") { system_group(root, "scanner"); }
+    if names.contains("sane-saned") { system_user(root, "saned", "scanner", "/run/saned"); }
+    // pinentry's script points /usr/bin/pinentry at the curses one when no
+    // graphical one is installed.
+    if names.contains("pinentry") && !exists(join_path(root, "usr/bin/pinentry")) {
+        system::link(root, "usr/bin/pinentry", "pinentry-curses");
+    }
 }
 
 // The lowest free system id (adduser -S/addgroup -S: from 100).

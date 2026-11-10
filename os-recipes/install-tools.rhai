@@ -73,11 +73,12 @@ fn renameat2_object(work) {
     object
 }
 
-// Recipe's state, as root runs it: its recipes, retained state and image
-// cache live on /var, which both A/B slots share, so what it installed
-// survives an update. Recipe's defaults are under root's home, which the
-// image replaces, so they point there. Every directory of this tree replaces
-// the rootfs's metadata when merged, so root's home keeps a private mode.
+// Root's recipe catalog, retained state and image cache live on /var, shared
+// by both A/B slots, so these directories survive a system update. This does
+// not activate packages or preserve published outputs elsewhere. Recipe's
+// defaults point here from root's home, which the image replaces. Every
+// directory of this tree replaces the rootfs's metadata when merged, so root's
+// home keeps a private mode.
 fn recipe_state(root) {
     for dir in [["var/lib/recipe", 0o755], ["var/lib/recipe/recipes", 0o755],
                 ["var/lib/recipe/state", 0o700], ["var/cache/recipe", 0o700],

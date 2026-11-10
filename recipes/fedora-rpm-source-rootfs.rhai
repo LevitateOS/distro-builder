@@ -7,7 +7,7 @@
 // `desktop_rpms` input) into the same tree, so every step below and the
 // installed-system policy run over base and desktop packages alike.
 const RECIPE_API = 2;
-const NEEDS = #{ inputs: #{ rpms: "directory", desktop_rpms: "directory?", capabilities: "file", system_setup: "file", os_release: "file", admin_rule_file: "file", admin_rule: "file", display_manager: "file?", wallpaper_light: "file?", wallpaper_dark: "file?" }, outputs: #{ rootfs: "directory" }, memory_mib: 8192, storage_max_objects: 196608 };
+const NEEDS = #{ inputs: #{ rpms: "directory", desktop_rpms: "directory?", capabilities: "file", system_setup: "file", os_release: "file", admin_rule_file: "file", admin_rule: "file", display_manager: "file?", wallpaper_light: "file?", wallpaper_dark: "file?", logo_ink: "file?", logo_paper: "file?", logo_micro_ink: "file?", logo_micro_paper: "file?" }, outputs: #{ rootfs: "directory" }, memory_mib: 8192, storage_max_objects: 196608 };
 import "sources/levitate-rpm-lock.rhai" as lock;
 import "sources/levitate-rpm-desktop-lock.rhai" as desktop_lock;
 import "installed-system.rhai" as system;

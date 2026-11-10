@@ -7,7 +7,7 @@
 // step below and the installed-system policy run over base and desktop
 // packages alike.
 const RECIPE_API = 2;
-const NEEDS = #{ inputs: #{ apks: "directory", desktop_apks: "directory?", capabilities: "file", system_setup: "file", os_release: "file", admin_rule_file: "file", admin_rule: "file", display_manager: "file?", wallpaper_light: "file?", wallpaper_dark: "file?" }, outputs: #{ rootfs: "directory" }, memory_mib: 4096, storage_max_objects: 131072 };
+const NEEDS = #{ inputs: #{ apks: "directory", desktop_apks: "directory?", capabilities: "file", system_setup: "file", os_release: "file", admin_rule_file: "file", admin_rule: "file", display_manager: "file?", wallpaper_light: "file?", wallpaper_dark: "file?", logo_ink: "file?", logo_paper: "file?", logo_micro_ink: "file?", logo_micro_paper: "file?" }, outputs: #{ rootfs: "directory" }, memory_mib: 4096, storage_max_objects: 131072 };
 import "sources/acorn-apk-lock.rhai" as lock;
 import "sources/acorn-apk-desktop-lock.rhai" as desktop_lock;
 import "installed-system.rhai" as system;

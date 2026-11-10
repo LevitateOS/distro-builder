@@ -76,7 +76,7 @@ pub fn materialize_rootfs_source(variant: &Variant, flavour: Flavour) -> Result<
     let mut inputs = BTreeMap::new();
     // What the system recipe installs from the builder: the setup program
     // and the system's identity; the desktop system also starts its
-    // display manager and shows the variant's wallpapers.
+    // display manager and shows the variant's branding.
     let rendered = work.join(format!("builder-inputs{suffix}"));
     fs::create_dir_all(&rendered)
         .with_context(|| format!("creating {}", rendered.display()))?;
@@ -97,7 +97,7 @@ pub fn materialize_rootfs_source(variant: &Variant, flavour: Flavour) -> Result<
         add_input(&mut inputs, name, path)?;
     }
     if flavour == Flavour::Desktop {
-        for (name, file) in distro_contract::WALLPAPERS {
+        for (name, file) in distro_contract::BRANDING {
             add_input(&mut inputs, name, variant.path(file))?;
         }
     }

@@ -454,12 +454,59 @@ fn apply(root, inputs, init) {
 // would have done (their caches; their accounts are the backend's
 // package_effects), the user session's services, and the boot into the
 // display manager, which takes the first virtual console (`login_consoles`),
-// and the variant's wallpapers, on the desktop and on the login screen.
+// and the variant's branding: its mark on the start button, and its
+// wallpapers on the desktop and on the login screen. The mark comes before
+// the caches, which index the icons.
 fn desktop_system(root, inputs, init, display_manager) {
+    start_button(root, inputs);
     desktop_caches(root, os_release_field(inputs, "REC_LIBC"));
     login_screen(root, inputs, display_manager, wallpaper(root, inputs));
     session_services(root, init);
     graphical(root, init, display_manager);
+}
+
+// The variant's mark (the builder's `logo_*` inputs) as the icon
+// distributor-logo-<os id> of the fallback icon theme, and on the start
+// button of the desktop (REC_DESKTOP), in the colour its panel needs.
+fn start_button(root, inputs) {
+    let icons = "usr/share/icons/hicolor/";
+    if !is_file(join_path(root, icons + "index.theme")) { throw "the desktop packages lack the hicolor icon theme"; }
+    let desktop = os_release_field(inputs, "REC_DESKTOP");
+    // Plasma's panel is dark under Fedora's look; LXQt's default theme has a light one.
+    let tone = if desktop == "plasma" { "paper" } else if desktop == "lxqt" { "ink" } else { throw "no start button for the desktop " + desktop };
+    let name = "distributor-logo-" + os_release_field(inputs, "ID");
+    let icon = icons + "scalable/apps/" + name + ".svg";
+    for file in [[icon, "logo_" + tone], [icons + "16x16/apps/" + name + ".svg", "logo_micro_" + tone]] {
+        mkdir(dirname(join_path(root, file[0])));
+        copy_file(join_path(inputs, file[1]), join_path(root, file[0]));
+        target_mode(root, file[0], 0o644);
+    }
+    if desktop == "plasma" {
+        // Fedora's looks set a new launcher's icon to "start-here", Fedora's
+        // logo (kde-settings-plasma); they set ours instead.
+        let fedora = "writeConfig(\"icon\", \"start-here\")";
+        let set = 0;
+        for look in ["fedora", "fedoradark", "fedoralight"] {
+            let scripts = "usr/share/plasma/look-and-feel/org.fedoraproject." + look + ".desktop/contents/plasmoidsetupscripts";
+            for script in tree_files(root, scripts, ".js") {
+                let text = read_file(script);
+                if !text.contains(fedora) { continue; }
+                text.replace(fedora, "writeConfig(\"icon\", \"" + name + "\")");
+                write_file(script, text);
+                set += 1;
+            }
+        }
+        if set == 0 { throw "the Plasma packages no longer set the launcher's icon to start-here"; }
+    } else {
+        // LXQt's menu button takes its icon from the LXQt theme unless the
+        // panel's settings give it its own.
+        let conf = "etc/xdg/lxqt/panel.conf";
+        let text = read_file_or_empty(join_path(root, conf));
+        let section = "[fancymenu]\n";
+        if !text.contains(section) { throw "the LXQt panel's settings have no fancymenu button"; }
+        text.replace(section, section + "ownIcon=true\nicon=/" + icon + "\n");
+        put(root, conf, text, 0o644);
+    }
 }
 
 // The variant's wallpapers (the builder's `wallpaper_light` and

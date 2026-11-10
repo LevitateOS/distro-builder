@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use crate::process::Cmd;
 
-/// The live tools `recipes/install-tools.rhai` builds: package, crate directory,
+/// The live tools `os-recipes/install-tools.rhai` builds: package, crate directory,
 /// binaries (the first is the package's default).
 const TOOLS: &[(&str, &str, &[&str])] = &[
     ("recpart", "tools/recpart", &["recpart"]),
@@ -353,7 +353,7 @@ pub(crate) fn build_tool_tree(
     let init = profile.init.as_str();
     let source = prepare_tool_source(repo, package)?;
     let recipe = repo
-        .join("distro/builder/recipes")
+        .join("distro/builder/os-recipes")
         .join("install-tools.rhai");
     // The tree depends on the init system (recab's trial service).
     let work = repo

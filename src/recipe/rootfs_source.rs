@@ -86,7 +86,7 @@ pub fn preseed_rootfs_source(
     })?;
     let required_outputs = levitate_recipe::needs::declaration(
         &recipe_path,
-        Some(&repo_root.join("distro/builder/recipes")),
+        Some(&repo_root.join("distro/builder/os-recipes")),
     )?
     .needs
     .outputs;
@@ -146,7 +146,7 @@ pub(crate) fn preseed_inputs(
 ) -> Result<BTreeMap<String, PathBuf>> {
     let required = levitate_recipe::needs::declaration(
         recipe,
-        Some(&repo.join("distro/builder/recipes")),
+        Some(&repo.join("distro/builder/os-recipes")),
     )?
     .needs
     .outputs;

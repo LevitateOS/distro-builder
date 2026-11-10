@@ -115,7 +115,7 @@ fn build(repo: &Path) -> Result<PathBuf> {
 }
 
 /// One run of a recipe phase (`install`, `isinstalled`, ...) in its work directory;
-/// imports resolve from `<repo>/distro/builder/recipes`.
+/// imports resolve from `<repo>/distro/builder/os-recipes`.
 pub struct Invocation<'a> {
     repo: &'a Path,
     phase: &'static str,
@@ -193,8 +193,9 @@ impl<'a> Invocation<'a> {
             .suffix(".json")
             .tempfile_in(work)
             .context("creating a fresh recipe result file")?;
-        // Every recipe and its imports live here, wherever the script itself is.
-        let recipes_path = self.repo.join("distro/builder/recipes");
+        // OS producers and their imports use the builder's collection;
+        // the workspace's user-managed recipe catalog is a separate consumer.
+        let os_recipes_path = self.repo.join("distro/builder/os-recipes");
 
         let mut cmd = Cmd::new(bin)
             .arg(self.phase)
@@ -206,7 +207,7 @@ impl<'a> Invocation<'a> {
             .arg("--json-output")
             .arg(result.path())
             .arg("--recipes-path")
-            .arg(&recipes_path)
+            .arg(&os_recipes_path)
             .args(&self.args)
             .dir(self.repo)
             .stdout_to_stderr()

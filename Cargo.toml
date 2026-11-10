@@ -15,7 +15,7 @@ reciso = { path = "../../tools/reciso" }
 recuki = { path = "../../tools/recuki" }
 libc = "0.2"
 levitate-recipe = { path = "../../tools/recipe" }
-# The kernel pins in recipes/kernel/metadata.rhai, read by src/pipeline/kernel.rs.
+# The kernel pins in os-recipes/kernel/metadata.rhai, read by src/pipeline/kernel.rs.
 rhai = "=1.19.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

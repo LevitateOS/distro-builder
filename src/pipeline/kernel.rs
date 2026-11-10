@@ -10,7 +10,7 @@ use crate::recipe::{recipe_work_dir, Invocation, RecipeResult};
 use distro_contract::runs::kernel_dir;
 
 /// The kernel recipes, relative to the repo root. Autofix may edit only these.
-const RECIPES: &str = "distro/builder/recipes";
+const RECIPES: &str = "distro/builder/os-recipes";
 /// The pins and the bundle rules both kernel recipes import.
 const METADATA: &str = "kernel/metadata.rhai";
 /// The kernel configuration every variant shares; the variant's own `kconfig`

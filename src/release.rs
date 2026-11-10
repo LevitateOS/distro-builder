@@ -86,7 +86,7 @@ pub fn kernel_cmdline(init: InitSystem, role: BootRole) -> Vec<String> {
 const SYSTEMD_BOOT_EFI: &str = "usr/lib/systemd/boot/efi/systemd-bootx64.efi";
 
 /// The recipe that produces the release's busybox binary.
-const BUSYBOX_RECIPE: &str = "distro/builder/recipes/busybox-static.rhai";
+const BUSYBOX_RECIPE: &str = "distro/builder/os-recipes/busybox-static.rhai";
 
 /// Builds `product`'s release ISO in `dir`, its release run's directory, with
 /// the kernel in `kernel` (`runs::kernel_dir`), and returns the ISO's path.

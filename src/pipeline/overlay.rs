@@ -1,5 +1,5 @@
 //! The live session a live product's overlay sets up, made by Recipe's
-//! `recipes/live-overlay.rhai`. Nothing here or there writes the rootfs.
+//! `os-recipes/live-overlay.rhai`. Nothing here or there writes the rootfs.
 use anyhow::{Context, Result};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -12,7 +12,7 @@ use serde::Serialize;
 use crate::guest::{self, Value};
 
 /// The live session of a live product: the `config` input of
-/// `recipes/live-overlay.rhai`, which reads these fields by name.
+/// `os-recipes/live-overlay.rhai`, which reads these fields by name.
 #[derive(Debug, Serialize)]
 pub(crate) struct LiveSession {
     /// The `/etc/issue` banner is `<os_name> <label>`, with `hint` under it.
@@ -102,7 +102,7 @@ pub(crate) fn create_live_overlay(
     let mut invocation = crate::recipe::Invocation::new(
         repo,
         "install",
-        repo.join("distro/builder/recipes/live-overlay.rhai"),
+        repo.join("distro/builder/os-recipes/live-overlay.rhai"),
         crate::recipe::recipe_work_dir(repo, &variant.id)?.join("live-overlay"),
     )
     .input("config", &config)

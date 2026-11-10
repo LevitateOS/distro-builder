@@ -18,13 +18,32 @@ AcornOS over Recipe. It reads each variant through `distro_contract::load`
 - `src/bin/`: the `distro-builder` binary. Its `usage()` in
   `src/bin/distro-builder.rs` is the command reference. Normal use goes through
   `cargo xtask build` (`cargo xtask --help`).
-- `recipes/`: the builder's Recipe scripts (source rootfs, installed system,
-  live overlay, tools, kernel). Each recipe documents what it produces.
+- `os-recipes/`: OS artifact producers (source rootfs, installed system,
+  live overlay, tools, kernel) and their shared modules and locks. Each recipe
+  documents what it produces; [the collection guide](os-recipes/README.md)
+  explains its boundary with user-managed software.
 - `guest/`: files installed into the live and installed systems.
 - `install-split-pane/`: the live install screen's two-pane terminal.
 
 Ownership and output locations across the workspace are in the root
 `architecture.md`.
+
+## Two consumers of one Recipe engine
+
+The builder selects `distro/builder/os-recipes` explicitly and consumes the
+files and trees those recipes publish. Their `install` hooks assemble outputs
+inside Ginux; the builder turns those outputs into OS images. Packages included
+in a base or desktop image, including desktop applications, belong to that
+image's lifecycle. recab owns staging and switching installed system images.
+
+The workspace's top-level [`recipes/`](../../recipes/README.md) is the separate
+catalog for user-managed software. It currently has no application recipes;
+live-system activation and the user package update/removal workflow remain work
+on Recipe. It is not the builder's default search path.
+
+Both collections use the same API 2 Rhai format and the same engine in
+`tools/recipe`. The directory split identifies the consumer and lifecycle; it
+does not introduce another recipe type or execution engine.
 
 ## Recipe and product verification
 

@@ -40,7 +40,7 @@ build never runs an older launcher or worker than the checkout. `GINUX_ROOT`,
 Each release records `system-sources.sha256` beside its rootfs: the digest of
 every source its system rootfs is built from (the builder, contract, profile,
 variant, TUI apps and the rootfs tools' crate closures, uncommitted edits
-included). A release build first rebuilds every parent product that is missing
+included) and the Ginux launcher built from `tools/ginux`. A release build first rebuilds every parent product that is missing
 or whose recorded digest differs from the checkout's, and preparing a product
 refuses such a parent, so live-boot and live-tools always carry the current
 system and tools. The maintained Ginux/Recipe source pair is recorded in

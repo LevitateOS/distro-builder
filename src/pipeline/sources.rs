@@ -1,7 +1,8 @@
 //! The sources a system rootfs is built from, as one digest. A product without
 //! a parent builds the system from the checkout (the builder's recipes and
 //! locks, the contract, the variant, the installed system's TUI apps and the
-//! rootfs tools' crates); every other product carries its parent's rootfs
+//! rootfs tools' crates) with every recipe step run by the Ginux launcher
+//! built from `tools/ginux`; every other product carries its parent's rootfs
 //! unchanged. Each release records the digest of the sources its rootfs was
 //! built from, so a product is never built on a parent whose system is older
 //! than the checkout: the planner rebuilds such a parent first, and preparing
@@ -23,7 +24,8 @@ pub const SOURCES_FILE: &str = "system-sources.sha256";
 /// The digest of the sources `distro_id`'s system rootfs is built from, as the
 /// checkout has them now: every file git lists (tracked, or new and not
 /// ignored, as the tools' source closures take them) under each source, with
-/// its path and content.
+/// its path and content, and the Ginux launcher the checkout builds (Ginux is
+/// developed here: a changed launcher rebuilds the system).
 pub fn system_sources_digest(repo: &Path, distro_id: &str) -> Result<String> {
     let repo = repo.canonicalize()?;
     let mut roots: BTreeSet<PathBuf> = [
@@ -40,6 +42,10 @@ pub fn system_sources_digest(repo: &Path, distro_id: &str) -> Result<String> {
         roots.extend(crate::recipe::tools::tool_crate_dirs(&repo, tool.package)?);
     }
     let mut hasher = Sha256::new();
+    let ginux = crate::recipe::ginux_binary(&repo)?;
+    hasher.update(b"ginux launcher\0");
+    hasher.update(fs::read(ginux).with_context(|| format!("reading '{}'", ginux.display()))?);
+    hasher.update([0]);
     // The workspace's manifest and locks pick the tools' and TUI's dependencies.
     for file in ["Cargo.toml", "Cargo.lock", "package.json", "bun.lock"] {
         hash_file(&mut hasher, &repo, Path::new(file))?;

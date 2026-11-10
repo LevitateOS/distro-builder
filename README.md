@@ -36,10 +36,13 @@ inside Ginux; the builder turns those outputs into OS images. Packages included
 in a base or desktop image, including desktop applications, belong to that
 image's lifecycle. recab owns staging and switching installed system images.
 
-The workspace's top-level [`recipes/`](../../recipes/README.md) is the separate
-catalog for user-managed software. The Recipe tool package copies it into
-`/usr/share/recipe/recipes`, alongside the builder's selected pinned Ginux root
-image and static launcher. Root's override catalog and active package profile
+The workspace's top-level [`recipes/`](../../recipes/README.md) is the official
+source of user-managed software, a repository of its own pinned here. The
+Recipe tool package ships it as a source: `/usr/share/recipe/sources/levitate.toml`
+says where it is fetched from, and `/usr/share/recipe/sources/levitate/` is a
+copy at the pinned commit, with its published `index.json`, that Recipe uses
+until it has fetched a newer index. It sits alongside the builder's selected
+pinned Ginux root image and static launcher. Root's override catalog and active package profile
 remain under `/var/lib/recipe`, shared across A/B system updates. Login shells
 add both the system and per-user Recipe profile's `bin` to `PATH`.
 

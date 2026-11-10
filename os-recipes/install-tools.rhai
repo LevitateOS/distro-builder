@@ -5,7 +5,8 @@
 // BIN names the binary (default recstrap); INSTALL_PATH where it goes in the
 // package tree (default usr/bin/<BIN>). recab also packages its trial service,
 // which it writes itself for the image's init system (INIT_SYSTEM, the
-// variant's profile). recipe also packages its public catalog and the same
+// variant's profile). recipe also packages the official source of recipes
+// (the file that names it and a copy of it at the pinned commit) and the same
 // pinned runtime image/launcher the builder selected, supplied as typed inputs.
 // The named program output is published by Recipe for the consumer to install.
 const RECIPE_API = 2;
@@ -103,6 +104,9 @@ fn recipe_state(root) {
 fn recipe_inputs(ctx) {
     let inputs = ctx.runtime.paths.inputs;
     if !is_dir(join_path(inputs, "catalog")) { throw "Recipe packaging requires the public catalog input"; }
+    if !is_file(join_path(inputs, "catalog/index.json")) {
+        throw "the public catalog has no index.json; run 'recipe index' in recipes/ and commit it";
+    }
     for name in ["launcher", "runtime_image", "runtime_reference"] {
         if !is_file(join_path(inputs, name)) { throw "Recipe packaging requires input " + name; }
     }
@@ -126,10 +130,20 @@ fn recipe_runtime(ctx) {
     mkdir(dirname(launcher));
     copy_file(join_path(inputs, "launcher"), launcher);
     chmod(launcher, 0o755);
-    // The image supplies defaults; an administrator's /var catalog stays intact.
-    let catalog = join_path(root, "usr/share/recipe/recipes");
-    mkdir(catalog);
-    copy_tree_contents(join_path(inputs, "catalog"), catalog);
+    // The image ships the official source of recipes, not a folder of them:
+    // the file that says where it is fetched from, and a copy of it as it is
+    // at the pinned commit. Recipe lists and installs from the copy until it
+    // has fetched a newer index, so the shipped recipes need no network. The
+    // file's name is the name the source gives itself in its repo.toml.
+    let sources = join_path(root, "usr/share/recipe/sources");
+    let copy = join_path(sources, "levitate");
+    mkdir(copy);
+    copy_tree_contents(join_path(inputs, "catalog"), copy);
+    let named = join_path(sources, "levitate.toml");
+    write_file(named,
+        "files = \"https://raw.githubusercontent.com/LevitateOS/recipes/{rev}/{path}\"\n" +
+        "branch = \"master\"\n");
+    chmod(named, 0o644);
     let profile = join_path(root, "etc/profile.d/recipe.sh");
     mkdir(dirname(profile));
     write_file(profile,
@@ -158,8 +172,8 @@ fn is_installed(ctx) {
                      "usr/share/recipe/runtime/root-reference", "etc/profile.d/recipe.sh"] {
             if !is_file(join_path(ctx.rootfs, path)) { return needs_work(ctx, "Recipe runtime is missing " + path); }
         }
-        if !is_dir(join_path(ctx.rootfs, "usr/share/recipe/recipes")) {
-            return needs_work(ctx, "Recipe's public catalog is missing");
+        for path in ["usr/share/recipe/sources/levitate.toml", "usr/share/recipe/sources/levitate/index.json"] {
+            if !is_file(join_path(ctx.rootfs, path)) { return needs_work(ctx, "Recipe's official source is missing " + path); }
         }
     }
     ctx.outputs = #{program: ctx.program, rootfs: ctx.rootfs};

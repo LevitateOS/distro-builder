@@ -11,6 +11,13 @@ use distro_contract::ProductId;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
+    ReleaseIndex {
+        distro: String,
+        bundle: PathBuf,
+        output: PathBuf,
+        sequence: u64,
+        signing_key: PathBuf,
+    },
     /// Describe and verify existing release artifacts; never build them.
     ReleaseManifest {
         distro: String,
@@ -49,6 +56,7 @@ pub fn usage() -> String {
     format!(
         "Usage: distro-builder --repo-root <dir> <command>\n\n\
          Commands:\n  \
+         release index <distro> <bundle> <publish_dir> <sequence> --signing-key PKCS8  publish a signed local update index\n  \
          release manifest <distro> <base|desktop> <root> <dir> [--signing-key PKCS8]  verify/package existing release artifacts\n  \
          release build <product> <distro>                   build a release ISO ({releases})\n  \
          product prepare <product> <distro> <dir>           prepare a product's rootfs and overlay ({products})\n  \
@@ -68,6 +76,22 @@ impl Command {
             args.extend(words.iter().map(|word| word.as_ref().to_os_string()));
         };
         match self {
+            Self::ReleaseIndex {
+                distro,
+                bundle,
+                output,
+                sequence,
+                signing_key,
+            } => push(&[
+                &"release",
+                &"index",
+                distro,
+                bundle,
+                output,
+                &sequence.to_string(),
+                &"--signing-key",
+                signing_key,
+            ]),
             Self::ReleaseManifest {
                 distro,
                 flavour,
@@ -155,6 +179,17 @@ pub fn parse(args: &[String]) -> Result<(PathBuf, Command), Usage> {
     };
     let words: Vec<&str> = rest.iter().map(String::as_str).collect();
     let command = match words.as_slice() {
+        ["release", "index", id, bundle, output, sequence, "--signing-key", key] => {
+            Command::ReleaseIndex {
+                distro: distro(id)?,
+                bundle: bundle.into(),
+                output: output.into(),
+                sequence: sequence
+                    .parse()
+                    .map_err(|_| Usage("index sequence must be an integer".into()))?,
+                signing_key: key.into(),
+            }
+        }
         ["release", "manifest", id, flavour, root, dir, flags @ ..] => {
             let signing_key = match flags {
                 [] => None,

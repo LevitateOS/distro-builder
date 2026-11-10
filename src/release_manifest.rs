@@ -63,7 +63,7 @@ pub fn write(
     );
     let root_policy: Policy = serde_json::from_slice(&fs::read(root.join(SOURCE_CONFIG))?)?;
     ensure!(
-        &root_policy == policy,
+        root_policy == policy.installed(),
         "prepared rootfs release policy differs from the variant contract"
     );
     let sources = crate::pipeline::sources::recorded(dir)

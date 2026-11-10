@@ -156,9 +156,33 @@ pub fn prepare_product(variant: &Variant, product: ProductId, dir: &Path) -> Res
 fn prepare_system(variant: &Variant, flavour: Flavour, rootfs: &Path) -> Result<()> {
     let source = materialize_rootfs_source(variant, flavour)?;
     levitate_recipe::target::merge_tree(&source, rootfs)?;
-    let update_source=rootfs.join(distro_contract::release::SOURCE_CONFIG);
+    let update_source = rootfs.join(distro_contract::release::SOURCE_CONFIG);
     fs::create_dir_all(update_source.parent().unwrap())?;
-    fs::write(&update_source,serde_json::to_vec(&variant.contract.release)?)?;
+    fs::write(
+        &update_source,
+        serde_json::to_vec(&variant.contract.release.installed())?,
+    )?;
+    if let Some(source) = &variant.contract.release.source {
+        let text = fs::read_to_string(variant.repo_root.join(&source.recipe))?;
+        let marker = "network: [] /* recab configured endpoint */";
+        anyhow::ensure!(
+            text.matches(marker).count() == 1,
+            "acquisition recipe must declare its configurable network marker exactly once"
+        );
+        let endpoint = distro_contract::release::endpoint(&source.index)?;
+        let rendered = text.replace(
+            marker,
+            &format!("network: [{}]", serde_json::to_string(&endpoint)?),
+        );
+        let path = rootfs.join(distro_contract::release::ACQUISITION_RECIPE);
+        fs::create_dir_all(path.parent().unwrap())?;
+        fs::write(&path, rendered)?;
+        levitate_recipe::target::set_mode(
+            rootfs,
+            std::path::Path::new(distro_contract::release::ACQUISITION_RECIPE),
+            0o644,
+        )?;
+    }
     let role = rootfs.join(recinit::live::PAYLOAD_ROLE_FILE);
     fs::write(&role, format!("{}\n", recinit::live::ROLE_ROOTFS))
         .with_context(|| format!("writing {}", role.display()))?;

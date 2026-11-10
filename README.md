@@ -162,9 +162,38 @@ Configure release ordering and optional source/trust in the variant's `[release]
 contract. The checked-in development channels have no production endpoint/key.
 Signed emission requires `--signing-key /private/release.pk8`; full release
 assembly reads that explicit path from `RECAB_RELEASE_SIGNING_KEY`. The key must
-match the configured distribution public key. Key custody and actual online
-publishing remain release operations; P08 adds discovery/acquisition.
+match the configured distribution public key. Key custody and deployment of the
+published directory remain release operations.
+
+To configure online acquisition, set the variant's source and trust deliberately:
+
+```toml
+[release.source]
+index = "https://updates.example.org/development/index.json"
+recipe = "distro/builder/os-recipes/update-acquire.rhai"
+[release.trust]
+ed25519 = "<64 lowercase hex characters of the public release key>"
+```
+
+The example URL is a placeholder, not a configured LevitateOS service. The builder
+packages the private acquisition recipe with only that endpoint in `NEEDS.network`
+and writes its installed path into the root policy. It must contain exactly one
+`network: [] /* recab configured endpoint */` marker. Production signing keys
+stay outside the checkout and published directory.
+
+Publish an already signed bundle into a local serveable directory:
+
+```sh
+distro-builder --repo-root /path/to/LevitateOS release index \
+  levitate /path/to/release /path/to/published 1 --signing-key /private/release.pk8
+```
+
+The index sequence must advance. The publisher serializes writers, copies and
+checks immutable `releases/<manifest SHA256>/` objects, signs the index, publishes
+its content-addressed signature first and replaces `index.json` last. Retain
+older release objects/signatures for clients with pinned downloads. Serving or
+uploading that directory is explicit; this command performs no network publish.
 
 The format and trust rules are in
 [the shared release contract](../contract/docs/releases.md). Full new distro,
-ISO and kernel builds have not been run for P07.
+ISO and kernel builds have not been run for P07/P08.

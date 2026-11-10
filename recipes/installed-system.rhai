@@ -516,16 +516,16 @@ fn start_button(root, inputs) {
 // system.
 fn wallpaper(root, inputs) {
     let name = pretty_name(inputs);
-    let package = "usr/share/wallpapers/" + name;
+    let wallpapers = "usr/share/wallpapers/" + name;
     // Plasma reads an image's size from its file name, and shows the
     // images_dark one under a dark colour scheme.
-    let dark = package + "/contents/images_dark/3840x2160.jpg";
-    for image in [[package + "/contents/images/3840x2160.jpg", "wallpaper_light"], [dark, "wallpaper_dark"]] {
+    let dark = wallpapers + "/contents/images_dark/3840x2160.jpg";
+    for image in [[wallpapers + "/contents/images/3840x2160.jpg", "wallpaper_light"], [dark, "wallpaper_dark"]] {
         mkdir(dirname(join_path(root, image[0])));
         copy_file(join_path(inputs, image[1]), join_path(root, image[0]));
         target_mode(root, image[0], 0o644);
     }
-    put(root, package + "/metadata.json",
+    put(root, wallpapers + "/metadata.json",
         "{\"KPlugin\": {\"Id\": \"" + name + "\", \"Name\": \"" + name + "\"}}\n", 0o644);
     let desktop = os_release_field(inputs, "REC_DESKTOP");
     if desktop == "plasma" {

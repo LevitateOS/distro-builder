@@ -19,3 +19,23 @@ pub(crate) fn publish_cmd(repo: &Path, family_name: &str, name: &str, distro: Op
     let key = prebuilt::key_for(repo, family, name, distro)?;
     prebuilt::publish(repo, family, name, &key)
 }
+
+/// `prebuilt list`: every part CI publishes, one `<family> <name> [--distro <id>]` per line.
+pub(crate) fn list_cmd(repo: &Path) -> Result<()> {
+    for part in prebuilt::list(repo)? {
+        match part.distro {
+            Some(distro) => println!("{} {} --distro {distro}", part.family.name(), part.name),
+            None => println!("{} {}", part.family.name(), part.name),
+        }
+    }
+    Ok(())
+}
+
+/// `prebuilt build`: compiles the part into the local cache and prints its key, then the
+/// cache directory.
+pub(crate) fn build_cmd(repo: &Path, family_name: &str, name: &str, distro: Option<&str>) -> Result<()> {
+    let (key, dir) = prebuilt::build(repo, family(family_name)?, name, distro)?;
+    println!("{}", key.hex);
+    println!("{}", dir.display());
+    Ok(())
+}

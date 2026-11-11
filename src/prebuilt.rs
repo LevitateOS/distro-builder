@@ -16,7 +16,9 @@
 //! Any failure of step 1 or 2 is a miss, never a failed build. Exact builds
 //! (`release build --exact`, or any signed build) never use this: they compile and touch
 //! no cache. `--no-prebuilt` skips steps 1 and 2 but still fills the cache.
-//! `distro-builder prebuilt key|publish` compute a key and upload a cache entry.
+//! `distro-builder prebuilt key|publish` compute a key and upload a cache entry;
+//! `prebuilt list|build` name every part and compile one into the cache, which is
+//! what CI runs before it publishes.
 //!
 //! The key leaves out Ginux and Recipe's bytes on purpose: they change how a compile
 //! is supervised, not what comes out of it (their declared behaviour versions are in).
@@ -504,6 +506,103 @@ fn expected_files(family: Family, name: &str) -> Result<Vec<String>> {
         Family::Tools => crate::recipe::tools::tool_binaries(name),
         Family::Tui => Ok(vec!["program".into()]),
     }
+}
+
+/// One part CI publishes: a family, a name, and for a TUI binary the distro whose libc
+/// it is built for.
+pub struct Part {
+    pub family: Family,
+    pub name: String,
+    pub distro: Option<String>,
+}
+
+/// Every prebuilt part: each tool package, and each TUI binary once per libc (the first
+/// distro with that libc stands for the others: the key depends on the libc alone).
+pub fn list(repo: &Path) -> Result<Vec<Part>> {
+    let mut parts: Vec<Part> = crate::recipe::tools::tool_packages()
+        .into_iter()
+        .map(|name| Part { family: Family::Tools, name: name.to_string(), distro: None })
+        .collect();
+    let mut libcs = BTreeSet::new();
+    for id in distro_contract::distro_ids(repo) {
+        let variant = distro_contract::load(repo, &id)?;
+        if !libcs.insert(variant.contract.profile.libc.bun_target()) {
+            continue;
+        }
+        for (name, _) in tui_binaries() {
+            parts.push(Part { family: Family::Tui, name: name.to_string(), distro: Some(id.clone()) });
+        }
+    }
+    Ok(parts)
+}
+
+/// The TUI binaries: file name and path in an image.
+fn tui_binaries() -> [(&'static str, &'static str); 2] {
+    let stem = |path: &'static str| Path::new(path).file_name().and_then(|n| n.to_str()).unwrap_or(path);
+    [
+        (stem(crate::tui_binary::INSTALL_BINARY), crate::tui_binary::INSTALL_BINARY),
+        (stem(crate::tui_binary::SYSTEM_BINARY), crate::tui_binary::SYSTEM_BINARY),
+    ]
+}
+
+/// Compiles the TUI binary `name` for `libc` through `tui_binary::install` (which fills
+/// the cache) into a scratch layer. `install` wants the libraries the binary links on its
+/// image; nothing runs here, so empty stand-ins satisfy that check.
+fn build_tui(repo: &Path, name: &str, libc: distro_contract::profile::Libc) -> Result<()> {
+    let (_, binary_path) = tui_binaries()
+        .into_iter()
+        .find(|(stem, _)| *stem == name)
+        .with_context(|| format!("unknown TUI binary '{name}'; expected install-tui or system-tui"))?;
+    let workspace = crate::tui_apps::Workspace::load(repo)?;
+    let apps: Vec<&crate::tui_apps::TuiApp> = if binary_path == crate::tui_binary::INSTALL_BINARY {
+        crate::install_ux::Screen::resolve(&workspace)?.apps()
+    } else {
+        distro_contract::SYSTEM_TUI_APPS
+            .iter()
+            .map(|app| workspace.app(app))
+            .collect::<Result<_>>()?
+    };
+    let scratch = tempfile::tempdir()?;
+    let rootfs = scratch.path().join("rootfs");
+    fs::create_dir_all(rootfs.join("usr/lib"))?;
+    for lib in libc.bun_libs() {
+        fs::write(rootfs.join("usr/lib").join(lib), b"")?;
+    }
+    let layer = scratch.path().join("layer");
+    fs::create_dir_all(&layer)?;
+    crate::tui_binary::install(repo, &rootfs, &layer, binary_path, libc, &apps)
+}
+
+/// Compiles `family`'s `name` into the local cache, through the path an ISO build uses
+/// and nothing else (no ISO, no other step, no download), and returns its key and the
+/// cache directory. The key is computed from the checkout again afterwards and the
+/// entry verified under it, so what CI then publishes is what was compiled.
+pub fn build(repo: &Path, family: Family, name: &str, distro: Option<&str>) -> Result<(Key, PathBuf)> {
+    if crate::recipe::exact_identity() {
+        bail!("an exact (signed) build never fills the prebuilt cache; unset the signing key");
+    }
+    select_no_prebuilt();
+    match family {
+        Family::Tools => {
+            crate::recipe::tools::compile_crate(repo, name)?;
+        }
+        Family::Tui => {
+            let distro = distro.context("a tui build depends on the distro's libc: pass --distro <id>")?;
+            let variant = distro_contract::load(repo, distro)?;
+            build_tui(repo, name, variant.contract.profile.libc)?;
+        }
+    }
+    let key = key_for(repo, family, name, distro)?;
+    let expected = expected_files(family, name)?;
+    let expected_refs: Vec<&str> = expected.iter().map(String::as_str).collect();
+    let dir = lookup(repo, family, name, &key, &expected_refs).with_context(|| {
+        format!(
+            "{} {name} compiled, but the cache holds no verified entry for key {} (the source changed during the build?)",
+            family.name(),
+            key.short()
+        )
+    })?;
+    Ok((key, dir))
 }
 
 /// Uploads the verified cache entry of `key` to the release `<family>-<key16>` of the

@@ -25,6 +25,11 @@ const TOOLS: &[(&str, &str, &[&str])] = &[
     ),
 ];
 
+/// Every tool package with a prebuilt (`prebuilt list`).
+pub fn tool_packages() -> Vec<&'static str> {
+    TOOLS.iter().map(|(name, _, _)| *name).collect()
+}
+
 fn tool(package: &str) -> Result<(&'static str, &'static str, &'static [&'static str])> {
     TOOLS
         .iter()

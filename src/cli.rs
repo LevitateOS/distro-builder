@@ -95,6 +95,16 @@ pub enum Command {
         name: String,
         distro: Option<String>,
     },
+    /// Compile a prebuilt (no download, no ISO) into the local cache and print its key and
+    /// cache directory: what CI publishes. Needs root, like every compile.
+    PrebuiltBuild {
+        family: String,
+        name: String,
+        distro: Option<String>,
+    },
+    /// Print every prebuilt part the builder knows, one `<family> <name> [--distro <id>]`
+    /// per line.
+    PrebuiltList,
     /// Prepare `product`'s rootfs source and overlay for `distro` in `output`:
     /// copies of its parts' trees.
     ProductPrepare {
@@ -144,6 +154,8 @@ pub fn usage() -> String {
          artifact prepare-tool-source <package> <dir>       write a tool's offline source tree\n  \
          artifact preseed-rootfs-source <distro> [--desktop] [--refresh]  acquire a distro's base (or desktop) lock\n  \
          prebuilt key <tools|tui> <name> [--distro <id>]    print the key of a prebuilt program (a tool package, or install-tui/system-tui, which needs --distro)\n  \
+         prebuilt list                                      print every prebuilt part (<family> <name> [--distro <id>]), one per line\n  \
+         prebuilt build <tools|tui> <name> [--distro <id>]  compile that part into the local cache (no download, no ISO; needs root) and print its key and cache directory\n  \
          prebuilt publish <tools|tui> <name> [--distro <id>]  upload the local cache entry of that key to the prebuilt repository's release with gh",
         releases = ProductId::list(ProductId::releases()),
         products = ProductId::list(ProductId::ALL),
@@ -290,7 +302,13 @@ impl Command {
                     push(&[&"--no-prebuilt"]);
                 }
             }
+            Self::PrebuiltList => push(&[&"prebuilt", &"list"]),
             Self::PrebuiltKey {
+                family,
+                name,
+                distro,
+            }
+            | Self::PrebuiltBuild {
                 family,
                 name,
                 distro,
@@ -300,7 +318,11 @@ impl Command {
                 name,
                 distro,
             } => {
-                let verb = if matches!(self, Self::PrebuiltKey { .. }) { "key" } else { "publish" };
+                let verb = match self {
+                    Self::PrebuiltKey { .. } => "key",
+                    Self::PrebuiltBuild { .. } => "build",
+                    _ => "publish",
+                };
                 push(&[&"prebuilt", &verb, family, name]);
                 if let Some(distro) = distro {
                     push(&[&"--distro", distro]);
@@ -476,7 +498,8 @@ pub fn parse(args: &[String]) -> Result<(PathBuf, Command), Usage> {
                 no_prebuilt: flags.contains(&"--no-prebuilt"),
             }
         }
-        ["prebuilt", verb @ ("key" | "publish"), family, name, flags @ ..] => {
+        ["prebuilt", "list"] => Command::PrebuiltList,
+        ["prebuilt", verb @ ("key" | "build" | "publish"), family, name, flags @ ..] => {
             if crate::prebuilt::Family::parse(family).is_none() {
                 return usage(format!(
                     "unsupported prebuilt family '{family}'; expected one of: {}",
@@ -489,10 +512,10 @@ pub fn parse(args: &[String]) -> Result<(PathBuf, Command), Usage> {
                 _ => return usage("expected --distro <id>".into()),
             };
             let (family, name) = (family.to_string(), name.to_string());
-            if *verb == "key" {
-                Command::PrebuiltKey { family, name, distro: selected }
-            } else {
-                Command::PrebuiltPublish { family, name, distro: selected }
+            match *verb {
+                "key" => Command::PrebuiltKey { family, name, distro: selected },
+                "build" => Command::PrebuiltBuild { family, name, distro: selected },
+                _ => Command::PrebuiltPublish { family, name, distro: selected },
             }
         }
         ["product", "prepare", name, id, output] => Command::ProductPrepare {

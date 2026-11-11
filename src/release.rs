@@ -288,10 +288,11 @@ fn kernel_release(kernel: &Path) -> Result<String> {
 
 /// Puts the kernel's modules into the system the ISO runs and installs,
 /// beside the kernel it boots; without them no modular driver (WiFi's among
-/// them) can load. `lib/modules` is `/usr/lib/modules` where `/lib` links to
-/// `usr/lib`, and busybox's modprobe reads `/lib/modules`.
+/// them) can load. The installed boot contract binds `/usr/lib/modules`.
+/// Busybox's modprobe reads `/lib/modules`, including on Acorn where `/lib`
+/// is a real directory rather than a link to `usr/lib`.
 fn add_modules(rootfs: &Path, modules: &Path, release: &str) -> Result<()> {
-    let dest = rootfs.join("lib/modules").join(release);
+    let dest = rootfs.join("usr/lib/modules").join(release);
     if fs::symlink_metadata(&dest).is_ok() {
         fs::remove_dir_all(&dest).with_context(|| format!("removing {}", dest.display()))?;
     }
@@ -301,6 +302,21 @@ fn add_modules(rootfs: &Path, modules: &Path, release: &str) -> Result<()> {
             "the kernel's modules {} have no modules.dep",
             modules.display()
         );
+    }
+    if fs::symlink_metadata(rootfs.join("lib"))?.is_dir() {
+        let legacy = rootfs.join("lib/modules").join(release);
+        if let Ok(meta) = fs::symlink_metadata(&legacy) {
+            if meta.is_dir() {
+                fs::remove_dir_all(&legacy)?;
+            } else {
+                fs::remove_file(&legacy)?;
+            }
+        }
+        fs::create_dir_all(legacy.parent().context("module directory has no parent")?)?;
+        std::os::unix::fs::symlink(
+            Path::new("../../usr/lib/modules").join(release),
+            &legacy,
+        )?;
     }
     Ok(())
 }

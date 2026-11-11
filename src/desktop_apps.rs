@@ -19,6 +19,9 @@
 //!    publishes the tree `cmake --install` writes.
 //! 4. That tree is merged into the desktop system's rootfs.
 //!
+//! Steps 1-3 are skipped when a prebuilt tree exists (`crate::prebuilt`, family
+//! `desktop-apps`): the local cache, else a download. A compile fills the cache.
+//!
 //! Rust selects the source, the root and the image paths; the recipes own
 //! unpacking, compiling and publishing. The build root is never in an image.
 
@@ -34,10 +37,55 @@ use crate::pipeline::source::{apps_build_preseed_recipe, apps_build_root_recipe,
 use crate::process::Cmd;
 use crate::recipe::{rootfs_source, Invocation};
 
-/// Compiles the desktop apps for `variant` and puts them into its desktop
-/// system `rootfs`: each app and the helper in `usr/bin`, each app's menu entry,
-/// and the polkit actions two of the apps ask the administrator's password through.
+/// Puts the desktop apps for `variant` into its desktop system `rootfs`: each app and
+/// the helper in `usr/bin`, each app's menu entry, and the polkit actions two of the apps
+/// ask the administrator's password through. The tree is a prebuilt one when there is one
+/// (never in an exact build, or with `--no-prebuilt`), else it is compiled and cached.
 pub(crate) fn install_system(variant: &Variant, rootfs: &Path) -> Result<()> {
+    let tree = obtain_tree(variant)?;
+    levitate_recipe::target::merge_tree(&tree, rootfs)
+        .with_context(|| format!("merging the desktop apps into '{}'", rootfs.display()))?;
+    check(rootfs)
+}
+
+/// The desktop apps tree: prebuilt (local or downloaded), else compiled and stored.
+fn obtain_tree(variant: &Variant) -> Result<PathBuf> {
+    let repo = &variant.repo_root;
+    let step = crate::timeline::Step::begin("prebuilt", &format!("desktop-apps {}", variant.id));
+    if !crate::recipe::exact_identity() {
+        step.key(crate::prebuilt::desktop_apps_key(repo, variant)?.short());
+    }
+    let tree = match crate::prebuilt::lookup_desktop_apps(repo, variant)? {
+        Some(tree) => tree,
+        None => {
+            let compiled = compile_tree(variant)?;
+            crate::prebuilt::store_desktop_apps(repo, variant, &compiled)?
+        }
+    };
+    step.finish();
+    Ok(tree)
+}
+
+/// `prebuilt build desktop-apps`: compiles the apps into the local cache, with no download
+/// and no ISO. The package locks it reads are acquired first, as an ISO build does.
+pub(crate) fn build_cache(variant: &Variant) -> Result<()> {
+    use crate::recipe::rootfs_source::{preseed_apps_build, preseed_rootfs_source};
+    let (repo, id) = (&variant.repo_root, &variant.id);
+    if crate::recipe::exact_identity() {
+        bail!("an exact (signed) build never fills the prebuilt cache; unset the signing key");
+    }
+    preseed_rootfs_source(repo, id, &preseed_recipe(variant, Flavour::Base), Flavour::Base, false)
+        .with_context(|| format!("acquiring the base package lock for '{id}'"))?;
+    preseed_apps_build(repo, id, &apps_build_preseed_recipe(variant), false)
+        .with_context(|| format!("acquiring the apps-build package lock for '{id}'"))?;
+    let tree = compile_tree(variant)?;
+    crate::prebuilt::store_desktop_apps(repo, variant, &tree)?;
+    Ok(())
+}
+
+/// Compiles the desktop apps for `variant` in its apps-build root and returns the tree
+/// `cmake --install` wrote (Recipe's output `rootfs`).
+fn compile_tree(variant: &Variant) -> Result<PathBuf> {
     let repo = &variant.repo_root;
     let (reference, image) = build_root(variant).context("making the root the desktop apps are compiled in")?;
     // The static Recipe the image itself ships: it runs in any root.
@@ -59,9 +107,7 @@ pub(crate) fn install_system(variant: &Variant, rootfs: &Path) -> Result<()> {
     .run()
     .context("compiling the desktop apps through Recipe")?
     .directory("rootfs")?;
-    levitate_recipe::target::merge_tree(&tree, rootfs)
-        .with_context(|| format!("merging the desktop apps into '{}'", rootfs.display()))?;
-    check(rootfs)
+    Ok(tree)
 }
 
 /// Refuses a desktop rootfs that lacks one of the desktop apps, its menu entry

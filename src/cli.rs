@@ -80,9 +80,9 @@ pub enum Command {
         /// downloading prebuilts (`prebuilt`); exact builds do so anyway.
         no_prebuilt: bool,
     },
-    /// Print the key of a prebuilt (`prebuilt::Key`): `family` is `tools` or
-    /// `tui`, `name` a tool package or a TUI binary (`install-tui`,
-    /// `system-tui`); a TUI's libc comes from `distro`.
+    /// Print the key of a prebuilt (`prebuilt::Key`): `family` is `tools`,
+    /// `tui` or `desktop-apps`, `name` a tool package, a TUI binary (`install-tui`,
+    /// `system-tui`) or, for the desktop apps, the distro; a TUI's libc comes from `distro`.
     PrebuiltKey {
         family: String,
         name: String,
@@ -153,10 +153,10 @@ pub fn usage() -> String {
          transform build product-erofs <prepared_dir>       write a prepared product's EROFS images\n  \
          artifact prepare-tool-source <package> <dir>       write a tool's offline source tree\n  \
          artifact preseed-rootfs-source <distro> [--desktop] [--refresh]  acquire a distro's base (or desktop) lock\n  \
-         prebuilt key <tools|tui> <name> [--distro <id>]    print the key of a prebuilt program (a tool package, or install-tui/system-tui, which needs --distro)\n  \
+         prebuilt key <tools|tui|desktop-apps> <name> [--distro <id>]    print the key of a prebuilt (a tool package; install-tui/system-tui, which needs --distro; or desktop-apps <distro>)\n  \
          prebuilt list                                      print every prebuilt part (<family> <name> [--distro <id>]), one per line\n  \
-         prebuilt build <tools|tui> <name> [--distro <id>]  compile that part into the local cache (no download, no ISO; needs root) and print its key and cache directory\n  \
-         prebuilt publish <tools|tui> <name> [--distro <id>]  upload the local cache entry of that key to the prebuilt repository's release with gh",
+         prebuilt build <tools|tui|desktop-apps> <name> [--distro <id>]  compile that part into the local cache (no download, no ISO; needs root) and print its key and cache directory\n  \
+         prebuilt publish <tools|tui|desktop-apps> <name> [--distro <id>]  upload the local cache entry of that key to the prebuilt repository's release with gh",
         releases = ProductId::list(ProductId::releases()),
         products = ProductId::list(ProductId::ALL),
     )
@@ -506,10 +506,19 @@ pub fn parse(args: &[String]) -> Result<(PathBuf, Command), Usage> {
                     crate::prebuilt::Family::NAMES
                 ));
             }
-            let selected = match flags {
-                [] => None,
-                ["--distro", id] => Some(distro(id)?),
-                _ => return usage("expected --distro <id>".into()),
+            let selected = if *family == "desktop-apps" {
+                // The desktop apps' name is the distro itself.
+                distro(name)?;
+                if !flags.is_empty() {
+                    return usage("prebuilt desktop-apps takes the distro as its name and no flags".into());
+                }
+                None
+            } else {
+                match flags {
+                    [] => None,
+                    ["--distro", id] => Some(distro(id)?),
+                    _ => return usage("expected --distro <id>".into()),
+                }
             };
             let (family, name) = (family.to_string(), name.to_string());
             match *verb {

@@ -1,4 +1,4 @@
-//! Prebuilt programs of our own tools and the TUI binary.
+//! Prebuilt programs of our own tools, the TUI binary and the desktop apps (Qt).
 //!
 //! An OS build needs the same few programs again and again. Each is identified by a
 //! **key**: the SHA-256 of everything its compile depends on (the source closure the
@@ -19,6 +19,12 @@
 //! `distro-builder prebuilt key|publish` compute a key and upload a cache entry;
 //! `prebuilt list|build` name every part and compile one into the cache, which is
 //! what CI runs before it publishes.
+//!
+//! The desktop apps family is a whole tree (programs, menu entries, polkit actions and
+//! Recipe's target metadata), one entry per distro, `desktop-apps/<key>/{prebuilt.json,tree/}`.
+//! Its entries record every path with kind, exact mode, size and SHA-256, and verification
+//! compares the whole tree both ways (no missing and no extra entries). See
+//! [`desktop_apps_key`], [`lookup_desktop_apps`] and [`store_desktop_apps`].
 //!
 //! The key leaves out Ginux and Recipe's bytes on purpose: they change how a compile
 //! is supervised, not what comes out of it (their declared behaviour versions are in).
@@ -59,15 +65,18 @@ pub enum Family {
     Tools,
     /// The TUI binary (`install-tui`, `system-tui`).
     Tui,
+    /// The Qt desktop apps tree (`gui/`), one entry per distro: its `name` is the distro id.
+    DesktopApps,
 }
 
 impl Family {
-    pub const NAMES: &'static str = "tools, tui";
+    pub const NAMES: &'static str = "tools, tui, desktop-apps";
 
     pub fn name(self) -> &'static str {
         match self {
             Self::Tools => "tools",
             Self::Tui => "tui",
+            Self::DesktopApps => "desktop-apps",
         }
     }
 
@@ -75,6 +84,7 @@ impl Family {
         match name {
             "tools" => Some(Self::Tools),
             "tui" => Some(Self::Tui),
+            "desktop-apps" => Some(Self::DesktopApps),
             _ => None,
         }
     }
@@ -110,11 +120,28 @@ impl Key {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+/// One file of a prebuilt. Flat families list regular files only (`kind` `file`, no mode);
+/// a tree lists every entry: `file`, `dir` or `symlink`, with the exact permission bits of
+/// files and directories and, for a link, its target (its SHA-256 is the target's).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct FileEntry {
     pub path: String,
     pub sha256: String,
     pub bytes: u64,
+    #[serde(default = "file_kind", skip_serializing_if = "is_file_kind")]
+    pub kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
+}
+
+fn file_kind() -> String {
+    "file".into()
+}
+
+fn is_file_kind(kind: &String) -> bool {
+    kind == "file"
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -264,16 +291,48 @@ fn plain_name(path: &str) -> bool {
     !path.as_os_str().is_empty() && path.components().all(|c| matches!(c, Component::Normal(_)))
 }
 
-/// Checks `manifest` against what is wanted and every file of `dir` against it.
-fn verify_entry(dir: &Path, manifest: &Manifest, family: Family, name: &str, key: &Key, expected: &[&str]) -> Result<()> {
+/// What a family's entry holds.
+enum Payload {
+    /// Regular files directly in the payload directory, by name.
+    Files(Vec<String>),
+    /// A whole tree, verified entry by entry with exact modes.
+    Tree,
+}
+
+impl Payload {
+    fn of(family: Family, name: &str) -> Result<Self> {
+        match family {
+            Family::Tools => Ok(Self::Files(crate::recipe::tools::tool_binaries(name)?)),
+            Family::Tui => Ok(Self::Files(vec!["program".into()])),
+            Family::DesktopApps => Ok(Self::Tree),
+        }
+    }
+}
+
+/// The directory of a cache entry that holds the payload: the entry itself for files,
+/// `tree/` for a tree (beside `prebuilt.json`).
+fn payload_dir(entry: &Path, payload: &Payload) -> PathBuf {
+    match payload {
+        Payload::Files(_) => entry.to_path_buf(),
+        Payload::Tree => entry.join("tree"),
+    }
+}
+
+/// Checks `manifest` against what is wanted and every file of `dir` (the payload
+/// directory) against it.
+fn verify_entry(dir: &Path, manifest: &Manifest, family: Family, name: &str, key: &Key, payload: &Payload) -> Result<()> {
     if manifest.format != FORMAT {
         bail!("prebuilt.json has format {}, expected {FORMAT}", manifest.format);
     }
     if manifest.key != key.hex || manifest.family != family.name() || manifest.name != name {
         bail!("prebuilt.json is for another key, family or name");
     }
+    let expected = match payload {
+        Payload::Tree => return verify_tree(dir, manifest),
+        Payload::Files(expected) => expected,
+    };
     let listed: BTreeSet<&str> = manifest.files.iter().map(|f| f.path.as_str()).collect();
-    let wanted: BTreeSet<&str> = expected.iter().copied().collect();
+    let wanted: BTreeSet<&str> = expected.iter().map(String::as_str).collect();
     if listed != wanted || listed.len() != manifest.files.len() {
         bail!("prebuilt.json lists {listed:?}, expected {wanted:?}");
     }
@@ -293,19 +352,95 @@ fn verify_entry(dir: &Path, manifest: &Manifest, family: Family, name: &str, key
     Ok(())
 }
 
+/// Every entry of the tree at `root` below it, sorted by path: kind, exact mode (files and
+/// directories), size and SHA-256 (a link's: of its target). Only files, directories and
+/// symlinks may exist.
+fn scan_tree(root: &Path) -> Result<Vec<FileEntry>> {
+    let mut entries = Vec::new();
+    for entry in walkdir::WalkDir::new(root).follow_links(false).min_depth(1).sort_by_file_name() {
+        let entry = entry?;
+        let path = entry.path();
+        let relative = path.strip_prefix(root)?.to_str().context("a non-Unicode path in a prebuilt tree")?.to_string();
+        let metadata = fs::symlink_metadata(path)?;
+        let file_type = metadata.file_type();
+        let mode = metadata.permissions().mode() & 0o7777;
+        entries.push(if file_type.is_symlink() {
+            let target = fs::read_link(path)?.to_str().context("a non-Unicode link target in a prebuilt tree")?.to_string();
+            FileEntry {
+                path: relative,
+                sha256: hex(&Sha256::digest(target.as_bytes())),
+                bytes: target.len() as u64,
+                kind: "symlink".into(),
+                mode: None,
+                target: Some(target),
+            }
+        } else if file_type.is_dir() {
+            FileEntry {
+                path: relative,
+                sha256: hex(&Sha256::digest(b"")),
+                bytes: 0,
+                kind: "dir".into(),
+                mode: Some(mode),
+                target: None,
+            }
+        } else if file_type.is_file() {
+            let (sha256, bytes) = sha256_file(path)?;
+            FileEntry { path: relative, sha256, bytes, kind: "file".into(), mode: Some(mode), target: None }
+        } else {
+            bail!("unsupported entry '{}' in a prebuilt tree (only files, directories and links)", path.display());
+        });
+    }
+    entries.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok(entries)
+}
+
+/// Compares the tree at `dir` with `manifest.files`, both ways: every listed entry exists
+/// with its recorded kind, mode, size, SHA-256 and target, and nothing else exists.
+fn verify_tree(dir: &Path, manifest: &Manifest) -> Result<()> {
+    let mut listed = BTreeMap::new();
+    for entry in &manifest.files {
+        if !plain_name(&entry.path) {
+            bail!("prebuilt.json names an unsafe path '{}'", entry.path);
+        }
+        if listed.insert(entry.path.as_str(), entry).is_some() {
+            bail!("prebuilt.json lists '{}' twice", entry.path);
+        }
+    }
+    if !fs::symlink_metadata(dir).is_ok_and(|m| m.is_dir()) {
+        bail!("'{}' is not a directory", dir.display());
+    }
+    let actual = scan_tree(dir)?;
+    for found in &actual {
+        match listed.remove(found.path.as_str()) {
+            None => bail!("'{}' is in the tree but not in prebuilt.json (an extra entry)", found.path),
+            Some(want) if want != found => bail!(
+                "'{}' does not match prebuilt.json: has {} mode {:?} {} bytes sha256 {}, recorded {} mode {:?} {} bytes sha256 {}",
+                found.path, found.kind, found.mode.map(|m| format!("{m:o}")), found.bytes, found.sha256,
+                want.kind, want.mode.map(|m| format!("{m:o}")), want.bytes, want.sha256
+            ),
+            Some(_) => {}
+        }
+    }
+    if let Some(missing) = listed.keys().next() {
+        bail!("'{missing}' is in prebuilt.json but missing from the tree");
+    }
+    Ok(())
+}
+
 fn read_manifest(path: &Path) -> Result<Manifest> {
     serde_json::from_slice(&fs::read(path).with_context(|| format!("reading '{}'", path.display()))?)
         .with_context(|| format!("parsing '{}'", path.display()))
 }
 
 /// A verified cache entry for `key`, or `None` (also when it fails verification).
-fn lookup(repo: &Path, family: Family, name: &str, key: &Key, expected: &[&str]) -> Option<PathBuf> {
+/// (The entry directory; for a tree its payload is `tree/` inside it.)
+fn lookup(repo: &Path, family: Family, name: &str, key: &Key, payload: &Payload) -> Option<PathBuf> {
     let dir = entry_dir(repo, family, key);
     let json = dir.join("prebuilt.json");
     if !json.is_file() {
         return None;
     }
-    let verified = read_manifest(&json).and_then(|m| verify_entry(&dir, &m, family, name, key, expected));
+    let verified = read_manifest(&json).and_then(|m| verify_entry(&payload_dir(&dir, payload), &m, family, name, key, payload));
     match verified {
         Ok(()) => Some(dir),
         Err(error) => {
@@ -315,8 +450,46 @@ fn lookup(repo: &Path, family: Family, name: &str, key: &Key, expected: &[&str])
     }
 }
 
-/// Puts `files` (name, source path) into the cache entry for `key`, atomically: it is
-/// built beside the entry and renamed into place, replacing an older one.
+/// What goes into a cache entry.
+enum Content<'a> {
+    /// Files (name, source path), made executable.
+    Files(&'a [(String, PathBuf)]),
+    /// A tree, copied with exact modes and links.
+    Tree(&'a Path),
+}
+
+/// Copies the tree `source` to `dest` (which must not exist) with every mode exact and
+/// symlinks kept as links; hard links become separate files.
+fn copy_tree(source: &Path, dest: &Path) -> Result<()> {
+    fs::create_dir(dest)?;
+    let mut directories = vec![(dest.to_path_buf(), fs::symlink_metadata(source)?.permissions())];
+    for entry in walkdir::WalkDir::new(source).follow_links(false).min_depth(1).sort_by_file_name() {
+        let entry = entry?;
+        let target = dest.join(entry.path().strip_prefix(source)?);
+        let metadata = fs::symlink_metadata(entry.path())?;
+        let file_type = metadata.file_type();
+        if file_type.is_symlink() {
+            std::os::unix::fs::symlink(fs::read_link(entry.path())?, &target)?;
+        } else if file_type.is_dir() {
+            fs::create_dir(&target)?;
+            fs::set_permissions(&target, fs::Permissions::from_mode(0o700))?;
+            directories.push((target, metadata.permissions()));
+        } else if file_type.is_file() {
+            fs::copy(entry.path(), &target).with_context(|| format!("copying '{}'", entry.path().display()))?;
+            fs::set_permissions(&target, metadata.permissions())?;
+        } else {
+            bail!("unsupported entry '{}' in a prebuilt tree (only files, directories and links)", entry.path().display());
+        }
+    }
+    // Directories last, deepest first, so a read-only one does not stop its children.
+    for (path, permissions) in directories.into_iter().rev() {
+        fs::set_permissions(&path, permissions)?;
+    }
+    Ok(())
+}
+
+/// Puts `content` into the cache entry for `key`, atomically: it is built beside the entry
+/// and renamed into place, replacing an older one.
 #[allow(clippy::too_many_arguments)]
 fn store(
     repo: &Path,
@@ -324,7 +497,7 @@ fn store(
     name: &str,
     key: &Key,
     sources: BTreeMap<String, String>,
-    files: &[(String, PathBuf)],
+    content: Content<'_>,
     origin: &str,
     archive: Option<ArchiveEntry>,
 ) -> Result<PathBuf> {
@@ -333,17 +506,26 @@ fn store(
     fs::create_dir_all(parent)?;
     let staging = tempfile::Builder::new().prefix(".tmp-").tempdir_in(parent)?;
     let mut entries = Vec::new();
-    for (file, source) in files {
-        if !plain_name(file) {
-            bail!("unsafe prebuilt file name '{file}'");
+    match content {
+        Content::Files(files) => {
+            for (file, source) in files {
+                if !plain_name(file) {
+                    bail!("unsafe prebuilt file name '{file}'");
+                }
+                let target = staging.path().join(file);
+                fs::copy(source, &target).with_context(|| format!("copying '{}'", source.display()))?;
+                fs::set_permissions(&target, fs::Permissions::from_mode(0o755))?;
+                let (sha256, bytes) = sha256_file(&target)?;
+                entries.push(FileEntry { path: file.clone(), sha256, bytes, kind: file_kind(), mode: None, target: None });
+            }
+            entries.sort_by(|a, b| a.path.cmp(&b.path));
         }
-        let target = staging.path().join(file);
-        fs::copy(source, &target).with_context(|| format!("copying '{}'", source.display()))?;
-        fs::set_permissions(&target, fs::Permissions::from_mode(0o755))?;
-        let (sha256, bytes) = sha256_file(&target)?;
-        entries.push(FileEntry { path: file.clone(), sha256, bytes });
+        Content::Tree(source) => {
+            let tree = staging.path().join("tree");
+            copy_tree(source, &tree).with_context(|| format!("copying the tree '{}'", source.display()))?;
+            entries = scan_tree(&tree)?;
+        }
     }
-    entries.sort_by(|a, b| a.path.cmp(&b.path));
     let manifest = Manifest {
         format: FORMAT,
         key: key.hex.clone(),
@@ -382,7 +564,7 @@ fn store(
 
 /// Fetches the release of `key` through the `prebuilt-fetch` recipe, verifies it and
 /// stores it in the cache. An error is a miss.
-fn fetch(repo: &Path, family: Family, name: &str, key: &Key, expected: &[&str]) -> Result<PathBuf> {
+fn fetch(repo: &Path, family: Family, name: &str, key: &Key, payload: &Payload) -> Result<PathBuf> {
     let slug = repository()?;
     let base = format!("https://github.com/{slug}/releases/download/{}", release_tag(family, key));
     let archive = archive_name(family, name);
@@ -400,11 +582,17 @@ fn fetch(repo: &Path, family: Family, name: &str, key: &Key, expected: &[&str]) 
             .run()?;
         let files = result.directory("files")?;
         let manifest = read_manifest(&result.file("manifest")?)?;
-        verify_entry(&files, &manifest, family, name, key, expected)?;
+        verify_entry(&files, &manifest, family, name, key, payload)?;
         let archive_entry = manifest.archive.clone().context("prebuilt.json names no archive")?;
         let sources = manifest.sources.clone();
-        let list: Vec<(String, PathBuf)> = manifest.files.iter().map(|f| (f.path.clone(), files.join(&f.path))).collect();
-        store(repo, family, name, key, sources, &list, "downloaded", Some(archive_entry))
+        match payload {
+            Payload::Files(_) => {
+                let list: Vec<(String, PathBuf)> =
+                    manifest.files.iter().map(|f| (f.path.clone(), files.join(&f.path))).collect();
+                store(repo, family, name, key, sources, Content::Files(&list), "downloaded", Some(archive_entry))
+            }
+            Payload::Tree => store(repo, family, name, key, sources, Content::Tree(&files), "downloaded", Some(archive_entry)),
+        }
     })();
     let _ = fs::remove_dir_all(&work);
     outcome
@@ -458,17 +646,18 @@ fn obtain_inner(
     let key = key()?;
     step.key(key.short());
     let short = key.short().to_string();
+    let payload = Payload::Files(expected.iter().map(|file| file.to_string()).collect());
     let from_dir = |dir: PathBuf| Obtained {
         files: expected.iter().map(|file| (file.to_string(), dir.join(file))).collect(),
     };
     if NO_PREBUILT.load(Ordering::SeqCst) {
         crate::tprintln!("[prebuilt] {name}: compiling {short} (--no-prebuilt)");
     } else {
-        if let Some(dir) = lookup(repo, family, name, &key, expected) {
+        if let Some(dir) = lookup(repo, family, name, &key, &payload) {
             crate::tprintln!("[prebuilt] {name}: local {short}");
             return Ok(from_dir(dir));
         }
-        match fetch(repo, family, name, &key, expected) {
+        match fetch(repo, family, name, &key, &payload) {
             Ok(dir) => {
                 crate::tprintln!("[prebuilt] {name}: downloaded {short}");
                 return Ok(from_dir(dir));
@@ -481,7 +670,7 @@ fn obtain_inner(
         }
     }
     let compiled = compile()?;
-    let dir = store(repo, family, name, &key, sources(), &compiled, "local", None)
+    let dir = store(repo, family, name, &key, sources(), Content::Files(&compiled), "local", None)
         .with_context(|| format!("caching the compiled {name}"))?;
     crate::tprintln!("[prebuilt] {name}: compiled {short}");
     Ok(from_dir(dir))
@@ -497,14 +686,7 @@ pub fn key_for(repo: &Path, family: Family, name: &str, distro: Option<&str>) ->
             let variant = distro_contract::load(repo, distro)?;
             crate::tui_binary::prebuilt_key(repo, name, variant.contract.profile.libc)
         }
-    }
-}
-
-/// The names `expected` for `family`/`name`: the files its entry holds.
-fn expected_files(family: Family, name: &str) -> Result<Vec<String>> {
-    match family {
-        Family::Tools => crate::recipe::tools::tool_binaries(name),
-        Family::Tui => Ok(vec!["program".into()]),
+        Family::DesktopApps => desktop_apps_key(repo, &distro_contract::load(repo, name)?),
     }
 }
 
@@ -516,7 +698,7 @@ pub struct Part {
     pub distro: Option<String>,
 }
 
-/// Every prebuilt part: each tool package, and each TUI binary once per libc (the first
+/// Every prebuilt part: each tool package, the desktop apps of every distro, and each TUI binary once per libc (the first
 /// distro with that libc stands for the others: the key depends on the libc alone).
 pub fn list(repo: &Path) -> Result<Vec<Part>> {
     let mut parts: Vec<Part> = crate::recipe::tools::tool_packages()
@@ -525,6 +707,7 @@ pub fn list(repo: &Path) -> Result<Vec<Part>> {
         .collect();
     let mut libcs = BTreeSet::new();
     for id in distro_contract::distro_ids(repo) {
+        parts.push(Part { family: Family::DesktopApps, name: id.clone(), distro: None });
         let variant = distro_contract::load(repo, &id)?;
         if !libcs.insert(variant.contract.profile.libc.bun_target()) {
             continue;
@@ -583,6 +766,10 @@ pub fn build(repo: &Path, family: Family, name: &str, distro: Option<&str>) -> R
     }
     select_no_prebuilt();
     match family {
+        Family::DesktopApps => {
+            let variant = distro_contract::load(repo, name)?;
+            crate::desktop_apps::build_cache(&variant)?;
+        }
         Family::Tools => {
             crate::recipe::tools::compile_crate(repo, name)?;
         }
@@ -593,9 +780,8 @@ pub fn build(repo: &Path, family: Family, name: &str, distro: Option<&str>) -> R
         }
     }
     let key = key_for(repo, family, name, distro)?;
-    let expected = expected_files(family, name)?;
-    let expected_refs: Vec<&str> = expected.iter().map(String::as_str).collect();
-    let dir = lookup(repo, family, name, &key, &expected_refs).with_context(|| {
+    let payload = Payload::of(family, name)?;
+    let dir = lookup(repo, family, name, &key, &payload).with_context(|| {
         format!(
             "{} {name} compiled, but the cache holds no verified entry for key {} (the source changed during the build?)",
             family.name(),
@@ -612,8 +798,7 @@ pub fn publish(repo: &Path, family: Family, name: &str, key: &Key) -> Result<()>
     let slug = repository()?;
     let tag = release_tag(family, key);
     let dir = entry_dir(repo, family, key);
-    let expected = expected_files(family, name)?;
-    let expected_refs: Vec<&str> = expected.iter().map(String::as_str).collect();
+    let payload = Payload::of(family, name)?;
     let mut manifest = read_manifest(&dir.join("prebuilt.json")).with_context(|| {
         format!(
             "no cache entry for {} {name} {}: build it first (a build, or `release build --no-prebuilt`)",
@@ -621,11 +806,11 @@ pub fn publish(repo: &Path, family: Family, name: &str, key: &Key) -> Result<()>
             key.short()
         )
     })?;
-    verify_entry(&dir, &manifest, family, name, key, &expected_refs)?;
+    verify_entry(&payload_dir(&dir, &payload), &manifest, family, name, key, &payload)?;
 
     let staging = tempfile::Builder::new().prefix("prebuilt-publish-").tempdir()?;
     let archive_file = staging.path().join(archive_name(family, name));
-    make_archive(&dir, &expected, &archive_file)?;
+    make_archive(&payload_dir(&dir, &payload), &payload, &archive_file)?;
     let (archive_sha, archive_bytes) = sha256_file(&archive_file)?;
     manifest.archive = Some(ArchiveEntry {
         name: archive_name(family, name),
@@ -701,14 +886,21 @@ fn same_prebuilt(path: &Path, key: &Key, archive_sha: &str) -> bool {
 }
 
 /// The same bytes for the same files: names sorted, owners and times zeroed, no
-/// gzip name or time.
-fn make_archive(dir: &Path, files: &[String], output: &Path) -> Result<()> {
+/// gzip name or time. A tree's archive holds its contents at the root (`./usr/...`), with
+/// exact modes and links, hard links stored as separate files.
+fn make_archive(dir: &Path, payload: &Payload, output: &Path) -> Result<()> {
     use std::process::{Command, Stdio};
-    let mut names = files.to_vec();
-    names.sort();
+    let names = match payload {
+        Payload::Files(files) => {
+            let mut names = files.to_vec();
+            names.sort();
+            names
+        }
+        Payload::Tree => vec![".".to_string()],
+    };
     let mut tar = Command::new("tar")
         .args(["--sort=name", "--mtime=@0", "--owner=0", "--group=0", "--numeric-owner", "--format=gnu"])
-        .args(["-cf", "-", "-C"])
+        .args(["--hard-dereference", "-cf", "-", "-C"])
         .arg(dir)
         .arg("--")
         .args(&names)
@@ -726,4 +918,174 @@ fn make_archive(dir: &Path, files: &[String], output: &Path) -> Result<()> {
         bail!("packing '{}' failed (tar {tar}, gzip {gzip})", dir.display());
     }
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// The desktop apps (Qt) family: one tree per distro.
+// ---------------------------------------------------------------------------
+
+/// The recipes whose bytes decide what the desktop apps compile in: `recipe` and everything
+/// it names with `import "..."` or a `//! extends:` header, transitively. Names resolve next
+/// to the importing recipe, else under `os-recipes`. Keyed by path relative to `repo`.
+fn recipe_closure(repo: &Path, recipe: &Path, found: &mut BTreeMap<String, String>) -> Result<()> {
+    let label = recipe.strip_prefix(repo).unwrap_or(recipe).display().to_string();
+    if found.contains_key(&label) {
+        return Ok(());
+    }
+    let text = fs::read_to_string(recipe).with_context(|| format!("reading '{}'", recipe.display()))?;
+    found.insert(label, file_digest(recipe)?);
+    let dir = recipe.parent().context("a recipe has a directory")?;
+    let os_recipes = repo.join("distro/builder/os-recipes");
+    for line in text.lines() {
+        let line = line.trim_start();
+        let named = if line.starts_with("import ") {
+            line.split('"').nth(1)
+        } else {
+            line.strip_prefix("//! extends:").map(str::trim)
+        };
+        let Some(named) = named.filter(|name| !name.is_empty()) else { continue };
+        let path = [dir.join(named), os_recipes.join(named)]
+            .into_iter()
+            .find(|path| path.is_file())
+            .with_context(|| format!("'{}' names '{named}', which is not a file", recipe.display()))?;
+        recipe_closure(repo, &path, found)?;
+    }
+    Ok(())
+}
+
+/// One digest over the closure's `label=digest` lines.
+fn closure_digest(files: &BTreeMap<String, String>) -> String {
+    let mut hash = Sha256::new();
+    for (label, digest) in files {
+        hash.update(format!("{label}\0{digest}\n"));
+    }
+    hex(&hash.finalize())
+}
+
+/// A digest of `gui/`: every file git tracks or would add (untracked and not ignored), by
+/// path, exact mode and worktree content (a link's target), so local edits change it. A
+/// tracked file deleted in the worktree is left out. Everything under `gui/` counts, the
+/// `fixtures/` stand-ins too, though the compile's source copy leaves them out: a change
+/// there misses once, which is harmless.
+fn gui_digest(repo: &Path) -> Result<String> {
+    let listing = Cmd::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", "gui"])
+        .error_msg("listing the files of gui/ with git")
+        .run()?;
+    let paths: BTreeSet<&str> = listing.stdout.split('\0').filter(|path| !path.is_empty()).collect();
+    if paths.is_empty() {
+        bail!("git lists no files under gui/ in '{}'", repo.display());
+    }
+    let mut hash = Sha256::new();
+    for path in paths {
+        let full = repo.join(path);
+        let metadata = match fs::symlink_metadata(&full) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error).with_context(|| format!("reading '{}'", full.display())),
+        };
+        let mode = metadata.permissions().mode() & 0o7777;
+        let (kind, content) = if metadata.file_type().is_symlink() {
+            ("l", hex(fs::read_link(&full)?.as_os_str().as_encoded_bytes()))
+        } else if metadata.is_dir() {
+            ("d", String::new())
+        } else if metadata.is_file() {
+            ("f", file_digest(&full)?)
+        } else {
+            bail!("unsupported entry '{}' under gui/", full.display());
+        };
+        hash.update(format!("{kind}\0{path}\0{mode:o}\0{content}\n"));
+    }
+    Ok(hex(&hash.finalize()))
+}
+
+/// The lock files (`sources/*-lock.rhai`) a recipe closure contains, as one digest.
+fn lock_digest(files: &BTreeMap<String, String>) -> String {
+    closure_digest(&files.iter().filter(|(label, _)| label.ends_with("-lock.rhai")).map(|(l, d)| (l.clone(), d.clone())).collect())
+}
+
+/// The key of the desktop apps tree for `variant`: the `gui/` tree, the base and apps-build
+/// locks (the root the apps compile in is made from both), the apps-build root recipe, both
+/// preseed recipes and `desktop-apps.rhai` with everything they import, the compiler image,
+/// Recipe's declared behaviour versions, and the distro and its libc.
+///
+/// Not covered: the builder's own Rust that composes the root (`compose.rs`) and runs the
+/// compile (`desktop_apps.rs`), which the other prebuilts leave out too.
+pub fn desktop_apps_key(repo: &Path, variant: &distro_contract::Variant) -> Result<Key> {
+    use crate::pipeline::source::{apps_build_preseed_recipe, apps_build_root_recipe, preseed_recipe};
+    let closure = |recipe: &Path| -> Result<BTreeMap<String, String>> {
+        let mut found = BTreeMap::new();
+        recipe_closure(repo, recipe, &mut found)?;
+        Ok(found)
+    };
+    let base_preseed = closure(&preseed_recipe(variant, distro_contract::profile::Flavour::Base))?;
+    let build_preseed = closure(&apps_build_preseed_recipe(variant))?;
+    let root = closure(&apps_build_root_recipe(variant))?;
+    let compile = closure(&repo.join("distro/builder/os-recipes/desktop-apps.rhai"))?;
+    Ok(Key::new(&[
+        ("family", "desktop-apps".into()),
+        ("distro", variant.id.clone()),
+        ("libc", variant.contract.profile.libc.as_str().into()),
+        ("gui_tree", gui_digest(repo)?),
+        ("base_lock", lock_digest(&base_preseed)),
+        ("apps_build_lock", lock_digest(&build_preseed)),
+        ("base_preseed_recipe", closure_digest(&base_preseed)),
+        ("apps_build_preseed_recipe", closure_digest(&build_preseed)),
+        ("apps_build_root_recipe", closure_digest(&root)),
+        ("desktop_apps_recipe", closure_digest(&compile)),
+        ("compiler_image", crate::recipe::compiler_image_reference(repo)?),
+        ("declared", levitate_recipe::identity::declared()),
+    ]))
+}
+
+/// The verified desktop apps tree for `variant`, from the local cache, else downloaded; `None`
+/// on a miss (or any failure), without compiling. Never looks in exact mode or with
+/// `--no-prebuilt`. The path is a directory holding the tree itself, ready to merge.
+pub fn lookup_desktop_apps(repo: &Path, variant: &distro_contract::Variant) -> Result<Option<PathBuf>> {
+    let name = variant.id.as_str();
+    if crate::recipe::exact_identity() {
+        crate::tprintln!("[prebuilt] desktop-apps {name}: compiling (exact build: nothing prebuilt is used)");
+        return Ok(None);
+    }
+    let key = desktop_apps_key(repo, variant)?;
+    let short = key.short().to_string();
+    if NO_PREBUILT.load(Ordering::SeqCst) {
+        crate::tprintln!("[prebuilt] desktop-apps {name}: compiling {short} (--no-prebuilt)");
+        return Ok(None);
+    }
+    let family = Family::DesktopApps;
+    if let Some(dir) = lookup(repo, family, name, &key, &Payload::Tree) {
+        crate::tprintln!("[prebuilt] desktop-apps {name}: local {short}");
+        return Ok(Some(payload_dir(&dir, &Payload::Tree)));
+    }
+    match fetch(repo, family, name, &key, &Payload::Tree) {
+        Ok(dir) => {
+            crate::tprintln!("[prebuilt] desktop-apps {name}: downloaded {short}");
+            Ok(Some(payload_dir(&dir, &Payload::Tree)))
+        }
+        Err(error) => {
+            crate::tprintln!("[prebuilt] desktop-apps {name}: no prebuilt for {short}, compiling");
+            let reason = format!("{error:#}");
+            crate::teprintln!("  ({})", reason.lines().next().unwrap_or("no reason given"));
+            Ok(None)
+        }
+    }
+}
+
+/// Puts a freshly compiled desktop apps `tree` into the local cache (origin `local`) under the
+/// key the checkout has now and returns the cached tree. Exact mode stores nothing and returns
+/// `tree` itself. `--no-prebuilt` still stores.
+pub fn store_desktop_apps(repo: &Path, variant: &distro_contract::Variant, tree: &Path) -> Result<PathBuf> {
+    let name = variant.id.as_str();
+    if crate::recipe::exact_identity() {
+        return Ok(tree.to_path_buf());
+    }
+    let key = desktop_apps_key(repo, variant)?;
+    let sources = source_commits(repo, [PathBuf::from("gui")]);
+    let dir = store(repo, Family::DesktopApps, name, &key, sources, Content::Tree(tree), "local", None)
+        .with_context(|| format!("caching the compiled desktop apps of {name}"))?;
+    crate::tprintln!("[prebuilt] desktop-apps {name}: compiled {}", key.short());
+    Ok(payload_dir(&dir, &Payload::Tree))
 }

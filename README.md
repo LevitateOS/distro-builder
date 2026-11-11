@@ -269,7 +269,7 @@ Every line the builder prints starts with the local time (`HH:MM:SS`; `tprintln!
 ## Prebuilt programs
 
 Our own tools (`recpart`, `recstrap`, `recab`, `recipe`, `install-split`) and the TUI
-binary (`install-tui`, `system-tui`) are identified by a **key**, the SHA-256 of
+binary (`install-tui`, `system-tui`) and the Qt desktop apps (family `desktop-apps`, one whole tree per distro: programs, menu entries, polkit actions, Recipe's metadata, kept with exact modes and links) are identified by a **key**, the SHA-256 of
 everything their compile depends on (`src/prebuilt.rs`): the prepared source closure,
 the compile recipe, the target, the compiler image digest and Recipe's declared behaviour
 versions (`levitate_recipe::identity::declared`). A build takes each program from the
@@ -281,9 +281,14 @@ program says which: `[prebuilt] recab: local|downloaded|compiled <key16>`.
 
 - `release build --exact` (and any signed build) never uses prebuilts and touches no cache.
 - `--no-prebuilt` (`cargo xtask build ... --no-prebuilt`) compiles but still fills the cache.
-- `distro-builder prebuilt key <tools|tui> <name> [--distro <id>]` prints the key (CI uses it);
-  a TUI key needs `--distro` for its libc.
-- `distro-builder prebuilt publish <tools|tui> <name> [--distro <id>]` (also `cargo xtask
+- `distro-builder prebuilt key <tools|tui|desktop-apps> <name> [--distro <id>]` prints the key (CI uses it);
+  a TUI key needs `--distro` for its libc; for `desktop-apps` the name is the distro and no flag is taken.
+- The desktop apps key covers `gui/` (tracked files, modes, worktree content), the base and apps-build
+  locks, the apps-build root, both preseed recipes and `desktop-apps.rhai` with their imports, the
+  compiler image, Recipe's declared versions, the distro and its libc. On a hit `desktop_apps.rs` skips
+  building the apps-build root and the compile; the cached tree is merged and `check` still runs.
+  `prebuilt build desktop-apps <distro>` (elevated) fills the cache without ISO or download.
+- `distro-builder prebuilt publish <tools|tui|desktop-apps> <name> [--distro <id>]` (also `cargo xtask
   prebuilt publish ...`, run as the user) uploads the cache entry of the current key with
   `gh`: it creates the release if missing, never replaces an asset with different bytes, and
   uploads `<family>-<name>.tar.gz` before `prebuilt.json`.

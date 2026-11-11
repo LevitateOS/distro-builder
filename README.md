@@ -102,6 +102,8 @@ parent when Recipe, inputs or tooling change. Reuse the pinned prebuilt kernel
 (`cargo xtask build kernel <distro> --prebuilt` when preparation is needed).
 Do not replace this with kernel recompilation or a desktop build.
 
+`cargo xtask build` runs this builder through `sudo -n` (passwordless sudo or root is required), the builder picks the compiler image pinned in `tools/recipe/bootstrap/product-ci.json` itself (an ambient `GINUX_ROOT`/`GINUX_ROOTFS` still wins) and a product build acquires its package locks itself; `artifact preseed-rootfs-source` remains for `--refresh`.
+
 Configured Recipe needs whole-coordinator bootstrap privileges, and its private
 publications need an appropriately privileged builder consumer. Configure the
 launcher/image/worker explicitly as in Recipe's `docs/setup-linux.md`. A privileged

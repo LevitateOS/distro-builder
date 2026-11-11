@@ -30,6 +30,59 @@ use crate::process::Cmd;
 /// Recipe runs.
 const LAUNCHER_ENV: &[&str] = &["GINUX_ROOT", "GINUX_ROOTFS", "RECIPE_FRAME_TIMEOUT_SECS"];
 
+/// Where the pinned compiler image lives, and the file that pins it.
+const COMPILER_IMAGE_DIR: &str = ".artifacts/ginux-env/prepared-image-build-tools";
+const COMPILER_IMAGE_PIN: &str = "tools/recipe/bootstrap/product-ci.json";
+
+/// The compiler image OS builds run Recipe in, as `(GINUX_ROOT, GINUX_ROOTFS)`:
+/// the one `product-ci.json` pins (`oci:recipe-compiler@sha256:<image_sha256>`),
+/// produced at `.artifacts/ginux-env/prepared-image-build-tools/rootfs.tar`, after
+/// checking its `provenance.json` carries the pinned `sha256`. `None` when the
+/// builder's environment sets `GINUX_ROOT` or `GINUX_ROOTFS`: those keep winning.
+/// The builder never produces the image.
+fn compiler_image(repo: &Path) -> Result<Option<(String, PathBuf)>> {
+    if std::env::var_os("GINUX_ROOT").is_some() || std::env::var_os("GINUX_ROOTFS").is_some() {
+        return Ok(None);
+    }
+    let pin_file = repo.join(COMPILER_IMAGE_PIN);
+    let pin: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(&pin_file).with_context(|| format!("reading '{}'", pin_file.display()))?,
+    )
+    .with_context(|| format!("parsing '{}'", pin_file.display()))?;
+    let digest = pin["image_sha256"]
+        .as_str()
+        .with_context(|| format!("'{}' has no image_sha256", pin_file.display()))?;
+    let dir = repo.join(COMPILER_IMAGE_DIR);
+    let (rootfs, provenance) = (dir.join("rootfs.tar"), dir.join("provenance.json"));
+    let missing = |why: String| {
+        anyhow::anyhow!(
+            "the compiler image oci:recipe-compiler@sha256:{digest} (pinned in {COMPILER_IMAGE_PIN}) is {why}; \
+             produce it as tools/recipe/docs/setup-linux.md describes (expected {} and {})",
+            rootfs.display(),
+            provenance.display()
+        )
+    };
+    if !rootfs.is_file() {
+        return Err(missing(format!("not at '{}'", rootfs.display())));
+    }
+    let recorded: serde_json::Value = match std::fs::read(&provenance) {
+        Ok(bytes) => serde_json::from_slice(&bytes)
+            .with_context(|| format!("parsing '{}'", provenance.display()))?,
+        Err(_) => return Err(missing(format!("without '{}'", provenance.display()))),
+    };
+    match recorded["sha256"].as_str() {
+        Some(found) if found == digest => {}
+        found => {
+            return Err(missing(format!(
+                "not what '{}' records (sha256 {})",
+                provenance.display(),
+                found.unwrap_or("absent")
+            )))
+        }
+    }
+    Ok(Some((format!("oci:recipe-compiler@sha256:{digest}"), rootfs)))
+}
+
 /// The Ginux crate's directory, the cargo target it builds for, and its binary.
 const GINUX_DIR: &str = "tools/ginux";
 const GINUX_TARGET: &str = "x86_64-unknown-linux-gnu";
@@ -272,6 +325,10 @@ impl<'a> Invocation<'a> {
         if let Some((reference, rootfs)) = &self.root {
             cmd = cmd.env("GINUX_ROOT", reference).env("GINUX_ROOTFS", rootfs);
             eprintln!("    GINUX_ROOT={reference} (this recipe's own root)");
+            eprintln!("    GINUX_ROOTFS={}", rootfs.display());
+        } else if let Some((reference, rootfs)) = compiler_image(self.repo)? {
+            cmd = cmd.env("GINUX_ROOT", &reference).env("GINUX_ROOTFS", &rootfs);
+            eprintln!("    GINUX_ROOT={reference} (the pinned compiler image)");
             eprintln!("    GINUX_ROOTFS={}", rootfs.display());
         }
         cmd.run_interactive()?;

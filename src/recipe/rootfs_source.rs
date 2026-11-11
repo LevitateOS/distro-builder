@@ -64,8 +64,10 @@ fn preseed_record(flavour: Flavour) -> &'static str {
 const APPS_BUILD_RECORD: &str = "apps-build-source-inputs.json";
 
 /// Run an explicitly declared acquisition recipe (the preseed of `flavour`'s
-/// lock) and validate selected products. Materialization never calls this
-/// implicitly.
+/// lock) and validate selected products. A product build calls this itself
+/// (`pipeline::source::acquire_locks`, without `refresh`) before it reads the
+/// recorded outputs; the explicit `artifact preseed-rootfs-source` command stays
+/// for `--refresh`.
 pub fn preseed_rootfs_source(
     repo_root: &Path,
     distro_id: &str,

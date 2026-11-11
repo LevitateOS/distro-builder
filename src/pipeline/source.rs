@@ -80,10 +80,34 @@ pub fn apps_build_root_recipe(variant: &Variant) -> PathBuf {
     resolve_repo_path(&variant.repo_root, &variant.contract.desktop.apps_build_root_recipe_script)
 }
 
+/// Acquires the package locks the `flavour` system build reads, before it reads
+/// their recorded inputs: the base lock; for the desktop also the desktop lock and
+/// the apps-build lock (what compiling the desktop apps needs). Recipe's readiness
+/// checks make a preseed whose lock and recipe are unchanged a quick no-op; only
+/// `artifact preseed-rootfs-source --refresh` re-acquires.
+pub fn acquire_locks(variant: &Variant, flavour: Flavour) -> Result<()> {
+    use crate::recipe::rootfs_source::{preseed_apps_build, preseed_rootfs_source};
+    let (repo, id) = (&variant.repo_root, &variant.id);
+    let mut flavours = vec![Flavour::Base];
+    if flavour == Flavour::Desktop {
+        flavours.push(Flavour::Desktop);
+    }
+    for lock in flavours {
+        preseed_rootfs_source(repo, id, &preseed_recipe(variant, lock), lock, false)
+            .with_context(|| format!("acquiring the {lock} package lock for '{id}'"))?;
+    }
+    if flavour == Flavour::Desktop {
+        preseed_apps_build(repo, id, &apps_build_preseed_recipe(variant), false)
+            .with_context(|| format!("acquiring the apps-build package lock for '{id}'"))?;
+    }
+    Ok(())
+}
+
 /// Runs the variant's rootfs recipe and returns the tree it publishes: the
 /// whole installable `flavour` system. Each flavour has its own build
 /// directory, so building one never invalidates the other.
 pub fn materialize_rootfs_source(variant: &Variant, flavour: Flavour) -> Result<PathBuf> {
+    acquire_locks(variant, flavour)?;
     let repo = &variant.repo_root;
     let source = &variant.contract.sources.rootfs_source;
     let recipe = resolve_repo_path(repo, &source.recipe_script);

@@ -280,11 +280,46 @@ fn prepare_source(repo_root: &Path, work: &Path, apps: &[&TuiApp]) -> Result<tem
             }
         }
     }
+    generate_docs_index(repo_root, source.path())?;
     fs::write(
         source.path().join("entry.ts"),
         entry_source(repo_root, repo_root, apps)?,
     )?;
     Ok(source)
+}
+
+/// docs/content's page index (`src/generated/index.ts`) is generated and
+/// gitignored, so the git-listed snapshot lacks it. Generate it with the
+/// host's Bun in the checkout (where the workspace's node_modules are), as the
+/// tool sources run `cargo vendor` on the host, and copy it into the snapshot:
+/// Bun cannot run JavaScript inside a Ginux domain yet. The snapshot, and so
+/// the prebuilt key, then carries exactly what was generated.
+fn generate_docs_index(repo_root: &Path, source: &Path) -> Result<()> {
+    let docs = repo_root.join("docs/content");
+    if !docs.join("scripts/build.ts").is_file() || !source.join("docs/content").is_dir() {
+        return Ok(());
+    }
+    let status = std::process::Command::new("bun")
+        .arg("scripts/build.ts")
+        .current_dir(&docs)
+        .status()
+        .context("running bun for docs/content's page index (Bun on PATH and `bun install` in the checkout are needed)")?;
+    if !status.success() {
+        bail!("docs/content/scripts/build.ts failed ({status}); run `bun install` at the repository root");
+    }
+    let index = docs.join("src/generated/index.ts");
+    // The builder runs as root under sudo: hand the generated file back to the
+    // checkout's owner so a later unprivileged `bun run build` can replace it.
+    if let (Ok(uid), Ok(gid)) = (std::env::var("SUDO_UID"), std::env::var("SUDO_GID")) {
+        if let (Ok(uid), Ok(gid)) = (uid.parse::<u32>(), gid.parse::<u32>()) {
+            let _ = std::os::unix::fs::chown(&index, Some(uid), Some(gid));
+            let _ = std::os::unix::fs::chown(docs.join("src/generated"), Some(uid), Some(gid));
+        }
+    }
+    let target = source.join("docs/content/src/generated/index.ts");
+    fs::create_dir_all(target.parent().context("generated index has a parent")?)?;
+    fs::copy(&index, &target).with_context(|| format!("copying {}", index.display()))?;
+    Ok(())
 }
 
 /// The shared libraries the bun build for `libc` links are in `rootfs`.

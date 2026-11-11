@@ -263,6 +263,11 @@ pub fn assemble(
             .extra_files
             .push((signature, distro_contract::release::SIGNATURE.into()));
     }
+    if contract.release.production.is_some() {
+        let authority=release_manifest.inputs.manifest_path().with_file_name(distro_contract::release::production::AUTHORITY_FILE);
+        anyhow::ensure!(authority.is_file(),"verified production release lacks its public authority proof");
+        config.extra_files.push((authority,distro_contract::release::production::AUTHORITY_FILE.into()));
+    }
     config.systemd_boot = rootfs.join(SYSTEMD_BOOT_EFI);
     let iso = reciso::create_iso(&config, &|message| println!("  {message}")).context(what)?;
 

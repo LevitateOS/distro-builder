@@ -83,6 +83,27 @@ fn compiler_image(repo: &Path) -> Result<Option<(String, PathBuf)>> {
     Ok(Some((format!("oci:recipe-compiler@sha256:{digest}"), rootfs)))
 }
 
+/// Whether `release build --exact` selected exact identity for this process.
+static EXACT_FLAG: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Selects exact identity for the rest of this process (`release build
+/// --exact`); call it before the first part key or Recipe invocation.
+pub fn select_exact_identity() {
+    EXACT_FLAG.store(true, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// Whether this build uses exact identity: `--exact` selected it, or the
+/// release is signed (`RECAB_RELEASE_SIGNING_KEY` is set), since a signed
+/// release is what production publishes. Then every Recipe invocation gets
+/// `--exact-identity` (Recipe reuses saved state only from byte-identical
+/// Recipe and Ginux binaries), and the system part's key carries the Recipe
+/// and launcher bytes (`crate::parts`). Otherwise both name the tools by
+/// Recipe's declared behaviour versions (`levitate_recipe::identity`).
+pub fn exact_identity() -> bool {
+    EXACT_FLAG.load(std::sync::atomic::Ordering::SeqCst)
+        || std::env::var_os(crate::parts::SIGNING_KEY_ENV).is_some()
+}
+
 /// The Ginux crate's directory, the cargo target it builds for, and its binary.
 const GINUX_DIR: &str = "tools/ginux";
 const GINUX_TARGET: &str = "x86_64-unknown-linux-gnu";
@@ -301,6 +322,7 @@ impl<'a> Invocation<'a> {
             .arg(result.path())
             .arg("--recipes-path")
             .arg(&os_recipes_path)
+            .args(exact_identity().then_some("--exact-identity"))
             .args(&self.args)
             .dir(self.cwd.as_deref().unwrap_or(self.repo))
             .stdout_to_stderr()

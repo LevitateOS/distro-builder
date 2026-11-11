@@ -74,8 +74,11 @@ build never runs an older launcher or worker than the checkout. `GINUX_ROOT`,
 Each release records `system-sources.sha256` beside its rootfs: the digest of
 every source its system rootfs is built from (the builder, contract, profile,
 variant, TUI and GUI apps, the recipes repository and the rootfs tools' crate
-closures, uncommitted edits included) and the Ginux launcher built from
-`tools/ginux`. It is one input of the system part's key (below), so every
+closures, uncommitted edits included), the Ginux launcher built from
+`tools/ginux` (by content: the system ships it as `usr/libexec/recipe/ginux`)
+and Recipe's declared behaviour versions of the Recipe and Ginux that run the
+recipe steps (`levitate_recipe::identity::declared`, not their bytes). It is
+one input of the system part's key (below), so every
 release carries a system built from the checkout's current sources. The
 maintained Ginux/Recipe source pair is recorded in
 `docs/ginux-contributions/delivery-sources.json` at the repository root. New local
@@ -119,8 +122,9 @@ A part's key is a SHA-256 over its kind, the distro and named inputs, all
 recorded in its `part.json` with its output files (path, bytes, sha256):
 
 - system: the flavour, `system-sources.sha256`'s digest, the source closure of
-  the builder's own crates (recinit, reciso, recab, levitate-recipe...), the
-  Recipe CLI, the Ginux root (`GINUX_ROOT`, and the `GINUX_ROOTFS` tar's
+  the builder's own crates (recinit, reciso, recab, levitate-recipe...),
+  Recipe's declared behaviour versions and the identity mode (`declared`, or
+  `exact` with the Recipe CLI's and the Ginux launcher's SHA-256), the Ginux root (`GINUX_ROOT`, and the `GINUX_ROOTFS` tar's
   digest), the kernel (release, image digest, module tree digest), busybox,
   the release policy and its production authority, and whether the manifest
   is signed and the digest of the `RECAB_RELEASE_SIGNING_KEY` file;
@@ -135,7 +139,20 @@ file has its recorded size and hash; otherwise it is removed and rebuilt. An
 `flock` on each key lets two products or distros build at once; a second
 builder of one key reuses the first one's part. The build log has one line per
 part: `[part:system-desktop:levitate] reused <key prefix>`, `building ...` or
-`built ...`.
+`built ...`; in exact mode the label ends in `:exact`.
+
+**Identity modes.** By default the tools that execute recipe steps are named
+by declared behaviour versions, in Recipe's saved-state identities and in the
+system part's key, so a Recipe or Ginux rebuild that behaves the same reuses
+every step whose inputs did not change (a Ginux change still builds the system
+part again, because the system ships the launcher, but its Recipe steps are
+reused). `release build <product> <distro> --exact` (`cargo xtask build
+<product> <distro> --exact`) passes `--exact-identity` to every Recipe
+invocation and puts the Recipe CLI's and launcher's bytes into the system
+part's key, so a release comes only from what byte-identical tools built. A
+signed build (`RECAB_RELEASE_SIGNING_KEY` set), the production release path,
+is always exact. When to bump the declared versions is stated in
+`tools/recipe/src/identity.rs`.
 
 The **combiner** (`release build <product> <distro>`, `src/release.rs`)
 ensures the product's system and overlay parts, hard-links their files into

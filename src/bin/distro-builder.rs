@@ -202,8 +202,21 @@ fn run(repo: &Path, command: Command) -> Result<()> {
             println!("{}", manifest.path.display());
             Ok(())
         }
-        Command::ReleaseBuild { product, distro } => {
+        Command::ReleaseBuild {
+            product,
+            distro,
+            exact,
+        } => {
             process::check_host_tools(HostNeed::Build)?;
+            if exact {
+                distro_builder::recipe::select_exact_identity();
+            }
+            if distro_builder::recipe::exact_identity() {
+                distro_builder::tprintln!(
+                    "exact identity: reusing only what byte-identical Recipe and Ginux built{}",
+                    if exact { "" } else { " (the release is signed)" }
+                );
+            }
             build::build_one(repo, &distro, product)
         }
         Command::ProductPrepare {

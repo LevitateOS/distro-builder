@@ -12,7 +12,8 @@
 //!   EROFS, the installed initramfs and the published release set
 //!   (`release.json`, inventory, signature, `live/` and `boot/` members,
 //!   `system-sources.sha256`). Built from the checkout's system sources,
-//!   the builder's own crates, Recipe and its Ginux root, the kernel,
+//!   the builder's own crates, Recipe's and Ginux's declared behaviour
+//!   versions (and their bytes in exact mode) and the Ginux root, the kernel,
 //!   busybox and the release policy and signing input (`system_inputs`).
 //! - `overlay-<product>`: the product's overlay tree (live session, overlay
 //!   tools, install screen) built on its flavour's system tree, and its
@@ -164,7 +165,7 @@ impl Part {
 pub(crate) fn system(variant: &Variant, flavour: Flavour, kernel: &Path) -> Result<Part> {
     let kind = format!("system-{flavour}");
     let names = &variant.contract.artifacts;
-    let label = format!("[part:{kind}:{}]", variant.id);
+    let label = label(&kind, &variant.id);
     ensure_part(
         variant,
         &kind,
@@ -244,7 +245,7 @@ pub(crate) fn system(variant: &Variant, flavour: Flavour, kernel: &Path) -> Resu
 pub(crate) fn overlay(variant: &Variant, product: ProductId, system: &Part) -> Result<Part> {
     let kind = format!("overlay-{product}");
     let build = crate::product::build(product);
-    let label = format!("[part:{kind}:{}]", variant.id);
+    let label = label(&kind, &variant.id);
     ensure_part(
         variant,
         &kind,
@@ -312,8 +313,25 @@ fn system_inputs(variant: &Variant, flavour: Flavour, kernel: &Path) -> Result<I
         "builder-sources".into(),
         sources::roots_digest(repo, &builder_crates).context("fingerprinting the builder's crates")?,
     );
-    // The Recipe CLI every recipe step runs, and the Ginux root it runs in.
-    inputs.insert("recipe-cli".into(), file_sha256(crate::recipe::binary(repo)?)?.0);
+    // The Recipe and Ginux every recipe step runs under: by their declared
+    // behaviour versions, as Recipe names them in its saved-state identities;
+    // in exact mode also by the bytes of the Recipe CLI (the worker too,
+    // unless a root needs the static one, which is built from the same
+    // sources) and of the launcher, so a release comes only from these exact
+    // tools. Recipe's sources are in "system-sources" and "builder-sources"
+    // either way: the system ships Recipe.
+    inputs.insert("recipe-behaviour".into(), levitate_recipe::identity::declared());
+    if crate::recipe::exact_identity() {
+        inputs.insert("recipe-identity".into(), "exact".into());
+        inputs.insert("recipe-cli".into(), file_sha256(crate::recipe::binary(repo)?)?.0);
+        inputs.insert(
+            "ginux-launcher".into(),
+            file_sha256(crate::recipe::ginux_binary(repo)?)?.0,
+        );
+    } else {
+        inputs.insert("recipe-identity".into(), "declared".into());
+    }
+    // The Ginux root recipe steps run in.
     inputs.insert(
         "ginux-root".into(),
         std::env::var("GINUX_ROOT").unwrap_or_else(|_| "pinned compiler image".into()),
@@ -416,7 +434,7 @@ fn ensure_part(
 ) -> Result<Part> {
     let parent = runs::parts_dir(&variant.repo_root, &variant.id).join(kind);
     fs::create_dir_all(&parent).with_context(|| format!("creating {}", parent.display()))?;
-    let label = format!("[part:{kind}:{}]", variant.id);
+    let label = label(kind, &variant.id);
     let ensure = crate::timeline::Step::begin("part", &format!("part {kind}"));
     let trees: Vec<String> = trees.iter().map(|tree| tree.to_string()).collect();
     for _ in 0..ATTEMPTS {
@@ -513,6 +531,14 @@ fn ensure_part(
          build again once the checkout and the kernel stay unchanged",
         variant.id
     )
+}
+
+/// The prefix of the build log's lines about the `kind` part of `distro_id`:
+/// `[part:<kind>:<distro>]`, with `:exact` in exact mode
+/// (`crate::recipe::exact_identity`).
+fn label(kind: &str, distro_id: &str) -> String {
+    let mode = if crate::recipe::exact_identity() { ":exact" } else { "" };
+    format!("[part:{kind}:{distro_id}{mode}]")
 }
 
 /// The key of the `kind` part of `distro_id` built from `inputs`.

@@ -69,9 +69,13 @@ pub enum Command {
     },
     /// Build `product`'s release ISO for `distro` from its system and overlay
     /// parts, building or reusing each (`parts`); no other product is built.
+    /// `exact`: Recipe and the part keys name the exact Recipe and Ginux bytes,
+    /// so nothing built by other tool binaries is reused
+    /// (`recipe::exact_identity`; a signed build is always exact).
     ReleaseBuild {
         product: ProductId,
         distro: String,
+        exact: bool,
     },
     /// Prepare `product`'s rootfs source and overlay for `distro` in `output`:
     /// copies of its parts' trees.
@@ -116,7 +120,7 @@ pub fn usage() -> String {
          release verify-feed <distro> <directory>           authenticate staged production metadata (no builds/network)\n  \
          release index <distro> <bundle> <publish_dir> <sequence> --signing-key PKCS8  publish a signed local update index\n  \
          release manifest <distro> <base|desktop> <root> <dir> [--signing-key PKCS8]  verify/package existing release artifacts\n  \
-         release build <product> <distro>                   build a release ISO from its cached parts ({releases})\n  \
+         release build <product> <distro> [--exact]         build a release ISO from its cached parts ({releases}); --exact (implied when signed): reuse only what byte-identical Recipe and Ginux built\n  \
          product prepare <product> <distro> <dir>           prepare a product's rootfs and overlay ({products})\n  \
          transform build product-erofs <prepared_dir>       write a prepared product's EROFS images\n  \
          artifact prepare-tool-source <package> <dir>       write a tool's offline source tree\n  \
@@ -252,8 +256,15 @@ impl Command {
                     push(&[&"--signing-key", key]);
                 }
             }
-            Self::ReleaseBuild { product, distro } => {
-                push(&[&"release", &"build", &product.name(), distro])
+            Self::ReleaseBuild {
+                product,
+                distro,
+                exact,
+            } => {
+                push(&[&"release", &"build", &product.name(), distro]);
+                if *exact {
+                    push(&[&"--exact"]);
+                }
             }
             Self::ProductPrepare {
                 product,
@@ -408,7 +419,7 @@ pub fn parse(args: &[String]) -> Result<(PathBuf, Command), Usage> {
                 signing_key,
             }
         }
-        ["release", "build", name, id] => {
+        ["release", "build", name, id, flags @ ..] if flags.is_empty() || *flags == ["--exact"] => {
             let product = product(name)?;
             if !product.is_release() {
                 return usage(format!(
@@ -419,6 +430,7 @@ pub fn parse(args: &[String]) -> Result<(PathBuf, Command), Usage> {
             Command::ReleaseBuild {
                 product,
                 distro: distro(id)?,
+                exact: !flags.is_empty(),
             }
         }
         ["product", "prepare", name, id, output] => Command::ProductPrepare {

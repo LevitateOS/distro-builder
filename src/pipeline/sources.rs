@@ -1,7 +1,8 @@
 //! The sources a system rootfs is built from, as one digest: the checkout's
 //! builder (its recipes and locks), contract, profile, variant, TUI and GUI
-//! apps, the recipes repository and the rootfs tools' crates, with every
-//! recipe step run by the Ginux launcher built from `tools/ginux`. The digest
+//! apps, the recipes repository and the rootfs tools' crates, the Ginux
+//! launcher the system ships, and the declared behaviour versions of the
+//! Recipe and Ginux that run every recipe step. The digest
 //! is one input of the system part's key (`crate::parts`), and the system part
 //! records it as `system-sources.sha256`, which the release manifest carries
 //! as its provenance and every release directory keeps.
@@ -22,8 +23,15 @@ pub const SOURCES_FILE: &str = "system-sources.sha256";
 /// The digest of the sources `distro_id`'s system rootfs is built from, as the
 /// checkout has them now: every file git lists (tracked, or new and not
 /// ignored, as the tools' source closures take them) under each source, with
-/// its path and content, and the Ginux launcher the checkout builds (Ginux is
-/// developed here: a changed launcher rebuilds the system).
+/// its path and content; the Ginux launcher the checkout builds, by content,
+/// because the system ships it (`usr/libexec/recipe/ginux`, put there by
+/// `install-tools.rhai` for Recipe); and the declared behaviour versions of
+/// the Recipe and Ginux that execute the recipes
+/// (`levitate_recipe::identity`), not their bytes. A changed launcher still
+/// builds the system part again, but Recipe reuses the saved state of every
+/// step whose inputs did not change, so only the steps that take the launcher
+/// as an input run again. The exact tools' bytes are added to the part key in
+/// exact mode only (`crate::parts`).
 pub fn system_sources_digest(repo: &Path, distro_id: &str) -> Result<String> {
     let repo = repo.canonicalize()?;
     let mut roots: BTreeSet<PathBuf> = [
@@ -42,9 +50,14 @@ pub fn system_sources_digest(repo: &Path, distro_id: &str) -> Result<String> {
         roots.extend(crate::recipe::tools::tool_crate_dirs(&repo, tool.package)?);
     }
     let mut hasher = Sha256::new();
+    // Shipped content: the system carries this launcher for its own Recipe.
     let ginux = crate::recipe::ginux_binary(&repo)?;
-    hasher.update(b"ginux launcher\0");
+    hasher.update(b"shipped ginux launcher\0");
     hasher.update(fs::read(ginux).with_context(|| format!("reading '{}'", ginux.display()))?);
+    hasher.update([0]);
+    // What executes the recipe steps, by declared behaviour.
+    hasher.update(b"recipe execution behaviour\0");
+    hasher.update(levitate_recipe::identity::declared().as_bytes());
     hasher.update([0]);
     // This pinned tar ships with Recipe in the installed system. Recipe verifies
     // the selected input's bytes against this reference before publishing it.

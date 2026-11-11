@@ -5,6 +5,7 @@
 pub mod artifact;
 pub mod cli;
 pub mod install_ux;
+pub(crate) mod compose;
 pub(crate) mod guest;
 pub use pipeline::kernel;
 pub(crate) mod parts;

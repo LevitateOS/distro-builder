@@ -240,7 +240,7 @@ fn recorded_inputs(
 // of a verified temp file in the same directory, and nothing is ever deleted,
 // so concurrent builds can share it.
 
-fn store_dir(repo_root: &Path) -> PathBuf {
+pub(crate) fn store_dir(repo_root: &Path) -> PathBuf {
     repo_root.join(".artifacts/store/sha256")
 }
 
@@ -271,6 +271,78 @@ fn lock_digests(recipe: &Path) -> Result<std::collections::BTreeSet<String>> {
         }
     }
     Ok(digests)
+}
+
+/// One row of a package lock's `packages()`: `[name, id, URL, SHA256]`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct LockRow {
+    pub name: String,
+    pub id: String,
+    pub url: String,
+    pub sha256: String,
+}
+
+impl LockRow {
+    /// The file name the preseed gives the package: its URL's basename.
+    pub fn file_name(&self) -> &str {
+        self.url.rsplit('/').next().unwrap_or(&self.url)
+    }
+}
+
+/// The rows of `packages()` in the lock the preseed recipe `recipe` imports
+/// (`import "sources/<..>-lock.rhai"`), in lock order: the order the rootfs
+/// and root recipes install them in. The locks are generated, one row per
+/// line (`["name", "id", "URL", "SHA256"],`).
+pub(crate) fn lock_rows(recipe: &Path) -> Result<Vec<LockRow>> {
+    let text = std::fs::read_to_string(recipe)
+        .with_context(|| format!("reading '{}'", recipe.display()))?;
+    let dir = recipe.parent().context("preseed recipe has no directory")?;
+    let locks: Vec<&str> = text
+        .lines()
+        .filter(|l| l.trim_start().starts_with("import "))
+        .filter_map(|l| l.split('"').nth(1))
+        .filter(|name| name.starts_with("sources/") && name.ends_with("-lock.rhai"))
+        .collect();
+    let [lock] = locks.as_slice() else {
+        bail!("'{}' imports {} package locks, not one", recipe.display(), locks.len());
+    };
+    let path = dir.join(lock);
+    let text = std::fs::read_to_string(&path)
+        .with_context(|| format!("reading lock '{}'", path.display()))?;
+    let mut rows = Vec::new();
+    let mut inside = false;
+    for line in text.lines() {
+        let line = line.trim();
+        if !inside {
+            inside = line.starts_with("fn packages()");
+            continue;
+        }
+        if line == "}" {
+            break;
+        }
+        if !line.starts_with("[\"") {
+            continue;
+        }
+        let fields: Vec<&str> = line.split('"').collect();
+        // `["a", "b", "c", "d"],` splits into 9 pieces, the values at 1, 3, 5, 7.
+        if fields.len() != 9 || fields.iter().any(|f| f.contains('\\')) {
+            bail!("unexpected row in lock '{}': {line}", path.display());
+        }
+        let row = LockRow {
+            name: fields[1].into(),
+            id: fields[3].into(),
+            url: fields[5].into(),
+            sha256: fields[7].to_ascii_lowercase(),
+        };
+        if !is_digest(&row.sha256) {
+            bail!("lock '{}' gives {} no SHA-256", path.display(), row.id);
+        }
+        rows.push(row);
+    }
+    if rows.is_empty() {
+        bail!("lock '{}' has no packages() rows", path.display());
+    }
+    Ok(rows)
 }
 
 /// Hardlink (or copy, across filesystems) the stored files `digests` name into `view`.

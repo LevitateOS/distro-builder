@@ -1,12 +1,14 @@
 // The root the desktop apps (gui/) are compiled in on a Fedora variant: the
-// base lock's RPMs (the `rpms` input) and the apps-build lock's (the
-// `apps_build_rpms` input) unpacked into one tree, without their scripts. The
+// base lock's RPMs and the apps-build lock's, without firmware and without
+// their scripts, composed by the builder from its unpack store into one tree
+// (the `composed` input: `tree.tar`, the tree in `target_pack_tree`'s format,
+// and `packages.txt`, one `<sha256> <id>` line per package in order). The
 // builder makes a root image of the tree and runs `desktop-apps.rhai` in it,
 // so the apps are compiled by the distro's own compiler against the distro's
 // own C++ runtime and Qt, the ones the desktop system ships. The tree is
 // never part of an image.
 const RECIPE_API = 2;
-const NEEDS = #{ inputs: #{ rpms: "directory", apps_build_rpms: "directory" }, outputs: #{ root: "directory" }, memory_mib: 8192, storage_max_objects: 262144, timeout_secs: 7200 };
+const NEEDS = #{ inputs: #{ composed: "directory" }, outputs: #{ root: "directory" }, memory_mib: 8192, storage_max_objects: 262144, timeout_secs: 7200 };
 import "sources/levitate-rpm-lock.rhai" as lock;
 import "sources/levitate-rpm-apps-build-lock.rhai" as build_lock;
 let ctx = #{
@@ -20,37 +22,35 @@ fn root_of(ctx) { join_path(ctx.runtime.paths.output, "root") }
 fn stamp_of(ctx) { join_path(ctx.runtime.paths.output, "root.built") }
 
 // A compiler needs no firmware; it is most of the base lock's bytes, and the
-// root is copied for every run in it.
+// root is copied for every run in it. The builder composes only these
+// packages (`apps_build_wanted` in src/compose.rs); verify_inputs checks it.
 fn wanted(name) { !name.contains("firmware") && !name.contains("microcode") }
 
-// Each RPM the root gets, with its lock row: [file, row].
-fn rpm_files(ctx) {
-    let files = [];
-    for set in ctx.sets {
-        for rpm in set[1] {
-            if wanted(rpm[0]) { files.push([join_path(join_path(ctx.runtime.paths.inputs, set[0]), basename(rpm[2])), rpm]); }
-        }
-    }
-    files
+// The lock rows the root is made of, in order.
+fn root_rows(ctx) {
+    let rows = [];
+    for set in ctx.sets { for rpm in set[1] { if wanted(rpm[0]) { rows.push(rpm); } } }
+    rows
 }
 
-// Unpacks every RPM, reporting package k of n.
-fn unpack_all(ctx, root) {
-    let files = rpm_files(ctx);
-    let total = files.len();
-    let done = 0;
-    progress(0, total, "packages");
-    for entry in files {
-        target_extract_rpm(entry[0], root);
-        done += 1;
-        progress(done, total, "packages");
-    }
-}
+fn composed_file(ctx, name) { join_path(join_path(ctx.runtime.paths.inputs, "composed"), name) }
 
+// Refuses a composed tree that is not made of exactly these packages, in this order.
 fn verify_inputs(ctx) {
-    for entry in rpm_files(ctx) {
-        if !is_file(entry[0]) { throw "the rpm inputs lack " + basename(entry[0]) + "; run the rootfs source preseed for the desktop"; }
-        verify_sha256(entry[0], entry[1][3]);
+    if !is_file(composed_file(ctx, "tree.tar")) { throw "the composed input lacks tree.tar"; }
+    let lines = [];
+    for line in read_file(composed_file(ctx, "packages.txt")).split("\n") {
+        let line = trim(line);
+        if line != "" { lines.push(line); }
+    }
+    let expected = root_rows(ctx);
+    if lines.len() != expected.len() {
+        throw "the composed root is made of " + lines.len() + " packages, the locks name " + expected.len();
+    }
+    for i in 0..expected.len() {
+        if lines[i].split(" ")[0] != expected[i][3].to_lower() {
+            throw "package " + (i + 1) + " of the composed root is " + lines[i] + ", the locks name " + expected[i][1];
+        }
     }
 }
 
@@ -78,8 +78,9 @@ fn build(ctx) {
     if exists(stamp_of(ctx)) { rm(stamp_of(ctx)); }
     if is_dir(root) { rm(root); }
     mkdir(root);
-    log("Extracting the Fedora " + lock::release() + " compiler root...");
-    unpack_all(ctx, root);
+    log("Copying the composed Fedora " + lock::release() + " compiler root...");
+    progress(0, 0, "copying the composed root");
+    target_unpack_tree(composed_file(ctx, "tree.tar"), root);
     // binutils' install script chooses the linker through `alternatives`;
     // no script ran, so name the default one here.
     if !exists(join_path(root, "usr/bin/ld")) {

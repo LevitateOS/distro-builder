@@ -101,6 +101,25 @@ pub(crate) fn compiler_image_reference(repo: &Path) -> Result<String> {
     Ok(format!("oci:recipe-compiler@sha256:{digest}"))
 }
 
+/// The root image recipe steps run in, as its reference: `GINUX_ROOT` when
+/// the builder's environment sets it, else the pinned compiler image
+/// (`oci:recipe-compiler@sha256:<image_sha256>` from `product-ci.json`). For
+/// store keys of what those steps produce; nothing is checked here.
+pub(crate) fn root_reference(repo: &Path) -> Result<String> {
+    if let Some(root) = std::env::var_os("GINUX_ROOT") {
+        return Ok(root.to_string_lossy().into_owned());
+    }
+    let pin_file = repo.join(COMPILER_IMAGE_PIN);
+    let pin: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(&pin_file).with_context(|| format!("reading '{}'", pin_file.display()))?,
+    )
+    .with_context(|| format!("parsing '{}'", pin_file.display()))?;
+    let digest = pin["image_sha256"]
+        .as_str()
+        .with_context(|| format!("'{}' has no image_sha256", pin_file.display()))?;
+    Ok(format!("oci:recipe-compiler@sha256:{digest}"))
+}
+
 /// Whether `release build --exact` selected exact identity for this process.
 static EXACT_FLAG: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
@@ -221,6 +240,10 @@ pub struct Invocation<'a> {
     root: Option<(String, PathBuf)>,
     worker: Option<PathBuf>,
     cwd: Option<PathBuf>,
+    /// Runs beside other invocations: its own progress file, no timeline step.
+    concurrent: Option<PathBuf>,
+    /// Where the run's output goes instead of the terminal.
+    log: Option<PathBuf>,
 }
 
 impl<'a> Invocation<'a> {
@@ -239,7 +262,24 @@ impl<'a> Invocation<'a> {
             root: None,
             worker: None,
             cwd: None,
+            concurrent: None,
+            log: None,
         }
+    }
+
+    /// Runs beside other invocations of the same build (the unpack shards):
+    /// Recipe keeps its progress in `progress_file`, and the run records no
+    /// timeline step and no active recipe of its own, since the timeline is
+    /// one stack; the caller records the step they make up together.
+    pub fn concurrent(mut self, progress_file: impl Into<PathBuf>) -> Self {
+        self.concurrent = Some(progress_file.into());
+        self
+    }
+
+    /// Sends what the run prints to `log` instead of the terminal.
+    pub fn log_file(mut self, log: impl Into<PathBuf>) -> Self {
+        self.log = Some(log.into());
+        self
     }
 
     /// Keep short-lived verification outputs in the invocation's private scope,
@@ -307,13 +347,32 @@ impl<'a> Invocation<'a> {
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_else(|| recipe.display().to_string());
-        let step = crate::timeline::Step::begin("recipe", &format!("recipe {} {recipe_name}", self.phase));
-        crate::teprintln!(
+        let step = self
+            .concurrent
+            .is_none()
+            .then(|| crate::timeline::Step::begin("recipe", &format!("recipe {} {recipe_name}", self.phase)));
+        // What the builder says about the run: on the terminal, or at the top
+        // of its log.
+        let mut log = match &self.log {
+            Some(path) => Some(
+                std::fs::File::create(path)
+                    .with_context(|| format!("creating the recipe log '{}'", path.display()))?,
+            ),
+            None => None,
+        };
+        let mut note = |line: String| match log.as_mut() {
+            Some(file) => {
+                use std::io::Write as _;
+                let _ = writeln!(file, "{} {line}", crate::timeline::clock());
+            }
+            None => crate::teprintln!("{line}"),
+        };
+        note(format!(
             "  recipe {} {} (work: {})",
             self.phase,
             recipe.display(),
             work.display()
-        );
+        ));
         let bin = binary(self.repo)?;
         std::fs::create_dir_all(work)
             .with_context(|| format!("creating recipe work directory '{}'", work.display()))?;
@@ -347,15 +406,21 @@ impl<'a> Invocation<'a> {
             .error_msg(format!("recipe {} {}", self.phase, recipe.display()));
         // Recipe keeps this file current (done/total of what it is doing); the
         // builder records its path, so `cargo xtask progress` can read it.
-        let progress = (self.phase == "install").then(|| crate::timeline::progress_file(self.repo, &recipe_name));
+        let progress = (self.phase == "install").then(|| {
+            self.concurrent
+                .clone()
+                .unwrap_or_else(|| crate::timeline::progress_file(self.repo, &recipe_name))
+        });
         let mut _active = None;
         if let Some(file) = &progress {
             if let Some(parent) = file.parent() {
                 let _ = std::fs::create_dir_all(parent);
             }
             cmd = cmd.arg("--progress-file").arg(file);
-            crate::timeline::recipe_begin(&recipe_name, file);
-            _active = Some(ActiveRecipe);
+            if self.concurrent.is_none() {
+                crate::timeline::recipe_begin(&recipe_name, file);
+                _active = Some(ActiveRecipe);
+            }
         }
         for (key, _) in std::env::vars_os() {
             let name = key.to_string_lossy();
@@ -369,9 +434,9 @@ impl<'a> Invocation<'a> {
         cmd = cmd.env("GINUX_BIN", ginux).env("RECIPE_WORKER_BIN", worker);
         for (name, value) in [("GINUX_BIN", ginux), ("RECIPE_WORKER_BIN", worker)] {
             if let Some(ambient) = std::env::var_os(name).filter(|ambient| Path::new(ambient) != value) {
-                crate::teprintln!("    {name}={} (the builder's own; ignoring {})", value.display(), Path::new(&ambient).display());
+                note(format!("    {name}={} (the builder's own; ignoring {})", value.display(), Path::new(&ambient).display()));
             } else {
-                crate::teprintln!("    {name}={}", value.display());
+                note(format!("    {name}={}", value.display()));
             }
         }
         for name in LAUNCHER_ENV {
@@ -380,17 +445,20 @@ impl<'a> Invocation<'a> {
                 continue;
             }
             if let Some(value) = std::env::var_os(name) {
-                crate::teprintln!("    {name}={}", Path::new(&value).display());
+                note(format!("    {name}={}", Path::new(&value).display()));
             }
         }
         if let Some((reference, rootfs)) = &self.root {
             cmd = cmd.env("GINUX_ROOT", reference).env("GINUX_ROOTFS", rootfs);
-            crate::teprintln!("    GINUX_ROOT={reference} (this recipe's own root)");
-            crate::teprintln!("    GINUX_ROOTFS={}", rootfs.display());
+            note(format!("    GINUX_ROOT={reference} (this recipe's own root)"));
+            note(format!("    GINUX_ROOTFS={}", rootfs.display()));
         } else if let Some((reference, rootfs)) = compiler_image(self.repo)? {
             cmd = cmd.env("GINUX_ROOT", &reference).env("GINUX_ROOTFS", &rootfs);
-            crate::teprintln!("    GINUX_ROOT={reference} (the pinned compiler image)");
-            crate::teprintln!("    GINUX_ROOTFS={}", rootfs.display());
+            note(format!("    GINUX_ROOT={reference} (the pinned compiler image)"));
+            note(format!("    GINUX_ROOTFS={}", rootfs.display()));
+        }
+        if let Some(file) = log.take() {
+            cmd = cmd.output_to(file).context("sending the recipe's output to its log")?;
         }
         cmd.run_interactive()?;
 
@@ -400,7 +468,9 @@ impl<'a> Invocation<'a> {
         if let Some(file) = &progress {
             let _ = std::fs::remove_file(file);
         }
-        step.finish();
+        if let Some(step) = step {
+            step.finish();
+        }
         Ok(result)
     }
 }

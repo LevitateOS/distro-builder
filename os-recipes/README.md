@@ -14,11 +14,23 @@ installed system images.
 
 The desktop apps (`gui/` in the workspace) are compiled here too, but not in
 Recipe's usual root: a Qt program has to be compiled against the distro's own
-Qt and C++ runtime. The variant's `*-apps-build-root.rhai` recipe unpacks the
-base lock and the apps-build lock (`sources/*-apps-build-lock.rhai`: compiler,
-CMake, Qt's development files) into one tree; the builder makes a root image
+Qt and C++ runtime. The variant's `*-apps-build-root.rhai` recipe makes one
+tree of the base lock and the apps-build lock (`sources/*-apps-build-lock.rhai`:
+compiler, CMake, Qt's development files; on Fedora composed by the builder from
+its unpack store, on Alpine installed by apk); the builder makes a root image
 of it and runs `desktop-apps.rhai` in that root (`src/desktop_apps.rs`). The
 build root is never part of an image.
+
+A system tree is made in steps the builder caches separately
+(`../README.md`, "The system tree"): `fedora-rpm-unpack.rhai` unpacks each
+locked RPM into the builder's unpack store, the builder composes them on the
+host, AcornOS's `alpine-apk-base-tree.rhai` installs its base lock with apk,
+`*-package-effects.rhai` (over `package-effects.rhai`) applies what the
+packages' scripts would have done, and the variant's rootfs recipe (over
+`rootfs-producer.rhai`) applies `installed-system.rhai`. Trees cross from one
+step to the next as one archive (`target_pack_tree`, `target_unpack_tree`).
+`system-files.rhai` holds the file helpers the effects step shares with
+`installed-system.rhai` without importing it.
 
 Base and desktop packages, including applications bundled into a desktop image,
 are image-owned here. The workspace's top-level

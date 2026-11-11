@@ -167,6 +167,60 @@ ensures the same parts and copies their trees into its directory, so
 removed automatically; delete `.artifacts/parts` to reclaim the space (old
 releases' tree links then dangle).
 
+## The system tree: unpack store, composition, effects, configuration
+
+The system part's tree comes from `pipeline::source::materialize_rootfs_source`
+in four steps, each cached by what determines it (`docs/build-redesign.md`,
+sections 1 and 2; `src/compose.rs`), each a timeline step:
+
+1. **Unpack store** (LevitateOS). `.artifacts/store/unpacked/<key>/` holds
+   one locked RPM each: `root/` (what `target_extract_rpm` makes of it in an
+   empty root, its target metadata manifest included), `members.json` (the
+   record of that extraction: members in archive order, file capabilities, the
+   directory mode extraction creates parents with) and `unpacked.json`. The key
+   is a SHA-256 over the package's SHA-256, the sources of
+   `os-recipes/fedora-rpm-unpack.rhai` (with its imports, by content),
+   Recipe's `ENGINE_BEHAVIOUR`, the root image recipes run in and the store
+   layout version: a Ginux or Recipe rebuild unpacks nothing. Missing packages
+   are unpacked by `fedora-rpm-unpack.rhai` inside Ginux, split into shards of
+   at most 512 MiB or 250 packages (at least one per worker), balanced by size;
+   the CPUs minus one (at most 6) run at once, each its own Recipe invocation
+   with its own work directory (`.artifacts/work/unpack/<pid>-<n>`), log
+   (`.artifacts/work/unpack/logs/`) and progress file; their counts show as one
+   in `cargo xtask progress`. A finished shard's trees move into the store at
+   once (temp directory, then rename); entries are never deleted. Builds that
+   share packages wait on `flock`s per key bucket (`.locks/<xx>.lock`, taken
+   in order) and unpack only what is still missing.
+2. **Composition** (LevitateOS, on the host, no Ginux, no package code).
+   `.artifacts/store/composed/<key>/root/` is the packages merged in lock
+   order by `levitate_recipe::target::replay`, which applies each package's
+   recorded extraction exactly as extracting the packages one after another
+   into one root does (same overwrite rules, same link resolution, same
+   manifest); files are hardlinked from the unpack store. The key is a SHA-256
+   over the compose format and the ordered unpack keys. The desktop tree is
+   the base tree (files linked, not composed again) with the desktop lock's
+   packages replayed over it; the Fedora apps-build root is composed from the
+   same store (base and apps-build locks, without firmware). Paths two
+   packages both ship are listed in `composed.json` (path, both packages,
+   whether identical) and counted in the log. `tree.tar`
+   (`target::write_tree`'s format) is written on first use, and recipes get it
+   with `packages.txt` as their `composed` directory input, which they check
+   against their locks. AcornOS installs its base lock with one apk run
+   instead (`alpine-apk-base-tree.rhai`, in
+   `.artifacts/work/apk-base-tree/<distro>`, reused by Recipe's own state):
+   apk's database is one run's, so APKs are not composed.
+3. **Package effects** (`<backend>-package-effects.rhai` over
+   `package-effects.rhai`): copies the composed tree (AcornOS: the base tree,
+   with the desktop lock installed over it by apk for the desktop), applies
+   what the packages' scripts would have done, finalizes the target metadata
+   and drops caches and logs. Its inputs are the composed tree, a `flavour`
+   file and (AcornOS) the APKs: a configuration change never reruns it. It
+   publishes the tree as one archive (`tree`).
+4. **System configuration** (the variant's rootfs recipe over
+   `rootfs-producer.rhai`): copies that archive's tree (input `system`),
+   applies `installed-system.rhai` with the builder's configuration inputs,
+   finalizes and runs the capability check.
+
 Acquire the base package closure explicitly with
 `cargo xtask build rootfs-source <distro>` when it must be refreshed. A
 release build and `product prepare` need the variant's kernel installed;

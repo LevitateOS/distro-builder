@@ -1,17 +1,17 @@
-// The rootfs producer: the lifecycle both package backends share. A backend
-// recipe starts with `//! extends: rootfs-producer.rhai`, sets `ctx.init` and
-// supplies three hooks:
+// The rootfs producer: the system recipe both package backends share, the
+// second half of making a system tree. A backend recipe starts with
+// `//! extends: rootfs-producer.rhai` and sets `ctx.init`.
 //
-//   verify_inputs(ctx)          check the locked packages it imports
-//   unpack(ctx, root)           unpack them into `root`, without their scripts
-//   package_effects(ctx, root)  do what those scripts would have done
-//
-// Then the installed-system policy (`installed-system.rhai`) makes the tree
-// the installable system, and the tree must have every command in the
-// `capabilities` input (distro/contract/capabilities.txt) before it counts as
-// built. Recipe's state identity already covers this file, the backend, their
+// The `system` input is the package-effects step's tree (`package-effects.rhai`
+// and its backends: the locked packages composed, their effects applied, the
+// target metadata finalized), one archive in `target_pack_tree`'s format. This
+// recipe copies it, the installed-system policy (`installed-system.rhai`)
+// makes it the installable system, and the tree must have every command in
+// the `capabilities` input (distro/contract/capabilities.txt) before it counts
+// as built. Recipe's state identity covers this file, the backend, their
 // imports and every input, so a change to any of them starts from an empty
-// output; the stamp beside the tree only records that the build finished.
+// output; a configuration change reruns this step only, not the packages'.
+// The stamp beside the tree only records that the build finished.
 const RECIPE_API = 2;
 const NEEDS = #{};
 import "installed-system.rhai" as installed;
@@ -40,6 +40,12 @@ fn missing(ctx, root) {
     ""
 }
 
+fn system_archive(ctx) { join_path(ctx.runtime.paths.inputs, "system") }
+
+fn verify_inputs(ctx) {
+    if !is_file(system_archive(ctx)) { throw "the system input (the package-effects step's tree) is missing"; }
+}
+
 fn is_acquired(ctx) {
     verify_inputs(ctx);
     ready(ctx)
@@ -62,22 +68,11 @@ fn build(ctx) {
     if is_file(stamp_of(ctx)) { rm(stamp_of(ctx)); }
     if is_dir(root) { rm(root); }
     mkdir(root);
-    progress(0, 0, "unpacking packages");
-    unpack(ctx, root);
-    progress(0, 0, "package effects");
-    package_effects(ctx, root);
-    progress(0, 0, "finalizing the tree");
-    // Resolve the packages' file owners against their accounts and make the
-    // staging tree writable before cleanup; package modes stay in metadata.
-    target_finalize(root);
-    // No caches or logs from the build.
-    for dir in ["var/cache", "var/log"] {
-        let path = join_path(root, dir);
-        if exists(path) { rm(path); }
-        mkdir(path);
-    }
-    // auditd's log directory.
-    installed::directory(root, "var/log/audit", 0o700);
+    // The package tree, as the package-effects step left it: packages
+    // composed, their effects applied, metadata finalized, caches and logs
+    // dropped, auditd's log directory made.
+    progress(0, 0, "copying the package tree");
+    target_unpack_tree(system_archive(ctx), root);
     progress(0, 0, "system configuration");
     installed::apply(root, ctx.runtime.paths.inputs, ctx.init);
     progress(0, 0, "finalizing the configured tree");

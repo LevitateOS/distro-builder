@@ -6,10 +6,12 @@
 //! distro's own Qt and C++ runtime. So it is compiled in the distro's own
 //! environment:
 //!
-//! 1. The variant's apps-build root recipe unpacks the base lock's and the
-//!    apps-build lock's packages (compiler, CMake, Qt's development files)
-//!    into one tree. The apps-build lock is made in the same run as the
-//!    desktop lock, so it names the Qt the desktop ships.
+//! 1. The variant's apps-build root recipe makes one tree of the base lock's
+//!    and the apps-build lock's packages (compiler, CMake, Qt's development
+//!    files): on Fedora it copies the tree the builder composed from the
+//!    unpack store (`crate::compose`), on Alpine apk installs them. The
+//!    apps-build lock is made in the same run as the desktop lock, so it
+//!    names the Qt the desktop ships.
 //! 2. That tree becomes a root image: one tar, named by its digest.
 //! 3. `desktop-apps.rhai` runs in that root instead of Recipe's usual one,
 //!    with the static Recipe binary as its worker (the usual worker is built
@@ -96,9 +98,25 @@ fn build_root(variant: &Variant) -> Result<(String, PathBuf)> {
     let mut invocation = Invocation::new(repo, "install", &recipe, work.join("recipe"));
     let base = rootfs_source::preseed_inputs(repo, &variant.id, &preseed_recipe(variant, Flavour::Base), Flavour::Base)?;
     let apps_build = rootfs_source::apps_build_inputs(repo, &variant.id, &apps_build_preseed_recipe(variant))?;
-    for (name, path) in base.iter().chain(&apps_build) {
-        if wanted.contains_key(name) {
-            invocation = invocation.input(name, path);
+    // On an RPM variant the root is composed from the unpack store: the base
+    // packages are unpacked once for every tree that has them.
+    let mut _view = None;
+    if variant.contract.profile.packages == distro_profile::PackageBackend::Rpm {
+        let mut rows = rootfs_source::lock_rows(&preseed_recipe(variant, Flavour::Base))?;
+        rows.extend(rootfs_source::lock_rows(&apps_build_preseed_recipe(variant))?);
+        rows.retain(crate::compose::apps_build_wanted);
+        let dirs: Vec<PathBuf> = base.values().chain(apps_build.values()).cloned().collect();
+        let packages = crate::compose::package_files(repo, &rows, &dirs)?;
+        let unpacked = crate::compose::unpack(repo, &packages).context("unpacking the apps-build root's packages")?;
+        let composed = crate::compose::compose(repo, None, &unpacked)?;
+        let view = crate::compose::input_view(repo, &composed)?;
+        invocation = invocation.input("composed", view.path());
+        _view = Some(view);
+    } else {
+        for (name, path) in base.iter().chain(&apps_build) {
+            if wanted.contains_key(name) {
+                invocation = invocation.input(name, path);
+            }
         }
     }
     let tree = invocation

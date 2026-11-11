@@ -5,7 +5,9 @@
 // recstrap installs and recab deploys.
 
 // ---------------------------------------------------------------------------
-// Files. Every mode is recorded in Recipe's target metadata.
+// Files. Every mode is recorded in Recipe's target metadata. put, link,
+// directory and shadow_line have copies in `system-files.rhai` (the
+// package-effects step's); change both together.
 // ---------------------------------------------------------------------------
 
 fn put(root, path, content, mode) {

@@ -128,6 +128,14 @@ impl Cmd {
         self
     }
 
+    /// Send the child's stdout and stderr to `file` instead of the terminal,
+    /// for children that run beside others.
+    pub fn output_to(mut self, file: std::fs::File) -> io::Result<Self> {
+        self.command.stdout(file.try_clone()?).stderr(file);
+        self.stdout_to_stderr = false;
+        Ok(self)
+    }
+
     /// Run with output captured; fails with the child's stderr unless it succeeds.
     pub fn run(mut self) -> Result<Output> {
         self.check_dir()?;

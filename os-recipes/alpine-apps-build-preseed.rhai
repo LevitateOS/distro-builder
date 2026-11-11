@@ -4,7 +4,7 @@
 // files. The apps-build root recipe imports them as `apps_build_apks`. None
 // of them goes into an image. apk-tools-static comes with the base preseed.
 const RECIPE_API = 2;
-const NEEDS = #{ inputs: #{ target: "directory?" }, outputs: #{ apps_build_apks: "directory" }, network: ["dl-cdn.alpinelinux.org:443"], memory_mib: 4096 };
+const NEEDS = #{ inputs: #{ target: "directory?", store: "directory?" }, outputs: #{ apps_build_apks: "directory" }, network: ["dl-cdn.alpinelinux.org:443"], memory_mib: 4096 };
 import "sources/acorn-apk-apps-build-lock.rhai" as lock;
 let ctx = #{
     name: "alpine-apps-build-preseed",

@@ -119,10 +119,19 @@ fn preseed(
     if required_outputs.is_empty() {
         bail!("preseed NEEDS.outputs must declare its products");
     }
+    let digests = lock_digests(&recipe_path)?;
+    let store = store_dir(repo_root);
+    let view = tempfile::Builder::new()
+        .prefix("view-")
+        .tempdir_in(ensure_dir(&store.parent().context("store has no parent")?.join("views"))?)
+        .context("creating the download store view")?;
+    fill_view(&store, view.path(), &digests)?;
     let ctx = Invocation::new(repo_root, "install", &recipe_path, &build_dir)
+        .input("store", view.path())
         .force_acquire(refresh)
         .run()
         .with_context(|| format!("preseeding rootfs source via '{}'", recipe_path.display()))?;
+    drop(view);
     let outputs: BTreeMap<String, PathBuf> = required_outputs
         .iter()
         .map(|(name, kind)| {
@@ -134,6 +143,10 @@ fn preseed(
         })
         .collect::<Result<_>>()
         .with_context(|| format!("preseed recipe '{}' output contract", recipe_path.display()))?;
+    // A store problem never fails a preseed that succeeded: the store is a cache.
+    if let Err(err) = fill_store(&store, &outputs, &digests) {
+        eprintln!("warning: download store not updated: {err:#}");
+    }
     save_preseed_outputs(&build_dir.join(record), &recipe_path, &outputs)?;
     Ok(outputs)
 }
@@ -220,4 +233,101 @@ fn recorded_inputs(
         }
     }
     Ok(record.outputs)
+}
+
+// The download store: `<repo>/.artifacts/store/sha256/<lowercase hex digest>`,
+// one verified file per download. Files only appear there by an atomic rename
+// of a verified temp file in the same directory, and nothing is ever deleted,
+// so concurrent builds can share it.
+
+fn store_dir(repo_root: &Path) -> PathBuf {
+    repo_root.join(".artifacts/store/sha256")
+}
+
+fn ensure_dir(dir: &Path) -> Result<PathBuf> {
+    std::fs::create_dir_all(dir).with_context(|| format!("creating '{}'", dir.display()))?;
+    Ok(dir.to_path_buf())
+}
+
+fn is_digest(token: &str) -> bool {
+    token.len() == 64 && token.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
+/// The SHA-256 digests of the lock `recipe` imports (`import "sources/<..>.rhai"`
+/// in a preseed recipe): every 64-digit lowercase hex string it holds.
+fn lock_digests(recipe: &Path) -> Result<std::collections::BTreeSet<String>> {
+    let text = std::fs::read_to_string(recipe)
+        .with_context(|| format!("reading '{}'", recipe.display()))?;
+    let dir = recipe.parent().context("preseed recipe has no directory")?;
+    let mut digests = std::collections::BTreeSet::new();
+    for line in text.lines().filter(|l| l.trim_start().starts_with("import ")) {
+        let Some(name) = line.split('"').nth(1) else { continue };
+        let lock = std::fs::read_to_string(dir.join(name))
+            .with_context(|| format!("reading lock '{name}' of '{}'", recipe.display()))?;
+        for token in lock.split(|c: char| !c.is_ascii_alphanumeric()) {
+            if is_digest(token) {
+                digests.insert(token.to_string());
+            }
+        }
+    }
+    Ok(digests)
+}
+
+/// Hardlink (or copy, across filesystems) the stored files `digests` name into `view`.
+fn fill_view(
+    store: &Path,
+    view: &Path,
+    digests: &std::collections::BTreeSet<String>,
+) -> Result<()> {
+    for digest in digests {
+        let from = store.join(digest);
+        if !from.is_file() {
+            continue;
+        }
+        let to = view.join(digest);
+        if std::fs::hard_link(&from, &to).is_err() {
+            std::fs::copy(&from, &to)
+                .with_context(|| format!("copying '{}' into the store view", from.display()))?;
+        }
+    }
+    Ok(())
+}
+
+fn sha256_file(path: &Path) -> Result<String> {
+    use sha2::{Digest, Sha256};
+    let mut file = std::fs::File::open(path)?;
+    let mut hasher = Sha256::new();
+    std::io::copy(&mut file, &mut hasher)?;
+    Ok(hasher.finalize().iter().map(|b| format!("{b:02x}")).collect())
+}
+
+/// Add every file of the preseed's output directories to the store under its
+/// digest, when the lock names that digest and the store lacks it.
+fn fill_store(
+    store: &Path,
+    outputs: &BTreeMap<String, PathBuf>,
+    digests: &std::collections::BTreeSet<String>,
+) -> Result<()> {
+    ensure_dir(store)?;
+    for path in outputs.values() {
+        let files: Vec<PathBuf> = if path.is_dir() {
+            std::fs::read_dir(path)?
+                .map(|e| e.map(|e| e.path()))
+                .collect::<std::io::Result<_>>()?
+        } else {
+            vec![path.clone()]
+        };
+        for file in files.into_iter().filter(|f| f.is_file()) {
+            let digest = sha256_file(&file)?;
+            let target = store.join(&digest);
+            if !digests.contains(&digest) || target.exists() {
+                continue;
+            }
+            let mut temp = tempfile::Builder::new().prefix(".tmp-").tempfile_in(store)?;
+            std::io::copy(&mut std::fs::File::open(&file)?, temp.as_file_mut())?;
+            temp.as_file().sync_all()?;
+            temp.persist(&target)?;
+        }
+    }
+    Ok(())
 }

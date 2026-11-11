@@ -23,6 +23,16 @@ fn is_acquired(ctx) {
     ready(with_outputs(ctx))
 }
 
+// The builder's content-addressed store, as the optional `store` input: files
+// named by their lowercase SHA-256, holding only what this lock needs. A copy
+// from it is verified like a download; a missing file means download.
+fn stored(ctx, row) {
+    let dir = join_path(ctx.runtime.paths.inputs, "store");
+    if !is_dir(dir) { return ""; }
+    let file = join_path(dir, row[3].to_lower());
+    if is_file(file) { file } else { "" }
+}
+
 // Mirrors drop superseded builds, so a failed download usually means the lock
 // is out of date. (A separate function keeps the nesting under Rhai's
 // expression-depth limit, which is lower in a debug build.)
@@ -31,12 +41,20 @@ fn fetch(row, file) {
     catch (err) { throw "downloading " + row[1] + " failed (" + err + "); the lock may need refreshing"; }
 }
 
+// Take a row's file from the store when it holds it, otherwise download it.
+fn obtain(ctx, row, file) {
+    let kept = stored(ctx, row);
+    if kept == "" { return fetch(row, file); }
+    copy_file(kept, file);
+    verify_sha256(file, row[3]);
+}
+
 fn acquire(ctx) {
     mkdir(dir_of(ctx));
     for row in ctx.files {
         let file = file_of(ctx, row);
         if ctx.runtime.options.force_acquire || !is_file(file) {
-            fetch(row, file);
+            obtain(ctx, row, file);
         } else {
             verify_sha256(file, row[3]);
         }

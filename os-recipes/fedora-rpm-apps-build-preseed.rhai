@@ -4,7 +4,7 @@
 // files. The apps-build root recipe imports them as `apps_build_rpms`. None
 // of them goes into an image.
 const RECIPE_API = 2;
-const NEEDS = #{ inputs: #{ target: "directory?" }, outputs: #{ apps_build_rpms: "directory" }, network: ["dl.fedoraproject.org:443"], memory_mib: 8192 };
+const NEEDS = #{ inputs: #{ target: "directory?", store: "directory?" }, outputs: #{ apps_build_rpms: "directory" }, network: ["dl.fedoraproject.org:443"], memory_mib: 8192 };
 import "sources/levitate-rpm-apps-build-lock.rhai" as lock;
 let ctx = #{
     name: "fedora-rpm-apps-build-preseed",

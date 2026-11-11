@@ -1,12 +1,14 @@
-//! Product preparation. Every product is the installable system rootfs of
-//! its flavour (`ProductId::flavour`) plus a layer: a product without a
-//! parent builds the system (the rootfs recipe's tree, its payload role and
-//! the rootfs tools): base-rootfs the base system, live-desktop the desktop
-//! system. Every other product takes its parent's rootfs image unchanged and
-//! adds only its overlay, as `crate::product::build` says. So installed-boot
-//! boots exactly the rootfs the live-tools ISO installs, and a desktop
-//! install gets exactly the live-desktop ISO's rootfs. One routine prepares
-//! every product and records it in one manifest.
+//! Products and their prepared directories. Every product is the installable
+//! system of its flavour (`ProductId::flavour`) plus an overlay, as
+//! `crate::product::build` says. Both are parts (`crate::parts`): the system
+//! part `system-<flavour>` is built here by `prepare_system` (the rootfs
+//! recipe's tree, its payload role, the rootfs tools and apps), and the
+//! overlay part `overlay-<product>` by `build_overlay` on that system's tree.
+//! base-rootfs, live-boot, live-tools and installed-boot share the base
+//! system part, live-desktop has the desktop one; so installed-boot boots
+//! exactly the rootfs the live-tools ISO installs. A prepared directory
+//! (`.prepared-product.json`, read by `PreparedProduct::read`) lays out one
+//! product's rootfs and overlay trees from its parts.
 use anyhow::{bail, Context, Result};
 use distro_contract::profile::Flavour;
 use distro_contract::{ConformanceContract, ProductId, Variant};
@@ -14,21 +16,23 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::pipeline::io::{create_empty_overlay_dir, extract_erofs_rootfs};
+use crate::pipeline::io::create_empty_overlay_dir;
 use crate::pipeline::live_tools::{add_tools, ToolLayer};
 use crate::pipeline::overlay::{create_live_overlay, LiveSession};
 use crate::pipeline::source::{materialize_rootfs_source, os_release};
 use crate::pipeline::sources;
 
-/// The prepared product's rootfs tree, beside its overlay tree.
-const ROOTFS_SOURCE_DIR: &str = "rootfs-source";
+/// The rootfs tree's directory in a system part, a prepared product's
+/// directory and a release run's directory, beside the overlay tree.
+pub(crate) const ROOTFS_SOURCE_DIR: &str = "rootfs-source";
 /// The manifest in a prepared product's directory.
 const MANIFEST: &str = ".prepared-product.json";
 /// The installed system's setup program (the system recipe installs it).
 const SETUP_PROGRAM: &str = "usr/libexec/recipe-system-setup";
 
-/// A prepared product: its rootfs and overlay trees in its directory, and the
-/// images they are packed into there.
+/// A prepared product: its rootfs and overlay trees in its directory (in a
+/// release run's directory, links to its parts' trees, only ever read), and
+/// the images they are packed into there.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PreparedProduct {
     pub product: String,
@@ -77,83 +81,87 @@ impl PreparedProduct {
     }
 }
 
-/// Prepares `product` of `variant` in `dir`: its rootfs tree, its overlay
-/// tree and the manifest.
-/// A derived product starts from its parent's latest release.
-pub fn prepare_product(variant: &Variant, product: ProductId, dir: &Path) -> Result<PreparedProduct> {
-    let contract = &variant.contract;
+/// Prepares `product` of `variant` in `dir`, with the kernel in `kernel`
+/// (`runs::kernel_dir`): ensures its system and overlay parts and copies
+/// their trees into `dir` (so `transform build product-erofs` may finalize
+/// and pack them there without touching the parts), with the system's
+/// `system-sources.sha256` and the manifest.
+pub fn prepare_product(
+    variant: &Variant,
+    product: ProductId,
+    dir: &Path,
+    kernel: &Path,
+) -> Result<PreparedProduct> {
     let build = crate::product::build(product);
     if build.install_screen {
         crate::install_ux::check(&variant.repo_root)
             .with_context(|| format!("resolving the install screen's apps for {}", variant.id))?;
     }
+    let system = crate::parts::system(variant, product.flavour(), kernel)?;
+    let overlay = crate::parts::overlay(variant, product, &system)?;
     fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
-
     let rootfs = create_empty_overlay_dir(dir, ROOTFS_SOURCE_DIR)?;
-    let flavour = product.flavour();
-    // The sources the system is built from now; a parent's rootfs must have
-    // been built from the same.
-    let current = sources::system_sources_digest(&variant.repo_root, &variant.id)
-        .context("fingerprinting the system's sources")?;
-    match product.parent() {
-        None => prepare_system(variant, flavour, &rootfs)
-            .with_context(|| format!("preparing the {} {flavour} system rootfs", variant.id))?,
-        Some(parent) => {
-            let image = crate::parent_rootfs_image(&variant.repo_root, &variant.id, contract, product)?
-                .with_context(|| format!("{product} has no parent rootfs image"))?;
-            let built_from = image.parent().and_then(sources::recorded);
-            if built_from.as_deref() != Some(current.as_str()) {
-                bail!(
-                    "the latest {parent} release ({}) was built from older sources than the checkout's \
-                     (its tools, recipes, locks or TUI apps changed since); rebuild {parent}",
-                    image.display()
-                );
-            }
-            extract_erofs_rootfs(&image, &rootfs)
-                .with_context(|| format!("extracting the {parent} rootfs {}", image.display()))?;
-            check_installable(&rootfs, contract, flavour).with_context(|| {
-                format!("the {parent} rootfs {} is not the current system; rebuild {parent}", image.display())
-            })?;
-        }
+    levitate_recipe::target::merge_tree(&system.tree(), &rootfs)
+        .with_context(|| format!("copying the system part's tree into {}", rootfs.display()))?;
+    let overlay_tree = create_empty_overlay_dir(dir, build.overlay_dir)?;
+    // An empty overlay (base-rootfs, installed-boot) stays empty, metadata too.
+    if fs::read_dir(overlay.tree())?.next().is_some() {
+        levitate_recipe::target::merge_tree(&overlay.tree(), &overlay_tree)
+            .with_context(|| format!("copying the overlay part's tree into {}", overlay_tree.display()))?;
     }
+    let digest = sources::recorded(&system.dir)
+        .with_context(|| format!("the system part {} records no sources", system.dir.display()))?;
+    sources::record(dir, &digest)?;
+    write_manifest(variant, product, dir)
+}
 
-    let overlay = create_empty_overlay_dir(dir, build.overlay_dir)?;
-    if build.live_session {
-        create_live_overlay(variant, &LiveSession::new(variant, product), &rootfs, &overlay)?;
-    }
-    if build.install_screen {
-        add_tools(&variant.repo_root, &overlay, ToolLayer::Overlay, &variant.id, &contract.profile)
-            .with_context(|| format!("adding the live tools for {}", variant.id))?;
-        crate::install_ux::write_payload(
-            &variant.repo_root,
-            &rootfs,
-            &overlay,
-            &contract.identity.os_name,
-            &contract.profile,
-        )
-        .with_context(|| format!("writing the install screen for {}", variant.id))?;
-    }
-    check_live_only(&overlay, &rootfs)?;
-    sources::record(dir, &current)?;
-
+/// Writes the manifest of `product` prepared in `dir`, whose rootfs tree is
+/// `dir/rootfs-source` and overlay tree `dir/<overlay_dir>` (directories, or
+/// in a release run's directory links to its parts' trees).
+pub(crate) fn write_manifest(variant: &Variant, product: ProductId, dir: &Path) -> Result<PreparedProduct> {
+    let contract = &variant.contract;
     let prepared = PreparedProduct {
         product: product.name().to_string(),
         distro_id: variant.id.clone(),
         rootfs_source_dir: PathBuf::from(ROOTFS_SOURCE_DIR),
-        overlay_dir: PathBuf::from(build.overlay_dir),
+        overlay_dir: PathBuf::from(crate::product::build(product).overlay_dir),
         rootfs_erofs: contract.artifacts.rootfs.clone(),
         overlay_erofs: contract.artifacts.overlay.clone(),
     };
     let manifest = dir.join(MANIFEST);
     distro_contract::runs::write_atomic(&manifest, &serde_json::to_vec_pretty(&prepared)?)
         .with_context(|| format!("writing {}", manifest.display()))?;
-    Ok(prepared)
+    PreparedProduct::read(dir)
+}
+
+/// Writes `product`'s overlay into `overlay` (an empty directory) for the
+/// system tree `rootfs`, which it only reads: the live session, and for a
+/// product with the install screen the overlay tools and the screen.
+pub(crate) fn build_overlay(variant: &Variant, product: ProductId, rootfs: &Path, overlay: &Path) -> Result<()> {
+    let contract = &variant.contract;
+    let build = crate::product::build(product);
+    if build.live_session {
+        create_live_overlay(variant, &LiveSession::new(variant, product), rootfs, overlay)?;
+    }
+    if build.install_screen {
+        add_tools(&variant.repo_root, overlay, ToolLayer::Overlay, &variant.id, &contract.profile)
+            .with_context(|| format!("adding the live tools for {}", variant.id))?;
+        crate::install_ux::write_payload(
+            &variant.repo_root,
+            rootfs,
+            overlay,
+            &contract.identity.os_name,
+            &contract.profile,
+        )
+        .with_context(|| format!("writing the install screen for {}", variant.id))?;
+    }
+    check_live_only(overlay, rootfs)
 }
 
 /// The installable `flavour` system in `rootfs`: the rootfs recipe's tree,
 /// marked as the live init's rootfs layer (recinit's payload-role protocol),
 /// with the rootfs tools.
-fn prepare_system(variant: &Variant, flavour: Flavour, rootfs: &Path) -> Result<()> {
+pub(crate) fn prepare_system(variant: &Variant, flavour: Flavour, rootfs: &Path) -> Result<()> {
     let source = materialize_rootfs_source(variant, flavour)?;
     levitate_recipe::target::merge_tree(&source, rootfs)?;
     let update_source = rootfs.join(distro_contract::release::SOURCE_CONFIG);
@@ -224,7 +232,7 @@ fn check_installable(root: &Path, contract: &ConformanceContract, flavour: Flavo
         bail!("{} is not the contract's identity and profile of the {flavour} system", path.display());
     }
     // A desktop system from before the desktop apps existed is not the
-    // current one: a parent image without them must be rebuilt.
+    // current one.
     if flavour == Flavour::Desktop {
         crate::desktop_apps::check(root)?;
     }
@@ -233,7 +241,8 @@ fn check_installable(root: &Path, contract: &ConformanceContract, flavour: Flavo
 
 /// The overlay is the only place of what it writes: refuses a non-empty
 /// regular file of `overlay` that `rootfs`, the system below it, also has
-/// with the same content (a rootfs that already carries the live session).
+/// with the same content (a system tree that already carries the live
+/// session).
 fn check_live_only(overlay: &Path, rootfs: &Path) -> Result<()> {
     for entry in walkdir::WalkDir::new(overlay).follow_links(false) {
         let entry = entry?;
@@ -260,7 +269,7 @@ fn check_live_only(overlay: &Path, rootfs: &Path) -> Result<()> {
         };
         if same {
             bail!(
-                "the live layer's {} is also in the rootfs {}; rebuild the rootfs",
+                "the live layer's {} is also in the system tree {}; the system recipe must not carry it",
                 relative.display(),
                 rootfs.display()
             );

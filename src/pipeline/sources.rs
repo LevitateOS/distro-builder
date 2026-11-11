@@ -1,12 +1,10 @@
-//! The sources a system rootfs is built from, as one digest. A product without
-//! a parent builds the system from the checkout (the builder's recipes and
-//! locks, the contract, the variant, the installed system's TUI apps and the
-//! rootfs tools' crates) with every recipe step run by the Ginux launcher
-//! built from `tools/ginux`; every other product carries its parent's rootfs
-//! unchanged. Each release records the digest of the sources its rootfs was
-//! built from, so a product is never built on a parent whose system is older
-//! than the checkout: the planner rebuilds such a parent first, and preparing
-//! a product refuses one.
+//! The sources a system rootfs is built from, as one digest: the checkout's
+//! builder (its recipes and locks), contract, profile, variant, TUI and GUI
+//! apps, the recipes repository and the rootfs tools' crates, with every
+//! recipe step run by the Ginux launcher built from `tools/ginux`. The digest
+//! is one input of the system part's key (`crate::parts`), and the system part
+//! records it as `system-sources.sha256`, which the release manifest carries
+//! as its provenance and every release directory keeps.
 
 use anyhow::{Context, Result};
 use sha2::{Digest, Sha256};
@@ -17,8 +15,8 @@ use std::path::{Path, PathBuf};
 use crate::pipeline::live_tools::{ToolLayer, LIVE_TOOLS};
 use crate::process::Cmd;
 
-/// The file in a release run's (or prepared product's) directory that holds
-/// the digest of the sources its rootfs was built from.
+/// The file in a system part's, release run's or prepared product's directory
+/// that holds the digest of the sources its rootfs was built from.
 pub const SOURCES_FILE: &str = "system-sources.sha256";
 
 /// The digest of the sources `distro_id`'s system rootfs is built from, as the
@@ -57,7 +55,22 @@ pub fn system_sources_digest(repo: &Path, distro_id: &str) -> Result<String> {
     for file in ["Cargo.toml", "Cargo.lock", "package.json", "bun.lock"] {
         hash_file(&mut hasher, &repo, Path::new(file))?;
     }
-    for root in &roots {
+    hash_roots(&mut hasher, &repo, &roots)?;
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
+/// The digest of every file git lists under each of `roots` (paths relative
+/// to the repository), with its path and content, as `system_sources_digest`
+/// takes them.
+pub(crate) fn roots_digest(repo: &Path, roots: &BTreeSet<PathBuf>) -> Result<String> {
+    let repo = repo.canonicalize()?;
+    let mut hasher = Sha256::new();
+    hash_roots(&mut hasher, &repo, roots)?;
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
+fn hash_roots(hasher: &mut Sha256, repo: &Path, roots: &BTreeSet<PathBuf>) -> Result<()> {
+    for root in roots {
         let listing = Cmd::new("git")
             .arg("-C")
             .arg(repo.join(root))
@@ -67,10 +80,10 @@ pub fn system_sources_digest(repo: &Path, distro_id: &str) -> Result<String> {
         let mut names: Vec<&str> = listing.stdout.split('\0').filter(|name| !name.is_empty()).collect();
         names.sort_unstable();
         for name in names {
-            hash_file(&mut hasher, &repo, &root.join(name))?;
+            hash_file(hasher, repo, &root.join(name))?;
         }
     }
-    Ok(format!("{:x}", hasher.finalize()))
+    Ok(())
 }
 
 /// `relative`'s path and content (a link's target) into `hasher`; a tracked
@@ -96,8 +109,8 @@ fn hash_file(hasher: &mut Sha256, repo: &Path, relative: &Path) -> Result<()> {
     Ok(())
 }
 
-/// The digest recorded in `dir` (a release run's or prepared product's
-/// directory), if any.
+/// The digest recorded in `dir` (a system part's, release run's or prepared
+/// product's directory), if any.
 pub fn recorded(dir: &Path) -> Option<String> {
     fs::read_to_string(dir.join(SOURCES_FILE)).ok().map(|text| text.trim().to_string())
 }

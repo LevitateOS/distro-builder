@@ -204,7 +204,6 @@ fn run(repo: &Path, command: Command) -> Result<()> {
         }
         Command::ReleaseBuild { product, distro } => {
             process::check_host_tools(HostNeed::Build)?;
-            build::ensure_release_prerequisites(repo, &distro, product)?;
             build::build_one(repo, &distro, product)
         }
         Command::ProductPrepare {

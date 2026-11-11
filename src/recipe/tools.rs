@@ -192,6 +192,13 @@ fn locked_packages(lock: &str) -> Result<BTreeSet<(String, String, String)>> {
 /// them.
 pub(crate) fn tool_crate_dirs(repo: &Path, package: &str) -> Result<BTreeSet<PathBuf>> {
     let (_, relative, _) = tool(package)?;
+    crate_closure_dirs(repo, Path::new(relative))
+}
+
+/// The crate directories (relative to the repository) of the crate at
+/// `relative` and of every local dependency it takes, transitively, as
+/// `copy_crate` walks them.
+pub(crate) fn crate_closure_dirs(repo: &Path, relative: &Path) -> Result<BTreeSet<PathBuf>> {
     let repo = repo.canonicalize()?;
     let root_manifest: toml::Value = toml::from_str(&fs::read_to_string(repo.join("Cargo.toml"))?)?;
     let workspace_dependencies = root_manifest

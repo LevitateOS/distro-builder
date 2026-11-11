@@ -7,14 +7,19 @@ AcornOS over Recipe. It reads each variant through `distro_contract::load`
 
 ## Where things live
 
-- `src/pipeline/`: planning and preparing each product, the kernel artifact
-  layout (`pipeline/kernel.rs`) and Recipe's work directory (`pipeline/paths.rs`).
+- `src/parts.rs`: the cached parts a release is combined from, their keys,
+  records and locks (see "Parts and the combiner" below).
+- `src/release.rs`: the combiner, which writes a release ISO from its parts.
+- `src/pipeline/`: what goes into each part (the system tree, a product's
+  overlay; `pipeline/products.rs`), the system sources' digest
+  (`pipeline/sources.rs`), the kernel artifact layout (`pipeline/kernel.rs`)
+  and Recipe's work directory (`pipeline/paths.rs`).
 - `src/recipe/`: calling Recipe and reading what a recipe reports in
   `ctx.outputs` (`recipe/outputs.rs`). The outputs a rootfs-source preseed must
   report are read statically from that recipe's `NEEDS.outputs`. Recipes own
   network and resource grants; variant TOML selects recipes and binds inputs.
 - `src/artifact/`: EROFS and overlay images and filesystem copies.
-- `src/run_history.rs`: the output directories and release run history.
+- `distro_contract::runs` (`distro/contract`): the output directories (releases, parts) and the release run history.
 - `src/bin/`: the `distro-builder` binary. Its `usage()` in
   `src/bin/distro-builder.rs` is the command reference. Normal use goes through
   `cargo xtask build` (`cargo xtask --help`).
@@ -68,11 +73,11 @@ build never runs an older launcher or worker than the checkout. `GINUX_ROOT`,
 
 Each release records `system-sources.sha256` beside its rootfs: the digest of
 every source its system rootfs is built from (the builder, contract, profile,
-variant, TUI apps and the rootfs tools' crate closures, uncommitted edits
-included) and the Ginux launcher built from `tools/ginux`. A release build first rebuilds every parent product that is missing
-or whose recorded digest differs from the checkout's, and preparing a product
-refuses such a parent, so live-boot and live-tools always carry the current
-system and tools. The maintained Ginux/Recipe source pair is recorded in
+variant, TUI and GUI apps, the recipes repository and the rootfs tools' crate
+closures, uncommitted edits included) and the Ginux launcher built from
+`tools/ginux`. It is one input of the system part's key (below), so every
+release carries a system built from the checkout's current sources. The
+maintained Ginux/Recipe source pair is recorded in
 `docs/ginux-contributions/delivery-sources.json` at the repository root. New local
 consumer corrections still need integration and final-combination acceptance;
 the contribution queue records their disposition.
@@ -94,13 +99,63 @@ Ginux. This compiler/installer path does not establish general Bun/JavaScript
 runtime support inside Ginux. The installed programs run on the guest's Linux
 kernel; their actual PTY behavior needs product/scenario verification.
 
+## Parts and the combiner
+
+A release ISO is combined from **parts**, each built once for what it is built
+from and kept under `.artifacts/parts/<distro>/<kind>/<key>/`
+(`docs/build-redesign.md`, section 0 at the repository root):
+
+- `system-base` and `system-desktop`: the system tree (`rootfs-source/`: the
+  rootfs recipe's tree with the rootfs tools and apps, the kernel's modules
+  and the kernel binding `usr/lib/recab/kernel.json`, metadata finalized), the
+  rootfs EROFS, the installed initramfs and the release set (`release.json`,
+  `system-inventory.json`, signature, `live/` and `boot/` members,
+  `system-sources.sha256`). base-rootfs, live-boot, live-tools and
+  installed-boot share `system-base`; live-desktop has `system-desktop`.
+- `overlay-<product>`: the product's overlay tree (live session, overlay
+  tools, install screen) built on its system part's tree, and its EROFS.
+
+A part's key is a SHA-256 over its kind, the distro and named inputs, all
+recorded in its `part.json` with its output files (path, bytes, sha256):
+
+- system: the flavour, `system-sources.sha256`'s digest, the source closure of
+  the builder's own crates (recinit, reciso, recab, levitate-recipe...), the
+  Recipe CLI, the Ginux root (`GINUX_ROOT`, and the `GINUX_ROOTFS` tar's
+  digest), the kernel (release, image digest, module tree digest), busybox,
+  the release policy and its production authority, and whether the manifest
+  is signed and the digest of the `RECAB_RELEASE_SIGNING_KEY` file;
+- overlay: the system part's key and exact build, the product, the overlay
+  tools' crate closures and the running builder executable.
+
+A part is built in a sibling temporary directory and renamed into place only
+when complete. If its inputs changed while it was built (the checkout was
+edited, a kernel installed), it is discarded and built again. A part under its
+key is used only when its record names exactly today's inputs and every output
+file has its recorded size and hash; otherwise it is removed and rebuilt. An
+`flock` on each key lets two products or distros build at once; a second
+builder of one key reuses the first one's part. The build log has one line per
+part: `[part:system-desktop:levitate] reused <key prefix>`, `building ...` or
+`built ...`.
+
+The **combiner** (`release build <product> <distro>`, `src/release.rs`)
+ensures the product's system and overlay parts, hard-links their files into
+the release run's directory (copies across filesystems; nothing is moved out of
+a part), links `rootfs-source` and the overlay tree to the parts' trees for
+readers such as the preflight, builds the live initramfs (never cached),
+verifies the release set and writes the ISO with reciso. The run directory has
+the same files as before parts existed. No product is built on another:
+building live-tools builds no base-rootfs or live-boot ISO. `product prepare`
+ensures the same parts and copies their trees into its directory, so
+`transform build product-erofs` may change them there. Parts are never
+removed automatically; delete `.artifacts/parts` to reclaim the space (old
+releases' tree links then dangle).
+
 Acquire the base package closure explicitly with
-`cargo xtask build rootfs-source <distro>`. Then build `base-rootfs`, `live-boot`
-and `live-tools` in that order for a complete fresh chain. A derived product uses
-the latest successful parent; it does not automatically rebuild every existing
-parent when Recipe, inputs or tooling change. Reuse the pinned prebuilt kernel
-(`cargo xtask build kernel <distro> --prebuilt` when preparation is needed).
-Do not replace this with kernel recompilation or a desktop build.
+`cargo xtask build rootfs-source <distro>` when it must be refreshed. A
+release build and `product prepare` need the variant's kernel installed;
+reuse the pinned prebuilt kernel (`cargo xtask build kernel <distro>
+--prebuilt` when preparation is needed). Do not replace this with kernel
+recompilation or a desktop build.
 
 `cargo xtask build` runs this builder through `sudo -n` (passwordless sudo or root is required), the builder picks the compiler image pinned in `tools/recipe/bootstrap/product-ci.json` itself (an ambient `GINUX_ROOT`/`GINUX_ROOTFS` still wins) and a product build acquires its package locks itself; `artifact preseed-rootfs-source` remains for `--refresh`.
 
@@ -139,8 +194,9 @@ at your option.
 
 ## Release manifest
 
-Release assembly emits `release.json`, `system-inventory.json` and, when
-configured, `release.sig` beside its existing outputs. The ISO carries the exact
+The system part emits `release.json`, `system-inventory.json` and, when
+configured, `release.sig` beside its other outputs, and the combiner verifies
+that set again in each release directory before writing the ISO. The ISO carries the exact
 same manifest/inventory/signature as the online bundle; payload members use its
 `boot/` and `live/` layout. The image writer records intended metadata from the
 actual tar input and binds it to the resulting EROFS image. Release emission

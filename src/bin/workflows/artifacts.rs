@@ -10,6 +10,16 @@ pub(crate) fn build_prepared_product_erofs_cmd(prepared_dir: &Path) -> Result<()
     let manifest = PreparedProduct::read(prepared_dir)?;
     let rootfs_source_dir = manifest.rootfs_source(prepared_dir);
     let overlay_dir = manifest.overlay(prepared_dir);
+    // A release run's trees are links to its cached parts, which nothing may
+    // change; `product prepare` makes trees of its own.
+    for tree in [&rootfs_source_dir, &overlay_dir] {
+        if std::fs::symlink_metadata(tree)?.file_type().is_symlink() {
+            anyhow::bail!(
+                "{} links to a cached part; run this on a directory `product prepare` made",
+                tree.display()
+            );
+        }
+    }
     let rootfs_output = prepared_dir.join(&manifest.rootfs_erofs);
     let overlay_output = prepared_dir.join(&manifest.overlay_erofs);
 
@@ -42,11 +52,12 @@ pub(crate) fn prepare_product_cmd(
     output_dir: &Path,
 ) -> Result<()> {
     let bundle = distro_contract::load(repo_root, distro_id)?;
-    super::build::ensure_release_prerequisites(&bundle.repo_root, distro_id, product)
-        .with_context(|| {
-            format!("realizing parent release prerequisites for product '{product}' on '{distro_id}'")
-        })?;
-    let prepared = distro_builder::prepare_product(&bundle, product, output_dir)
+    // The system part carries the kernel's modules and binding.
+    let kernel = distro_contract::runs::kernel_dir(&bundle.repo_root, distro_id);
+    distro_builder::kernel::check_kernel_installed(&bundle, &kernel).with_context(|| {
+        format!("install it first: cargo xtask build kernel {distro_id} (--prebuilt downloads it)")
+    })?;
+    let prepared = distro_builder::prepare_product(&bundle, product, output_dir, &kernel)
         .with_context(|| format!("preparing {product} for '{distro_id}'"))?;
 
     println!("product '{product}' inputs prepared for {distro_id}:");

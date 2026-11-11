@@ -259,3 +259,47 @@ pub fn write(
         inputs: verified,
     })
 }
+
+/// Verifies the release set already published in `dir` (its manifest, its
+/// signature or local trust as the variant's policy has it, every member's
+/// size and hash, and `root`, the tree it was built from, against the
+/// rootfs image's provenance), as `write` verifies the set it publishes.
+/// The returned paths are recab's frozen copy of the verified set.
+pub fn verify(variant: &Variant, root: &Path, dir: &Path) -> Result<ProducedRelease> {
+    let contract = &variant.contract;
+    let policy = &contract.release;
+    policy.validate()?;
+    let proof_file = levitate_recipe::fsx::open_regular(&provenance_path(
+        &dir.join(&contract.artifacts.rootfs),
+    ))?;
+    ensure!(
+        proof_file.metadata()?.len() <= MAX_INVENTORY + 1024 * 1024,
+        "image provenance exceeds bound"
+    );
+    let proof: RootfsProvenance = serde_json::from_reader(proof_file)?;
+    ensure!(
+        proof.schema_version == 1,
+        "unsupported image provenance version"
+    );
+    let path = dir.join(MANIFEST);
+    let verified = recab::release::verify_produced_bundle(
+        root,
+        &path,
+        policy.trust.as_ref(),
+        policy.trust.is_none(),
+        &proof,
+    )
+    .context("validating the release set")?;
+    ensure!(
+        verified.manifest().artifacts.rootfs.sha256 == proof.rootfs_sha256,
+        "rootfs image differs from image-writer provenance"
+    );
+    ensure!(
+        verified.id() == digest(&fs::read(&path)?),
+        "release verification identity changed"
+    );
+    Ok(ProducedRelease {
+        path,
+        inputs: verified,
+    })
+}

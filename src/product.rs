@@ -4,10 +4,9 @@
 pub use distro_contract::ProductId;
 
 /// How the builder lays out and assembles a product. Every product's rootfs
-/// is the installable system of its flavour (`ProductId::flavour`): a product
-/// without a parent builds it (base-rootfs the base system, live-desktop the
-/// desktop system), and every other product takes its parent's rootfs image
-/// unchanged and adds only its overlay.
+/// is the installable system of its flavour (`ProductId::flavour`), the
+/// shared `system-<flavour>` part, and the product adds only its overlay, its
+/// own `overlay-<product>` part (`crate::parts`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ProductBuild {
     /// The overlay directory beside the product's rootfs.

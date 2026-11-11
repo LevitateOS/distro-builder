@@ -5,26 +5,9 @@ use distro_builder::product::ProductId;
 
 use distro_contract::runs;
 
-/// Build the releases `product` is built on that are missing or were built
-/// from older sources than the checkout's.
-pub(crate) fn ensure_release_prerequisites(
-    repo_root: &Path,
-    distro_id: &str,
-    product: ProductId,
-) -> Result<()> {
-    let variant = distro_contract::load(repo_root, distro_id)?;
-    let parents =
-        distro_builder::parent_releases_to_build(repo_root, distro_id, &variant.contract, product)?;
-    for parent in parents {
-        println!(
-            "[release:iso:{product}:{distro_id}] building parent release '{parent}' (missing, or built from older sources)..."
-        );
-        build_one(repo_root, distro_id, parent)?;
-    }
-
-    Ok(())
-}
-
+/// Builds `product`'s release of `distro_id` in a new release run: the
+/// combiner (`release::assemble`) ensures the product's system and overlay
+/// parts and writes the ISO. No other product's release is built.
 pub(crate) fn build_one(repo_root: &Path, distro_id: &str, product: ProductId) -> Result<()> {
     let bundle = distro_contract::load(repo_root, distro_id)?;
 

@@ -346,14 +346,6 @@ pub const HOST_TOOLS: &[HostTool] = &[
         upstream: None,
     },
     HostTool {
-        program: "fsck.erofs",
-        purpose: "extracts a parent product's rootfs image",
-        needs: &[Build],
-        dnf: &["erofs-utils"],
-        apt: &["erofs-utils"],
-        upstream: None,
-    },
-    HostTool {
         program: "readelf",
         purpose: "recinit finds the libraries of initramfs binaries",
         needs: &[Build],

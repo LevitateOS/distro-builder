@@ -67,12 +67,14 @@ pub enum Command {
         directory: PathBuf,
         signing_key: Option<PathBuf>,
     },
-    /// Build `product`'s release ISO for `distro`, after any parent release it lacks.
+    /// Build `product`'s release ISO for `distro` from its system and overlay
+    /// parts, building or reusing each (`parts`); no other product is built.
     ReleaseBuild {
         product: ProductId,
         distro: String,
     },
-    /// Prepare `product`'s rootfs source and overlay for `distro` in `output`.
+    /// Prepare `product`'s rootfs source and overlay for `distro` in `output`:
+    /// copies of its parts' trees.
     ProductPrepare {
         product: ProductId,
         distro: String,
@@ -114,7 +116,7 @@ pub fn usage() -> String {
          release verify-feed <distro> <directory>           authenticate staged production metadata (no builds/network)\n  \
          release index <distro> <bundle> <publish_dir> <sequence> --signing-key PKCS8  publish a signed local update index\n  \
          release manifest <distro> <base|desktop> <root> <dir> [--signing-key PKCS8]  verify/package existing release artifacts\n  \
-         release build <product> <distro>                   build a release ISO ({releases})\n  \
+         release build <product> <distro>                   build a release ISO from its cached parts ({releases})\n  \
          product prepare <product> <distro> <dir>           prepare a product's rootfs and overlay ({products})\n  \
          transform build product-erofs <prepared_dir>       write a prepared product's EROFS images\n  \
          artifact prepare-tool-source <package> <dir>       write a tool's offline source tree\n  \

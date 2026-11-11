@@ -1,9 +1,12 @@
-//! Release assembly: a release product's ISO, built in its run directory
-//! from the prepared product, the variant's kernel and the boot command line,
-//! by calling recinit and reciso. The live medium boots the target rootfs's
-//! own systemd-boot.
+//! The combiner: a release product's ISO, written in its run directory from
+//! its two parts (`crate::parts`): its flavour's system part (system tree,
+//! rootfs image, installed initramfs, release set) and its overlay part. The
+//! combiner links the parts' files into the run directory, builds the live
+//! initramfs (small, never cached), verifies the release set and writes the
+//! ISO with reciso. The live medium boots the target rootfs's own
+//! systemd-boot.
 
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, ensure, Context, Result};
 use distro_contract::{ProductId, Variant};
 use distro_profile::InitSystem;
 use std::fs;
@@ -111,6 +114,7 @@ pub fn assemble(
     let contract = &variant.contract;
     let identity = &contract.identity;
     let names = &contract.artifacts;
+    let build = crate::product::build(product);
     let id = &variant.id;
     let step = |what: &str| {
         println!("[release:{product}:{id}] {what}");
@@ -126,40 +130,41 @@ pub fn assemble(
             modules.display()
         );
     }
-
-    let what = step("preparing the product");
-    let prepared = crate::prepare_product(variant, product, dir).context(what)?;
-    let rootfs = prepared.rootfs_source(dir);
-
-    let what = step("adding the kernel modules to the rootfs");
-    add_modules(&rootfs, &modules, &release).context(what)?;
-
-    let what = step("binding the kernel to its installed module tree");
-    {
-        use sha2::{Digest, Sha256};
-        use std::io::Read;
-        let mut image = fs::File::open(kernel.join(KERNEL_IMAGE_PATH))?;
-        let mut hash = Sha256::new();
-        let mut buffer = [0u8; 128 * 1024];
-        loop {
-            let n = image.read(&mut buffer)?;
-            if n == 0 {
-                break;
-            }
-            hash.update(&buffer[..n]);
-        }
-        let binding = serde_json::json!({"version":1,"release":release,"kernel_digest":format!("{:x}",hash.finalize()),"modules_digest":recinit::installed::modules_digest(&rootfs.join("usr/lib/modules").join(&release)).context(what.clone())?});
-        fs::create_dir_all(rootfs.join("usr/lib/recab"))?;
-        fs::write(
-            rootfs.join("usr/lib/recab/kernel.json"),
-            serde_json::to_vec(&binding)?,
-        )?;
+    if build.install_screen {
+        crate::install_ux::check(&variant.repo_root)
+            .with_context(|| format!("resolving the install screen's apps for {id}"))?;
     }
 
-    let what = step("writing the rootfs image");
-    levitate_recipe::target::finalize(&rootfs).context("finalizing intended release metadata")?;
-    let rootfs_image = dir.join(&names.rootfs);
-    crate::build_erofs_default(&rootfs, &rootfs_image).context(what)?;
+    let what = step("ensuring the system part");
+    let system = crate::parts::system(variant, product.flavour(), kernel).context(what)?;
+    let what = step("ensuring the overlay part");
+    let overlay = crate::parts::overlay(variant, product, &system).context(what)?;
+    ensure!(
+        system.record.inputs.get("kernel-release") == Some(&release),
+        "the {} part {} was built for another kernel than {release}",
+        system.kind,
+        system.short_key()
+    );
+
+    let what = step("linking the parts into the release directory");
+    (|| -> Result<()> {
+        system.link_outputs(dir)?;
+        overlay.link_outputs(dir)?;
+        system.link_tree(&dir.join(crate::pipeline::products::ROOTFS_SOURCE_DIR))?;
+        overlay.link_tree(&dir.join(build.overlay_dir))?;
+        crate::pipeline::products::write_manifest(variant, product, dir)?;
+        Ok(())
+    })()
+    .context(what)?;
+    let rootfs = system.tree();
+    let overlay_image = dir.join(&names.overlay);
+    ensure!(
+        overlay_image.is_file(),
+        "the {} part {} has no {}",
+        overlay.kind,
+        overlay.short_key(),
+        names.overlay
+    );
 
     let what = step("acquiring busybox");
     let busybox = busybox(variant).context(what)?;
@@ -182,41 +187,32 @@ pub fn assemble(
         false,
     )
     .context(what)?;
+    crate::parts::check_kernel(&system, kernel)?;
 
-    // Every product carries the installed system, on every variant, so every
-    // ISO carries the initramfs it boots through (recsetup installs it). It
-    // is built from the rootfs the ISO installs, so its fsck, blkid and
-    // modules match the installed system.
-    let what = step("building the installed initramfs");
-    let initramfs_installed = dir.join(recinit::live::INITRAMFS_INSTALLED_FILENAME);
-    recinit::build_install_initramfs(
-        &recinit::InstallConfig {
-            rootfs: rootfs.clone(),
-            busybox_path: busybox,
-            modules_dir: modules,
-            output: initramfs_installed.clone(),
-            gzip_level: recinit::DEFAULT_GZIP_LEVEL,
-        },
-        false,
-    )
-    .context(what)?;
-
-    let what = step("writing the overlay image");
-    let overlay_image = dir.join(&names.overlay);
-    crate::build_overlayfs_default(&prepared.overlay(dir), &overlay_image).context(what)?;
-
-    let what = step("publishing the installed-system release manifest");
-    let signing_key = std::env::var_os("RECAB_RELEASE_SIGNING_KEY").map(PathBuf::from);
-    let release_manifest = crate::release_manifest::write(
-        variant,
-        product.flavour(),
-        &rootfs,
-        dir,
-        &kernel.join(KERNEL_IMAGE_PATH),
-        &initramfs_installed,
-        signing_key.as_deref(),
-    )
-    .context(what)?;
+    // The release set is the system part's; verify it as linked here, with
+    // the tree it was built from, and take the ISO's members from recab's
+    // verified copy.
+    let what = step("verifying the installed-system release set");
+    let release_manifest = crate::release_manifest::verify(variant, &rootfs, dir).context(what.clone())?;
+    {
+        let manifest = release_manifest.inputs.manifest();
+        ensure!(
+            manifest.identity.flavour == product.flavour(),
+            "{what}: the release set is the {} system, not {}",
+            manifest.identity.flavour,
+            product.flavour()
+        );
+        ensure!(
+            manifest.kernel.release == release,
+            "{what}: the release set binds kernel {}, not {release}",
+            manifest.kernel.release
+        );
+        ensure!(
+            Some(&manifest.sources_sha256) == system.record.inputs.get("system-sources"),
+            "{what}: the release set was built from other sources than the {} part's key",
+            system.kind
+        );
+    }
 
     let what = step("writing the ISO");
     let iso = dir.join(names.iso(product));
@@ -275,8 +271,26 @@ pub fn assemble(
     Ok(iso)
 }
 
+/// Writes the kernel binding `usr/lib/recab/kernel.json` into `rootfs`: the
+/// kernel `release`, the digest of the kernel image in `kernel` and the
+/// digest of the module tree the rootfs carries for it.
+pub(crate) fn bind_kernel(kernel: &Path, rootfs: &Path, release: &str) -> Result<()> {
+    let kernel_digest = crate::parts::file_sha256(&kernel.join(KERNEL_IMAGE_PATH))?.0;
+    let modules_digest =
+        recinit::installed::modules_digest(&rootfs.join("usr/lib/modules").join(release))?;
+    let binding = serde_json::json!({
+        "version": 1,
+        "release": release,
+        "kernel_digest": kernel_digest,
+        "modules_digest": modules_digest,
+    });
+    fs::create_dir_all(rootfs.join("usr/lib/recab"))?;
+    fs::write(rootfs.join("usr/lib/recab/kernel.json"), serde_json::to_vec(&binding)?)?;
+    Ok(())
+}
+
 /// The kernel's release (`kernel.release`, one line).
-fn kernel_release(kernel: &Path) -> Result<String> {
+pub(crate) fn kernel_release(kernel: &Path) -> Result<String> {
     let path = kernel.join(KERNEL_RELEASE_PATH);
     let text = fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
     let release = text.strip_suffix('\n').unwrap_or(&text);
@@ -291,7 +305,7 @@ fn kernel_release(kernel: &Path) -> Result<String> {
 /// them) can load. The installed boot contract binds `/usr/lib/modules`.
 /// Busybox's modprobe reads `/lib/modules`, including on Acorn where `/lib`
 /// is a real directory rather than a link to `usr/lib`.
-fn add_modules(rootfs: &Path, modules: &Path, release: &str) -> Result<()> {
+pub(crate) fn add_modules(rootfs: &Path, modules: &Path, release: &str) -> Result<()> {
     let dest = rootfs.join("usr/lib/modules").join(release);
     if fs::symlink_metadata(&dest).is_ok() {
         fs::remove_dir_all(&dest).with_context(|| format!("removing {}", dest.display()))?;

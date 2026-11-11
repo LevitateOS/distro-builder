@@ -79,9 +79,13 @@ fn build(ctx) {
     log("Installing the Alpine " + lock::release() + " compiler root...");
     let args = ["--root", root, "--usermode", "--initdb", "--no-progress", "--no-scripts",
         "--force-non-repository", "--no-network", "--cache-dir", cache, "add"];
-    for set in ctx.sets { for row in set[1] { if wanted(row[0]) { args.push(apk_file(ctx, set, row)); } } }
-    // APK 3 installs as a non-root user in usermode.
+    let total = 0;
+    for set in ctx.sets { for row in set[1] { if wanted(row[0]) { args.push(apk_file(ctx, set, row)); total += 1; } } }
+    // APK 3 installs as a non-root user in usermode. One apk run installs
+    // them all: Recipe sees none done until it ends.
+    progress(0, total, "packages (one apk add)");
     exec_checked(apk, args, #{uid: 1000, gid: 1000});
+    progress(total, total, "packages (one apk add)");
     // BusyBox's install script links its commands; no script ran, and the
     // build runs its commands through /bin/sh.
     if !exists(join_path(root, "bin/sh")) {

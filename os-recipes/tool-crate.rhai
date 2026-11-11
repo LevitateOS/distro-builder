@@ -45,6 +45,7 @@ fn build(ctx) {
     let work = ctx.runtime.paths.build;
     let rustflags = "-C linker=/usr/lib/rustlib/x86_64-unknown-linux-gnu/bin/rust-lld -C linker-flavor=ld.lld";
     if ctx.bins.contains("recipe") { rustflags += " -C link-arg=" + renameat2_object(work); }
+    progress(0, 0, "compiling " + ctx.bins.len() + " binaries (cargo build)");
     let args = ["build", "--release", "--locked", "--offline"];
     for name in ctx.bins { args.push("--bin"); args.push(name); }
     for extra in ["--target", ctx.rust_target,
@@ -60,11 +61,15 @@ fn build(ctx) {
             LD_LIBRARY_PATH: "/usr/lib"},
     });
     // Each program is the tool it is asked for: `<bin> --version` names it.
+    let checked = 0;
+    progress(0, ctx.bins.len(), "binaries checked");
     for name in ctx.bins {
         let version = trim(exec_output(join_path(ctx.target_dir, name), ["--version"]));
         if !version.starts_with(name + " ") {
             throw "Unexpected " + name + " executable: " + version;
         }
+        checked += 1;
+        progress(checked, ctx.bins.len(), "binaries checked");
     }
     ctx
 }
@@ -92,6 +97,7 @@ fn is_installed(ctx) {
 
 fn install(ctx) {
     mkdir(ctx.output);
+    progress(0, 0, "installing the binaries");
     for name in ctx.bins {
         let program = join_path(ctx.output, name);
         copy_file(join_path(ctx.target_dir, name), program);

@@ -62,8 +62,11 @@ fn build(ctx) {
     if is_file(stamp_of(ctx)) { rm(stamp_of(ctx)); }
     if is_dir(root) { rm(root); }
     mkdir(root);
+    progress(0, 0, "unpacking packages");
     unpack(ctx, root);
+    progress(0, 0, "package effects");
     package_effects(ctx, root);
+    progress(0, 0, "finalizing the tree");
     // Resolve the packages' file owners against their accounts and make the
     // staging tree writable before cleanup; package modes stay in metadata.
     target_finalize(root);
@@ -75,8 +78,11 @@ fn build(ctx) {
     }
     // auditd's log directory.
     installed::directory(root, "var/log/audit", 0o700);
+    progress(0, 0, "system configuration");
     installed::apply(root, ctx.runtime.paths.inputs, ctx.init);
+    progress(0, 0, "finalizing the configured tree");
     target_finalize(root);
+    progress(0, 0, "capability check");
     let gap = missing(ctx, root);
     if gap != "" { throw "the built rootfs lacks " + gap; }
     write_file(stamp_of(ctx), "built\n");

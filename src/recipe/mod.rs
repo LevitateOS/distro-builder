@@ -123,7 +123,8 @@ pub fn ginux_binary(repo: &Path) -> Result<&'static Path> {
     let target_dir = std::env::var_os("CARGO_TARGET_DIR")
         .map(|target| PathBuf::from(target).join("ginux"))
         .unwrap_or_else(|| dir.join("target"));
-    eprintln!("  building ginux (cargo build -p ginux-init --bin ginux --release in {GINUX_DIR})");
+    crate::teprintln!("  building ginux (cargo build -p ginux-init --bin ginux --release in {GINUX_DIR})");
+    let step = crate::timeline::Step::begin("tool", "cargo build ginux");
     Cmd::new("cargo")
         .args(["build", "-q", "-p", "ginux-init", "--bin", "ginux", "--release", "--target", GINUX_TARGET])
         .arg("--target-dir")
@@ -136,16 +137,18 @@ pub fn ginux_binary(repo: &Path) -> Result<&'static Path> {
     if !path.is_file() {
         bail!("cargo built ginux, but it is not at '{}'", path.display());
     }
+    step.finish();
     Ok(BINARY.get_or_init(|| path))
 }
 
 /// `cargo build -p levitate-recipe` with the builder's profile.
 fn build(repo: &Path) -> Result<PathBuf> {
     let release = !cfg!(debug_assertions);
-    eprintln!(
+    crate::teprintln!(
         "  building recipe (cargo build -p levitate-recipe{})",
         if release { " --release" } else { "" }
     );
+    let step = crate::timeline::Step::begin("tool", "cargo build recipe");
     let mut cargo = Cmd::new("cargo")
         .args(["build", "-q", "-p", "levitate-recipe", "--bin", "recipe"])
         .dir(repo)
@@ -164,6 +167,7 @@ fn build(repo: &Path) -> Result<PathBuf> {
     if !path.is_file() {
         bail!("cargo built recipe, but it is not at '{}'", path.display());
     }
+    step.finish();
     Ok(path)
 }
 
@@ -260,7 +264,12 @@ impl<'a> Invocation<'a> {
     pub fn run(self) -> Result<RecipeResult> {
         let recipe = &self.recipe;
         let work = &self.work;
-        eprintln!(
+        let recipe_name = recipe
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| recipe.display().to_string());
+        let step = crate::timeline::Step::begin("recipe", &format!("recipe {} {recipe_name}", self.phase));
+        crate::teprintln!(
             "  recipe {} {} (work: {})",
             self.phase,
             recipe.display(),
@@ -296,6 +305,18 @@ impl<'a> Invocation<'a> {
             .dir(self.cwd.as_deref().unwrap_or(self.repo))
             .stdout_to_stderr()
             .error_msg(format!("recipe {} {}", self.phase, recipe.display()));
+        // Recipe keeps this file current (done/total of what it is doing); the
+        // builder records its path, so `cargo xtask progress` can read it.
+        let progress = (self.phase == "install").then(|| crate::timeline::progress_file(self.repo, &recipe_name));
+        let mut _active = None;
+        if let Some(file) = &progress {
+            if let Some(parent) = file.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            cmd = cmd.arg("--progress-file").arg(file);
+            crate::timeline::recipe_begin(&recipe_name, file);
+            _active = Some(ActiveRecipe);
+        }
         for (key, _) in std::env::vars_os() {
             let name = key.to_string_lossy();
             let control = name.starts_with("RECIPE_") || name.starts_with("GINUX_");
@@ -308,9 +329,9 @@ impl<'a> Invocation<'a> {
         cmd = cmd.env("GINUX_BIN", ginux).env("RECIPE_WORKER_BIN", worker);
         for (name, value) in [("GINUX_BIN", ginux), ("RECIPE_WORKER_BIN", worker)] {
             if let Some(ambient) = std::env::var_os(name).filter(|ambient| Path::new(ambient) != value) {
-                eprintln!("    {name}={} (the builder's own; ignoring {})", value.display(), Path::new(&ambient).display());
+                crate::teprintln!("    {name}={} (the builder's own; ignoring {})", value.display(), Path::new(&ambient).display());
             } else {
-                eprintln!("    {name}={}", value.display());
+                crate::teprintln!("    {name}={}", value.display());
             }
         }
         for name in LAUNCHER_ENV {
@@ -319,22 +340,36 @@ impl<'a> Invocation<'a> {
                 continue;
             }
             if let Some(value) = std::env::var_os(name) {
-                eprintln!("    {name}={}", Path::new(&value).display());
+                crate::teprintln!("    {name}={}", Path::new(&value).display());
             }
         }
         if let Some((reference, rootfs)) = &self.root {
             cmd = cmd.env("GINUX_ROOT", reference).env("GINUX_ROOTFS", rootfs);
-            eprintln!("    GINUX_ROOT={reference} (this recipe's own root)");
-            eprintln!("    GINUX_ROOTFS={}", rootfs.display());
+            crate::teprintln!("    GINUX_ROOT={reference} (this recipe's own root)");
+            crate::teprintln!("    GINUX_ROOTFS={}", rootfs.display());
         } else if let Some((reference, rootfs)) = compiler_image(self.repo)? {
             cmd = cmd.env("GINUX_ROOT", &reference).env("GINUX_ROOTFS", &rootfs);
-            eprintln!("    GINUX_ROOT={reference} (the pinned compiler image)");
-            eprintln!("    GINUX_ROOTFS={}", rootfs.display());
+            crate::teprintln!("    GINUX_ROOT={reference} (the pinned compiler image)");
+            crate::teprintln!("    GINUX_ROOTFS={}", rootfs.display());
         }
         cmd.run_interactive()?;
 
         let bytes = std::fs::read(result.path())
             .context("reading this invocation's recipe JSON result")?;
-        RecipeResult::from_json(&bytes)
+        let result = RecipeResult::from_json(&bytes)?;
+        if let Some(file) = &progress {
+            let _ = std::fs::remove_file(file);
+        }
+        step.finish();
+        Ok(result)
+    }
+}
+
+/// Clears the recorded Recipe invocation when the run ends, however it ends.
+struct ActiveRecipe;
+
+impl Drop for ActiveRecipe {
+    fn drop(&mut self) {
+        crate::timeline::recipe_end();
     }
 }

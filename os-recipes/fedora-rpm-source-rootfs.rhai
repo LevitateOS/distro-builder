@@ -41,13 +41,20 @@ fn verify_inputs(ctx) {
 
 fn unpack(ctx, root) {
     log("Extracting the locked Fedora " + lock::release() + " RPM set into the rootfs...");
-    for entry in rpm_files(ctx) {
-        log("  Extracting " + entry[1][1]);
+    let files = rpm_files(ctx);
+    let total = files.len();
+    let done = 0;
+    progress(0, total, "packages");
+    for entry in files {
+        log("  Extracting " + entry[1][1] + " (" + (done + 1) + "/" + total + ")");
         target_extract_rpm(entry[0], root);
+        done += 1;
+        progress(done, total, "packages");
     }
 }
 
 fn package_effects(ctx, root) {
+    progress(0, 0, "package effects");
     // `filesystem` lists /usr/sbin as a ghost that its script makes a link to
     // bin; the merged-/usr links at the root are in its payload.
     let sbin = join_path(root, "usr/sbin");
@@ -64,6 +71,7 @@ fn package_effects(ctx, root) {
     // and /sys into the new root and gives up without them, so a slot recab
     // stages from this image must carry them.
     for dir in ["proc", "sys"] { system::directory(root, dir, 0o555); }
+    progress(0, 0, "package effects: accounts (sysusers)");
     sysusers(root);
     // dbus-broker's preset: it is the system bus, started from its socket.
     system::link(root, "etc/systemd/system/dbus.service", "/usr/lib/systemd/system/dbus-broker.service");

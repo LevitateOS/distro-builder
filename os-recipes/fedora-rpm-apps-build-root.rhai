@@ -34,6 +34,19 @@ fn rpm_files(ctx) {
     files
 }
 
+// Unpacks every RPM, reporting package k of n.
+fn unpack_all(ctx, root) {
+    let files = rpm_files(ctx);
+    let total = files.len();
+    let done = 0;
+    progress(0, total, "packages");
+    for entry in files {
+        target_extract_rpm(entry[0], root);
+        done += 1;
+        progress(done, total, "packages");
+    }
+}
+
 fn verify_inputs(ctx) {
     for entry in rpm_files(ctx) {
         if !is_file(entry[0]) { throw "the rpm inputs lack " + basename(entry[0]) + "; run the rootfs source preseed for the desktop"; }
@@ -66,7 +79,7 @@ fn build(ctx) {
     if is_dir(root) { rm(root); }
     mkdir(root);
     log("Extracting the Fedora " + lock::release() + " compiler root...");
-    for entry in rpm_files(ctx) { target_extract_rpm(entry[0], root); }
+    unpack_all(ctx, root);
     // binutils' install script chooses the linker through `alternatives`;
     // no script ran, so name the default one here.
     if !exists(join_path(root, "usr/bin/ld")) {

@@ -56,7 +56,7 @@ pub fn create_erofs(
             .with_context(|| format!("Failed to create output directory: {}", parent.display()))?;
     }
 
-    println!(
+    crate::tprintln!(
         "Creating EROFS with {} compression (level {})...",
         compression, compression_level
     );
@@ -108,7 +108,7 @@ pub fn create_erofs(
     // Print size
     let metadata = fs::metadata(output)?;
     let bytes = metadata.len();
-    println!("EROFS created: {}", format_size_human(bytes));
+    crate::tprintln!("EROFS created: {}", format_size_human(bytes));
 
     Ok(())
 }

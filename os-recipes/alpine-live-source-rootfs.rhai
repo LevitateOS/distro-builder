@@ -42,7 +42,15 @@ fn verify_inputs(ctx) {
     }
 }
 
+// How many packages the apk run installs.
+fn package_count(ctx) {
+    let total = 0;
+    for set in ctx.sets { total += set[1].len(); }
+    total
+}
+
 fn unpack(ctx, root) {
+    progress(0, 0, "preparing apk");
     let build = ctx.runtime.paths.build;
     let tools = join_path(build, "apk-tools");
     if is_dir(tools) { rm(tools); }
@@ -68,11 +76,17 @@ fn unpack(ctx, root) {
     }
     // APK 3 installs as a non-root user in usermode; the packages' owners come
     // from their metadata.
+    // One apk run installs them all: Recipe sees 0 until it ends.
+    let total = package_count(ctx);
+    progress(0, total, "packages (one apk add)");
     exec_checked(apk, args, #{uid: 1000, gid: 1000});
+    progress(total, total, "packages (one apk add)");
+    progress(0, 0, "capturing the installed packages");
     target_capture_apks(root, dirs + [cache]);
 }
 
 fn package_effects(ctx, root) {
+    progress(0, 0, "package effects: busybox applets");
     busybox_applets(root);
     script_accounts(ctx, root);
     // pinentry's script points /usr/bin/pinentry at the curses one when no
@@ -102,7 +116,11 @@ fn script_accounts(ctx, root) {
     let groups = [];
     let users = [];
     let members = [];
-    for name in shell_output("ls '" + dir + "'").split("\n") {
+    let names = shell_output("ls '" + dir + "'").split("\n");
+    let seen = 0;
+    for name in names {
+        seen += 1;
+        progress(seen, names.len(), "package scripts read");
         let name = trim(name);
         if !(name.ends_with(".pre-install") || name.ends_with(".post-install")) { continue; }
         for command in account_commands(read_file(join_path(dir, name))) {
@@ -118,9 +136,12 @@ fn script_accounts(ctx, root) {
             }
         }
     }
-    for group in groups { add_group(root, group.name, group.id); }
-    for user in users { add_user(root, user); }
-    for group in members { add_member(root, group.member, group.name); }
+    let accounts = groups.len() + users.len() + members.len();
+    let made = 0;
+    progress(0, accounts, "accounts");
+    for group in groups { add_group(root, group.name, group.id); made += 1; progress(made, accounts, "accounts"); }
+    for user in users { add_user(root, user); made += 1; progress(made, accounts, "accounts"); }
+    for group in members { add_member(root, group.member, group.name); made += 1; progress(made, accounts, "accounts"); }
 }
 
 // The addgroup and adduser commands of a shell script's text, each as its

@@ -17,6 +17,7 @@ pub mod tui_apps;
 pub(crate) mod tui_binary;
 pub(crate) mod desktop_apps;
 pub mod process;
+pub mod timeline;
 pub mod recipe;
 
 pub use artifact::filesystem::copy_dir_recursive;

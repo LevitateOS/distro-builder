@@ -184,6 +184,17 @@ or smoke alone does not establish interaction. These commands are acceptance
 procedures, not claims that a particular source/product combination passed.
 The contribution queue owns current results and final delivery dependencies.
 
+## Timeline and progress
+
+Every line the builder prints starts with the local time (`HH:MM:SS`; `tprintln!`/`teprintln!` in `src/timeline.rs`). `release build` records its run with `timeline::start`/`finish` (`src/bin/workflows/build.rs`); each part ensure (`reused` or `built`, with its short key), each combiner and part step (reading the kernel, EROFS writes, both initramfs builds, the ISO write), each Recipe invocation (by recipe file name) and each tool compile (`cargo build` of Recipe and Ginux) is a step that nests in the one around it.
+
+- `<run directory>/timeline.jsonl`: two lines per step, `{"event":"start"|"end","step","kind","key"?,"note"?,"depth","at", ...}`; an `end` also has `start`, `seconds` and `ok`. Appended as it happens, so a killed build keeps what it did.
+- `<run directory>/timeline.txt`, also printed at the end (and on failure): "where the time went", each step with its duration and share of the build.
+- `.artifacts/progress/<distro>.json`: the current state (`distro`, `product`, `run_dir`, `pid`, `state` = `running`/`finished`/`failed`, `started`, `updated`, the step stack, the active Recipe invocation), replaced atomically at every change.
+- `.artifacts/progress/<distro>/<recipe>-<pid>.json`: Recipe's own progress file. `Invocation::run` passes it as `--progress-file` to every `install` invocation and removes it when the invocation succeeds. Recipes report through `progress(done, total, what)`; `total` 0 means "no count". Recipe writes it at most once a second.
+
+`cargo xtask progress` reads these (see `xtask/README.md`). Nothing here can fail a build: an unwritable file is skipped.
+
 ## License
 
 Licensed under either of:

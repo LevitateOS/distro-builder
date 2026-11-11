@@ -17,20 +17,22 @@ pub(crate) fn build_one(repo_root: &Path, distro_id: &str, product: ProductId) -
     run.manifest.iso_path = Some(iso_path.clone());
     run.save()?;
 
+    distro_builder::timeline::start(&bundle.repo_root, distro_id, product.name(), &run.dir);
     let build_result = (|| -> Result<()> {
         // Release builds never build a kernel.
         distro_builder::kernel::check_kernel_installed(&bundle, &kernel_output_dir).with_context(|| {
             format!("install it first: cargo xtask build kernel {distro_id} (--prebuilt downloads it)")
         })?;
-        println!("[release:iso:{product}:{distro_id}] kernel already installed");
+        distro_builder::tprintln!("[release:iso:{product}:{distro_id}] kernel already installed");
         distro_builder::release::assemble(&bundle, product, &run.dir, &kernel_output_dir)?;
 
-        println!(
+        distro_builder::tprintln!(
             "[release:iso:{product}:{distro_id}] built at {}",
             iso_path.display()
         );
         Ok(())
     })();
+    distro_builder::timeline::finish(build_result.is_ok());
 
     let release_dir = runs::release_dir(&bundle.repo_root, distro_id, product);
     let recorded = run

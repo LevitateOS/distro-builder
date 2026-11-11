@@ -116,8 +116,10 @@ pub fn assemble(
     let names = &contract.artifacts;
     let build = crate::product::build(product);
     let id = &variant.id;
+    let seq = crate::timeline::Seq::new();
     let step = |what: &str| {
-        println!("[release:{product}:{id}] {what}");
+        crate::tprintln!("[release:{product}:{id}] {what}");
+        seq.step(what);
         format!("{what} for the {product} release of {id}")
     };
 
@@ -265,7 +267,8 @@ pub fn assemble(
         config.extra_files.push((authority,distro_contract::release::production::AUTHORITY_FILE.into()));
     }
     config.systemd_boot = rootfs.join(SYSTEMD_BOOT_EFI);
-    let iso = reciso::create_iso(&config, &|message| println!("  {message}")).context(what)?;
+    let iso = reciso::create_iso(&config, &|message| crate::tprintln!("  {message}")).context(what)?;
+    seq.finish();
 
     print_summary(dir)?;
     Ok(iso)
@@ -363,9 +366,9 @@ fn print_summary(dir: &Path) -> Result<()> {
     }
     files.sort();
     let width = files.iter().map(|(name, _)| name.len()).max().unwrap_or(0);
-    println!("Artifacts in {}:", dir.display());
+    crate::tprintln!("Artifacts in {}:", dir.display());
     for (name, bytes) in files {
-        println!(
+        crate::tprintln!(
             "  {name:<width$}  {:>8.1} MiB",
             bytes as f64 / (1024.0 * 1024.0)
         );

@@ -51,6 +51,9 @@ fn obtain(ctx, row, file) {
 
 fn acquire(ctx) {
     mkdir(dir_of(ctx));
+    let total = ctx.files.len();
+    let done = 0;
+    progress(0, total, "files");
     for row in ctx.files {
         let file = file_of(ctx, row);
         if ctx.runtime.options.force_acquire || !is_file(file) {
@@ -58,6 +61,8 @@ fn acquire(ctx) {
         } else {
             verify_sha256(file, row[3]);
         }
+        done += 1;
+        progress(done, total, "files");
     }
     with_outputs(ctx)
 }

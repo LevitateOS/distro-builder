@@ -145,7 +145,7 @@ fn preseed(
         .with_context(|| format!("preseed recipe '{}' output contract", recipe_path.display()))?;
     // A store problem never fails a preseed that succeeded: the store is a cache.
     if let Err(err) = fill_store(&store, &outputs, &digests) {
-        eprintln!("warning: download store not updated: {err:#}");
+        crate::teprintln!("warning: download store not updated: {err:#}");
     }
     save_preseed_outputs(&build_dir.join(record), &recipe_path, &outputs)?;
     Ok(outputs)

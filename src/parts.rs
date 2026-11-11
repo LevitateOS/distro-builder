@@ -165,16 +165,18 @@ pub(crate) fn system(variant: &Variant, flavour: Flavour, kernel: &Path) -> Resu
     let kind = format!("system-{flavour}");
     let names = &variant.contract.artifacts;
     let label = format!("[part:{kind}:{}]", variant.id);
-    let step = |what: &str| {
-        println!("{label} {what}");
-        format!("{what} for the {kind} part of {}", variant.id)
-    };
     ensure_part(
         variant,
         &kind,
         &[ROOTFS_SOURCE_DIR],
         &|| system_inputs(variant, flavour, kernel),
         &mut |dir, inputs| {
+            let seq = crate::timeline::Seq::new();
+            let step = |what: &str| {
+                crate::tprintln!("{label} {what}");
+                seq.step(what);
+                format!("{what} for the {kind} part of {}", variant.id)
+            };
             let release = &inputs["kernel-release"];
             let modules = kernel.join(KERNEL_MODULES_DIR).join(release);
             let rootfs = create_empty_overlay_dir(dir, ROOTFS_SOURCE_DIR)?;
@@ -232,6 +234,7 @@ pub(crate) fn system(variant: &Variant, flavour: Flavour, kernel: &Path) -> Resu
             .context(what)?;
             // Unmounts recab's verified copy before the part is published.
             drop(produced);
+            seq.finish();
             Ok(())
         },
     )
@@ -248,13 +251,18 @@ pub(crate) fn overlay(variant: &Variant, product: ProductId, system: &Part) -> R
         &[build.overlay_dir],
         &|| overlay_inputs(variant, product, system),
         &mut |dir, _| {
-            println!("{label} preparing the overlay");
+            let seq = crate::timeline::Seq::new();
+            crate::tprintln!("{label} preparing the overlay");
+            seq.step("preparing the overlay");
             let overlay = create_empty_overlay_dir(dir, build.overlay_dir)?;
             products::build_overlay(variant, product, &system.tree(), &overlay)
                 .with_context(|| format!("preparing the {product} overlay of {}", variant.id))?;
-            println!("{label} writing the overlay image");
+            crate::tprintln!("{label} writing the overlay image");
+            seq.step("writing the overlay image");
             crate::build_overlayfs_default(&overlay, &dir.join(&variant.contract.artifacts.overlay))
-                .with_context(|| format!("writing the {product} overlay image of {}", variant.id))
+                .with_context(|| format!("writing the {product} overlay image of {}", variant.id))?;
+            seq.finish();
+            Ok(())
         },
     )
 }
@@ -409,11 +417,13 @@ fn ensure_part(
     let parent = runs::parts_dir(&variant.repo_root, &variant.id).join(kind);
     fs::create_dir_all(&parent).with_context(|| format!("creating {}", parent.display()))?;
     let label = format!("[part:{kind}:{}]", variant.id);
+    let ensure = crate::timeline::Step::begin("part", &format!("part {kind}"));
     let trees: Vec<String> = trees.iter().map(|tree| tree.to_string()).collect();
     for _ in 0..ATTEMPTS {
         let wanted = inputs().with_context(|| format!("computing the inputs of the {kind} part"))?;
         let key = key(kind, &variant.id, &wanted);
         let short = &key[..16];
+        ensure.key(short);
         let dir = parent.join(&key);
         let lock = fs::OpenOptions::new()
             .create(true)
@@ -431,7 +441,9 @@ fn ensure_part(
 
         flock(&lock, libc::LOCK_SH, kind)?;
         if let Ok(Some(record)) = check(&dir, kind, &variant.id, &key, &wanted, &trees) {
-            println!("{label} reused {short}");
+            crate::tprintln!("{label} reused {short}");
+            ensure.note("reused");
+            ensure.finish();
             return Ok(part(record, lock));
         }
         // Not atomic: check again once no one else uses or builds the part.
@@ -439,17 +451,19 @@ fn ensure_part(
         match check(&dir, kind, &variant.id, &key, &wanted, &trees) {
             Ok(Some(record)) => {
                 flock(&lock, libc::LOCK_SH, kind)?;
-                println!("{label} reused {short}");
+                crate::tprintln!("{label} reused {short}");
+                ensure.note("reused");
+                ensure.finish();
                 return Ok(part(record, lock));
             }
             Ok(None) => {}
             Err(why) => {
-                println!("{label} the part under {short} is unusable ({why:#}); removing it");
+                crate::tprintln!("{label} the part under {short} is unusable ({why:#}); removing it");
                 fs::remove_dir_all(&dir).with_context(|| format!("removing {}", dir.display()))?;
             }
         }
 
-        println!("{label} building {short}");
+        crate::tprintln!("{label} building {short}");
         remove_stale_builds(&parent, &key)?;
         let pending = parent.join(format!(".tmp-{key}-{}", std::process::id()));
         fs::create_dir(&pending).with_context(|| format!("creating {}", pending.display()))?;
@@ -471,7 +485,7 @@ fn ensure_part(
                 .collect::<BTreeSet<_>>()
                 .into_iter()
                 .collect();
-            println!(
+            crate::tprintln!(
                 "{label} its inputs changed while it was built ({}); discarding it and building again",
                 changed.join(", ")
             );
@@ -489,7 +503,9 @@ fn ensure_part(
             .and_then(|parent| parent.sync_all())
             .with_context(|| format!("syncing {}", parent.display()))?;
         flock(&lock, libc::LOCK_SH, kind)?;
-        println!("{label} built {short}");
+        crate::tprintln!("{label} built {short}");
+        ensure.note("built");
+        ensure.finish();
         return Ok(part(record, lock));
     }
     bail!(
@@ -663,7 +679,7 @@ fn remove_stale_builds(parent: &Path, key: &str) -> Result<()> {
     for entry in fs::read_dir(parent).with_context(|| format!("listing {}", parent.display()))? {
         let entry = entry?;
         if entry.file_name().to_str().is_some_and(|name| name.starts_with(&prefix)) {
-            println!("  removing the unfinished build {}", entry.path().display());
+            crate::tprintln!("  removing the unfinished build {}", entry.path().display());
             fs::remove_dir_all(entry.path())
                 .with_context(|| format!("removing {}", entry.path().display()))?;
         }

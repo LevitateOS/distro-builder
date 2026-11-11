@@ -54,11 +54,16 @@ fn build(ctx) {
     }
     let dir = work(ctx);
     if is_dir(dir) { rm(dir); }
+    progress(0, 0, "configuring (cmake)");
     exec_checked("cmake", ["-S", source(ctx), "-B", dir, "-G", "Unix Makefiles",
         "-DCMAKE_BUILD_TYPE=Release", "-DCMAKE_INSTALL_PREFIX=/usr"], #{ env: tools_env(ctx) });
+    progress(0, ctx.programs.len(), "compiling the apps (cmake --build)");
     exec_checked("cmake", ["--build", dir, "--parallel", ctx.jobs], #{ env: tools_env(ctx) });
+    let found = 0;
     for program in ctx.programs {
         if !is_file(built(ctx, program)) { throw "the build wrote no " + program; }
+        found += 1;
+        progress(found, ctx.programs.len(), "programs built");
     }
     ctx
 }
@@ -86,6 +91,7 @@ fn install(ctx) {
     mkdir(root);
     let env = tools_env(ctx);
     env.DESTDIR = root;
+    progress(0, 0, "installing into the tree (cmake --install)");
     exec_checked("cmake", ["--install", work(ctx)], #{ env: env });
     for file in installed_files(ctx) {
         if !is_file(join_path(root, file[0])) { throw "installing wrote no /" + file[0]; }

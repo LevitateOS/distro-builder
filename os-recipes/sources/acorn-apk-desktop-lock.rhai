@@ -5,7 +5,7 @@
 // command.
 
 fn release() { "v3.24" }
-fn locked_on() { "2026-11-10" }
+fn locked_on() { "2026-11-11" }
 fn mirror() { "https://dl-cdn.alpinelinux.org/alpine/v3.24" }
 
 // The key Alpine signs the release's packages with: [file name, PEM].
@@ -530,7 +530,6 @@ fn packages() {
         ["polkit-common", "polkit-common-127-r2", "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/polkit-common-127-r2.apk", "27b7069a0d4d5a6b09f362e54bcfa1ee8d0af9e371bb5e29cbc340295a6ef9c2"],
         ["polkit-elogind", "polkit-elogind-127-r2", "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/polkit-elogind-127-r2.apk", "e6953754a119f4dae1220875696bc0919a9378d08686fd6a27532d1f1053944d"],
         ["polkit-elogind-libs", "polkit-elogind-libs-127-r2", "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/polkit-elogind-libs-127-r2.apk", "8194ea9f3beb3931361db7c6a91e75a3dc2c87f438b41d57b8ad40b171c326c9"],
-        ["polkit-noelogind-libs", "polkit-noelogind-libs-127-r2", "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/polkit-noelogind-libs-127-r2.apk", "997938222fbd28c5c9f8149617777a01a9840ea6e0400063518243d4b8bfc499"],
         ["polkit-openrc", "polkit-openrc-127-r2", "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/polkit-openrc-127-r2.apk", "d824402210b76eda63a5422fae7c52841ab91dc638f0bb1bd5603d4e662c4e8f"],
         ["polkit-qt6", "polkit-qt6-0.201.1-r1", "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/polkit-qt6-0.201.1-r1.apk", "b71dd794b0d60b6965bd9ddc72d38deacc786c8c6cad7d7e07eac4c073ff4f9b"],
         ["poppler", "poppler-25.12.0-r1", "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/poppler-25.12.0-r1.apk", "27d05f21b2c4b4b3f68185a2f3e87426477bae0cfbd5bf6815b7f3ec93b53fff"],

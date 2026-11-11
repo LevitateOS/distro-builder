@@ -121,16 +121,28 @@ pub fn write(
         root_policy == policy.installed(),
         "prepared rootfs release policy differs from the variant contract"
     );
-    let secret = match (&policy.trust, signing_key) {
-        (Some(_), Some(key)) => Some(self::signing_key(variant, key, &[root, dir])?),
-        (Some(_), None) => {
-            anyhow::bail!("signed releases require an explicit distribution PKCS#8 signing key")
-        }
-        (None, Some(_)) => anyhow::bail!(
-            "configure release.trust before signing; the signing key cannot select its own authority"
-        ),
-        (None, None) => None,
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_secs();
+    let authority = if let Some(production) = &policy.production {
+        let file = levitate_recipe::fsx::open_regular(&variant.path(production::AUTHORITY_FILE))?;
+        ensure!(file.metadata()?.len() <= production::MAX_AUTHORITY as u64, "public delegation exceeds bound");
+        let mut raw = Vec::new(); file.take(production::MAX_AUTHORITY as u64 + 1).read_to_end(&mut raw)?;
+        let verified = production::AuthorityProof::parse(&raw)?.verify(production, &contract.identity.os_id, &policy.channel, now)?;
+        ensure!(fs::read(root.join("usr/lib/recab/release-keys.json"))? == raw, "prepared root has stale public authority; prepare it again");
+        Some((verified, raw))
+    } else { None };
+    let secret = if authority.is_some() || policy.trust.is_some() {
+        let path = signing_key.context("signed releases require an explicit distribution PKCS#8 signing key")?;
+        let key = read_signing_key(variant, path, &[root, dir])?;
+        if let Some((authority, _)) = &authority { authority.sign(production::SigningRole::Release, b"", &key, now)?; }
+        else { sign(b"", &key, policy.trust.as_ref().unwrap())?; }
+        Some(key)
+    } else {
+        ensure!(signing_key.is_none(), "configure release trust before signing; a private key cannot choose its own authority");
+        None
     };
+    if let Some((_, raw)) = &authority {
+        distro_contract::runs::write_atomic(&dir.join(production::AUTHORITY_FILE), raw)?;
+    }
     let sources = crate::pipeline::sources::recorded(dir)
         .context("release has no system-sources.sha256 provenance record")?;
     hash(&sources)?;
@@ -217,7 +229,10 @@ pub fn write(
     );
     manifest.validate()?;
     let bytes = serde_json::to_vec_pretty(&manifest)?;
-    if let (Some(trust), Some(secret)) = (&policy.trust, &secret) {
+    if let (Some((authority, _)), Some(secret)) = (&authority, &secret) {
+        let signature = authority.sign(production::SigningRole::Release, &bytes, secret, now)?;
+        distro_contract::runs::write_atomic(&dir.join(SIGNATURE), &signature)?;
+    } else if let (Some(trust), Some(secret)) = (&policy.trust, &secret) {
         let signature = sign(&bytes, secret, trust)?;
         distro_contract::runs::write_atomic(&dir.join(SIGNATURE), &signature)?;
     }

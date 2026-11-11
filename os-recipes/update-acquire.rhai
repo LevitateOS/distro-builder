@@ -19,7 +19,12 @@ fn is_installed(ctx) {
 }
 fn install(ctx) {
     let request = parse_json(read_file(join_path(RUNTIME.paths.inputs,"request")));
-    if request.sha256 == "" { fetch_bounded(request.url,ctx.file,request.size); }
-    else { download_exact(request.url,ctx.file,request.sha256,request.size); }
+    if "prefixes" in request {
+        if request.sha256 == "" { fetch_bounded(request.url,ctx.file,request.size,request.prefixes); }
+        else { download_exact(request.url,ctx.file,request.sha256,request.size,request.prefixes); }
+    } else {
+        if request.sha256 == "" { fetch_bounded(request.url,ctx.file,request.size); }
+        else { download_exact(request.url,ctx.file,request.sha256,request.size); }
+    }
     ctx.outputs.artifact=ctx.file; ctx
 }

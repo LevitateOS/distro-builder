@@ -197,6 +197,7 @@ pub fn publish(
 ) -> Result<()> {
     let policy = &variant.contract.release;
     policy.validate()?;
+    ensure!(policy.production.is_none(), "delegated production publication needs the version-2 transport publisher; legacy index emission is refused");
     let trust = policy
         .trust
         .as_ref()

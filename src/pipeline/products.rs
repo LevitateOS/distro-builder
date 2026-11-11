@@ -169,10 +169,20 @@ fn prepare_system(variant: &Variant, flavour: Flavour, rootfs: &Path) -> Result<
             text.matches(marker).count() == 1,
             "acquisition recipe must declare its configurable network marker exactly once"
         );
-        let endpoint = distro_contract::release::endpoint(&source.index)?;
+        let mut endpoints = std::collections::BTreeSet::from([distro_contract::release::endpoint(&source.index)?]);
+        if let Some(production) = &variant.contract.release.production {
+            endpoints.insert(distro_contract::release::endpoint(&production.asset_prefix)?);
+            for origin in &production.redirect_origins { endpoints.insert(distro_contract::release::endpoint(origin)?); }
+            let proof = fs::read(variant.path(distro_contract::release::production::AUTHORITY_FILE))?;
+            distro_contract::release::production::AuthorityProof::parse(&proof)?.verify(production,
+                &variant.contract.identity.os_id, &variant.contract.release.channel,
+                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_secs())?;
+            fs::write(rootfs.join("usr/lib/recab/release-keys.json"), proof)?;
+            levitate_recipe::target::set_mode(rootfs, Path::new("usr/lib/recab/release-keys.json"), 0o644)?;
+        }
         let rendered = text.replace(
             marker,
-            &format!("network: [{}]", serde_json::to_string(&endpoint)?),
+            &format!("network: {}", serde_json::to_string(&endpoints)?),
         );
         let path = rootfs.join(distro_contract::release::ACQUISITION_RECIPE);
         fs::create_dir_all(path.parent().unwrap())?;

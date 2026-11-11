@@ -8,10 +8,12 @@
 // variant's profile). recipe also packages the official source of recipes
 // (the file that names it and a copy of it at the pinned commit) and the same
 // pinned runtime image/launcher the builder selected, supplied as typed inputs.
+// Input `program`, when given, is the already compiled binary: it is
+// installed as it is and nothing compiles.
 // The named program output is published by Recipe for the consumer to install.
 const RECIPE_API = 2;
 const NEEDS = #{
-    inputs: #{ source: "directory", catalog: "directory?", launcher: "file?", runtime_image: "file?", runtime_reference: "file?" },
+    inputs: #{ source: "directory", catalog: "directory?", launcher: "file?", runtime_image: "file?", runtime_reference: "file?", program: "file?" },
     outputs: #{ program: "file", rootfs: "directory" },
     // Packaging Recipe retains compiler outputs while copying its selected
     // runtime tar (the current compiler image is about 1.3 GiB).
@@ -27,6 +29,7 @@ let ctx = #{
     install_path: if is_def_var("INSTALL_PATH") { INSTALL_PATH } else { "usr/bin/" + bin },
     init_system: if is_def_var("INIT_SYSTEM") { INIT_SYSTEM } else { "" },
     source: join_path(RUNTIME.paths.inputs, "source"),
+    prebuilt: join_path(RUNTIME.paths.inputs, "program"),
     built_program: join_path(RUNTIME.paths.build, "target/" + rust_target + "/release/" + bin),
     program: join_path(RUNTIME.paths.output, "bin/" + bin),
 };
@@ -44,11 +47,14 @@ fn acquire(ctx) {
 }
 
 fn is_built(ctx) {
+    if is_file(ctx.prebuilt) { return ready(ctx); }
     if !is_file(ctx.built_program) { return needs_work(ctx, ctx.name + " needs compilation"); }
     ready(ctx)
 }
 
 fn build(ctx) {
+    // A program built elsewhere (tool-crate.rhai, one compile per crate) needs no compiling.
+    if is_file(ctx.prebuilt) { return ctx; }
     let work = ctx.runtime.paths.build;
     let rustflags = "-C linker=/usr/lib/rustlib/x86_64-unknown-linux-gnu/bin/rust-lld -C linker-flavor=ld.lld";
     if ctx.name == "recipe" { rustflags += " -C link-arg=" + renameat2_object(work); }
@@ -182,7 +188,7 @@ fn is_installed(ctx) {
 
 fn install(ctx) {
     mkdir(dirname(ctx.program));
-    copy_file(ctx.built_program, ctx.program);
+    copy_file(if is_file(ctx.prebuilt) { ctx.prebuilt } else { ctx.built_program }, ctx.program);
     chmod(ctx.program, 0o755);
     let installed = join_path(ctx.rootfs, ctx.install_path);
     mkdir(dirname(installed)); copy_file(ctx.program, installed); chmod(installed, 0o755);

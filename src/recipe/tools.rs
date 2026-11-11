@@ -336,6 +336,40 @@ fn collect_local_dependencies(
     Ok(())
 }
 
+/// Compile every binary of `package` once, in one cargo build through
+/// `os-recipes/tool-crate.rhai`, and return the directory holding one program
+/// per binary. The result is shared by every init system and distro; the work
+/// directory is keyed by package alone. Two distro builds may run at once, so
+/// the whole invocation holds an exclusive lock: the second waits, then finds
+/// the first's published programs ready and reuses them.
+pub(crate) fn compile_crate(repo: &Path, package: &str) -> Result<PathBuf> {
+    let (_, _, binaries) = tool(package)?;
+    let crates = repo.join(".artifacts/work/recipe-tools/crates");
+    fs::create_dir_all(&crates)?;
+    let lock = fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(crates.join(format!("{package}.lock")))?;
+    use std::os::fd::AsRawFd;
+    anyhow::ensure!(
+        unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX) } == 0,
+        "cannot lock the {package} crate build: {}",
+        std::io::Error::last_os_error()
+    );
+    let source = prepare_tool_source(repo, package)?;
+    let recipe = repo
+        .join("distro/builder/os-recipes")
+        .join("tool-crate.rhai");
+    let result = super::Invocation::new(repo, "install", &recipe, crates.join(package))
+        .define("BINS", &binaries.join(","))
+        .input("source", source.path())
+        .run()?;
+    let bins = result.directory("bins");
+    drop(lock);
+    bins
+}
+
 /// Compile `package`'s `binary` (its default when `None`) through its recipe,
 /// as a static musl program on every distro, and return the published package tree,
 /// which holds it at `usr/bin/<binary>`.
@@ -365,7 +399,8 @@ pub(crate) fn build_tool_tree(
         .define("BIN", binary)
         .define("INSTALL_PATH", &install_path)
         .define("INIT_SYSTEM", init)
-        .input("source", source.path());
+        .input("source", source.path())
+        .input("program", &compile_crate(repo, package)?.join(binary));
     // The package manager ships the same pinned runtime the builder uses.
     // Explicit inputs give the recipe no ambient access to the host image.
     let reference_file = tempfile::NamedTempFile::new()?;

@@ -332,7 +332,7 @@ pub fn parse(args: &[String]) -> Result<(PathBuf, Command), Usage> {
         }
         ["release", "publish", id, publication, feed, audience @ ("candidate" | "stable"), "--index-key", key, extra @ ..] => {
             if extra.len() % 2 != 0
-                || extra.chunks_exact(2).any(|pair| pair[0] != "--publication")
+                || extra.as_chunks::<2>().0.iter().any(|pair| pair[0] != "--publication")
                 || (*publication == "refresh" && !extra.is_empty())
             {
                 return usage("expected repeated --publication DIR after the index key; refresh cannot select releases".into());
@@ -340,7 +340,7 @@ pub fn parse(args: &[String]) -> Result<(PathBuf, Command), Usage> {
             Command::ReleasePublish {
                 distro: distro(id)?,
                 publication: (*publication != "refresh").then(|| PathBuf::from(publication)),
-                additional_publications: extra.chunks_exact(2).map(|pair| PathBuf::from(pair[1])).collect(),
+                additional_publications: extra.as_chunks::<2>().0.iter().map(|pair| PathBuf::from(pair[1])).collect(),
                 feed: feed.into(),
                 audience: audience.to_string(),
                 index_key: key.into(),

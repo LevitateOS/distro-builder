@@ -65,11 +65,16 @@ fn run(repo: &Path, command: Command) -> Result<()> {
         Command::ReleasePublish {
             distro,
             publication,
+            additional_publications,
             feed,
             audience,
             index_key,
         } => {
             let variant = distro_contract::load(repo, &distro)?;
+            let publications: Vec<_> = publication
+                .into_iter()
+                .chain(additional_publications)
+                .collect();
             let audience = if audience == "candidate" {
                 distro_contract::release::production::Audience::Candidate
             } else {
@@ -79,7 +84,7 @@ fn run(repo: &Path, command: Command) -> Result<()> {
                 "{}",
                 distro_builder::release_index::production_publish::publish(
                     &variant,
-                    publication.as_deref(),
+                    &publications,
                     &feed,
                     audience,
                     &index_key

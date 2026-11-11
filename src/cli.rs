@@ -22,6 +22,7 @@ pub enum Command {
     ReleasePublish {
         distro: String,
         publication: Option<PathBuf>,
+        additional_publications: Vec<PathBuf>,
         feed: PathBuf,
         audience: String,
         index_key: PathBuf,
@@ -105,7 +106,7 @@ pub fn usage() -> String {
         "Usage: distro-builder --repo-root <dir> <command>\n\n\
          Commands:\n  \
          release transport <distro> <bundle> <root> <output> <source-commit> <part-bytes>  verify/split an existing signed x86_64 release\n  \
-         release publish <distro> <publication|refresh> <feed> <candidate|stable> --index-key PKCS8  sign discovery metadata\n  \
+         release publish <distro> <publication|refresh> <feed> <candidate|stable> --index-key PKCS8 [--publication DIR]  sign discovery metadata\n  \
          release inspect-publication <distro> <publication>  authenticate prepared public metadata\n  \
          release verify-online <distro> <feed> <candidate|stable> [--representative]  check deployed Pages bytes through Recipe\n  \
          release verify-remote <distro> <publication> [--representative]  verify public assets through Recipe\n  \
@@ -151,22 +152,28 @@ impl Command {
             Self::ReleasePublish {
                 distro,
                 publication,
+                additional_publications,
                 feed,
                 audience,
                 index_key,
-            } => push(&[
-                &"release",
-                &"publish",
-                distro,
-                &publication
-                    .as_ref()
-                    .map(|p| p.as_os_str())
-                    .unwrap_or_else(|| std::ffi::OsStr::new("refresh")),
-                feed,
-                audience,
-                &"--index-key",
-                index_key,
-            ]),
+            } => {
+                push(&[
+                    &"release",
+                    &"publish",
+                    distro,
+                    &publication
+                        .as_ref()
+                        .map(|p| p.as_os_str())
+                        .unwrap_or_else(|| std::ffi::OsStr::new("refresh")),
+                    feed,
+                    audience,
+                    &"--index-key",
+                    index_key,
+                ]);
+                for directory in additional_publications {
+                    push(&[&"--publication", directory]);
+                }
+            }
             Self::ReleaseVerifyOnline {
                 distro,
                 directory,
@@ -323,10 +330,17 @@ pub fn parse(args: &[String]) -> Result<(PathBuf, Command), Usage> {
                     .map_err(|_| Usage("part-bytes must be an integer".into()))?,
             }
         }
-        ["release", "publish", id, publication, feed, audience @ ("candidate" | "stable"), "--index-key", key] => {
+        ["release", "publish", id, publication, feed, audience @ ("candidate" | "stable"), "--index-key", key, extra @ ..] => {
+            if extra.len() % 2 != 0
+                || extra.chunks_exact(2).any(|pair| pair[0] != "--publication")
+                || (*publication == "refresh" && !extra.is_empty())
+            {
+                return usage("expected repeated --publication DIR after the index key; refresh cannot select releases".into());
+            }
             Command::ReleasePublish {
                 distro: distro(id)?,
                 publication: (*publication != "refresh").then(|| PathBuf::from(publication)),
+                additional_publications: extra.chunks_exact(2).map(|pair| PathBuf::from(pair[1])).collect(),
                 feed: feed.into(),
                 audience: audience.to_string(),
                 index_key: key.into(),

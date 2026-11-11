@@ -328,6 +328,24 @@ fn old_index(
         64,
     )?;
     ReleaseIndexV2::authenticate(&raw, &sig, &auth, policy, index.issued_at)?;
+    // Index-role authority cannot poison a system-release sequence. Authenticate
+    // the original selected manifests before using their identities as floors,
+    // even when a revoked signer is about to be replaced under new authority.
+    for entry in &index.releases {
+        let manifest = bytes(&feed.join(&entry.release.manifest.path), MAX_MANIFEST as u64)?;
+        let signature = bytes(&feed.join(&entry.release.signature.path), 64)?;
+        ensure!(
+            manifest.len() as u64 == entry.release.manifest.size
+                && digest(&manifest) == entry.release.manifest.sha256
+                && signature.len() as u64 == entry.release.signature.size
+                && digest(&signature) == entry.release.signature.sha256,
+            "selected metadata was altered"
+        );
+        auth.verify(SigningRole::Release, &manifest, &signature)?;
+        let manifest = ReleaseManifest::parse(&manifest)?;
+        matches_variant(variant, &manifest)?;
+        entry.for_manifest(&manifest, policy)?;
+    }
     let mut floor = RollbackFloor::default();
     floor.authority(&auth)?;
     floor.index(&index, &raw, now()?)?;
@@ -337,7 +355,7 @@ fn old_index(
 /// same directory; remote workflows also share one non-cancelling concurrency group.
 pub fn publish(
     variant: &Variant,
-    publication: Option<&Path>,
+    publications: &[std::path::PathBuf],
     feed: &Path,
     audience: Audience,
     key: &Path,
@@ -361,7 +379,7 @@ pub fn publish(
     let (mut index, mut floor) = if feed.join(INDEX).try_exists()? {
         old_index(variant, feed, &policy)?
     } else {
-        ensure!(publication.is_some(), "cannot refresh a missing feed");
+        ensure!(!publications.is_empty(), "cannot refresh a missing feed");
         (
             ReleaseIndexV2 {
                 schema_version: 2,
@@ -407,21 +425,17 @@ pub fn publish(
             "previously revoked signer cannot be reactivated"
         );
     }
-    for old in &index.releases {
-        let raw = bytes(&feed.join(&old.release.manifest.path), MAX_MANIFEST as u64)?;
-        let sig = bytes(&feed.join(&old.release.signature.path), 64)?;
-        ensure!(
-            digest(&raw) == old.release.manifest.sha256
-                && raw.len() as u64 == old.release.manifest.size
-                && digest(&sig) == old.release.signature.sha256
-                && sig.len() as u64 == old.release.signature.size,
-            "selected metadata was altered"
-        );
-        auth.verify(SigningRole::Release, &raw, &sig)?;
-        old.for_manifest(&ReleaseManifest::parse(&raw)?, &policy)?;
-    }
-    if let Some(directory) = publication {
+    // Authenticate every replacement before touching the reachable feed. A
+    // revoked release must be replaceable without trusting its old signer;
+    // unchanged entries and refreshes still require current authorization.
+    let mut replacements = BTreeMap::new();
+    for directory in publications {
         let record = read_publication(variant, directory, audience)?;
+        let flavour = record.entry.release.identity.flavour.to_string();
+        ensure!(
+            !replacements.contains_key(&flavour),
+            "publication set repeats a flavour"
+        );
         if let Some(old) = index
             .releases
             .iter()
@@ -434,6 +448,25 @@ pub fn publish(
                 "release sequence reuse/downgrade refused"
             );
         }
+        replacements.insert(flavour, (directory, record));
+    }
+    for old in &index.releases {
+        if replacements.contains_key(&old.release.identity.flavour.to_string()) {
+            continue;
+        }
+        let raw = bytes(&feed.join(&old.release.manifest.path), MAX_MANIFEST as u64)?;
+        let sig = bytes(&feed.join(&old.release.signature.path), 64)?;
+        ensure!(
+            digest(&raw) == old.release.manifest.sha256
+                && raw.len() as u64 == old.release.manifest.size
+                && digest(&sig) == old.release.signature.sha256
+                && sig.len() as u64 == old.release.signature.size,
+            "selected metadata was altered"
+        );
+        auth.verify(SigningRole::Release, &raw, &sig)?;
+        old.for_manifest(&ReleaseManifest::parse(&raw)?, &policy)?;
+    }
+    for (_, (directory, record)) in replacements {
         immutable(
             &feed.join(&record.entry.release.manifest.path),
             &bytes(&directory.join(MANIFEST), MAX_MANIFEST as u64)?,

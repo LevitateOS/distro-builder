@@ -6,11 +6,21 @@
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
-use distro_contract::profile::Flavour;
 use distro_contract::ProductId;
+use distro_contract::profile::Flavour;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
+    ReleaseAuthorize {
+        distro: String,
+        document: PathBuf,
+        output: PathBuf,
+        root_key: PathBuf,
+    },
+    ReleaseVerifyFeed {
+        distro: String,
+        directory: PathBuf,
+    },
     ReleaseIndex {
         distro: String,
         bundle: PathBuf,
@@ -27,7 +37,10 @@ pub enum Command {
         signing_key: Option<PathBuf>,
     },
     /// Build `product`'s release ISO for `distro`, after any parent release it lacks.
-    ReleaseBuild { product: ProductId, distro: String },
+    ReleaseBuild {
+        product: ProductId,
+        distro: String,
+    },
     /// Prepare `product`'s rootfs source and overlay for `distro` in `output`.
     ProductPrepare {
         product: ProductId,
@@ -35,9 +48,14 @@ pub enum Command {
         output: PathBuf,
     },
     /// Write both EROFS images of a prepared product.
-    ProductErofs { prepared: PathBuf },
+    ProductErofs {
+        prepared: PathBuf,
+    },
     /// Write a tool package's offline source tree to `output`.
-    PrepareToolSource { package: String, output: PathBuf },
+    PrepareToolSource {
+        package: String,
+        output: PathBuf,
+    },
     /// Run `distro`'s rootfs-source acquisition of `flavour`'s lock (the
     /// desktop system needs the base lock's too); `refresh` acquires again.
     PreseedRootfsSource {
@@ -56,6 +74,8 @@ pub fn usage() -> String {
     format!(
         "Usage: distro-builder --repo-root <dir> <command>\n\n\
          Commands:\n  \
+         release authorize <distro> <keys.json> <proof.json> --root-key PKCS8  sign public role authorization\n  \
+         release verify-feed <distro> <directory>           authenticate staged production metadata (no builds/network)\n  \
          release index <distro> <bundle> <publish_dir> <sequence> --signing-key PKCS8  publish a signed local update index\n  \
          release manifest <distro> <base|desktop> <root> <dir> [--signing-key PKCS8]  verify/package existing release artifacts\n  \
          release build <product> <distro>                   build a release ISO ({releases})\n  \
@@ -76,6 +96,23 @@ impl Command {
             args.extend(words.iter().map(|word| word.as_ref().to_os_string()));
         };
         match self {
+            Self::ReleaseAuthorize {
+                distro,
+                document,
+                output,
+                root_key,
+            } => push(&[
+                &"release",
+                &"authorize",
+                distro,
+                document,
+                output,
+                &"--root-key",
+                root_key,
+            ]),
+            Self::ReleaseVerifyFeed { distro, directory } => {
+                push(&[&"release", &"verify-feed", distro, directory])
+            }
             Self::ReleaseIndex {
                 distro,
                 bundle,
@@ -179,17 +216,42 @@ pub fn parse(args: &[String]) -> Result<(PathBuf, Command), Usage> {
     };
     let words: Vec<&str> = rest.iter().map(String::as_str).collect();
     let command = match words.as_slice() {
-        ["release", "index", id, bundle, output, sequence, "--signing-key", key] => {
-            Command::ReleaseIndex {
-                distro: distro(id)?,
-                bundle: bundle.into(),
-                output: output.into(),
-                sequence: sequence
-                    .parse()
-                    .map_err(|_| Usage("index sequence must be an integer".into()))?,
-                signing_key: key.into(),
-            }
-        }
+        [
+            "release",
+            "authorize",
+            id,
+            document,
+            output,
+            "--root-key",
+            root_key,
+        ] => Command::ReleaseAuthorize {
+            distro: distro(id)?,
+            document: document.into(),
+            output: output.into(),
+            root_key: root_key.into(),
+        },
+        ["release", "verify-feed", id, directory] => Command::ReleaseVerifyFeed {
+            distro: distro(id)?,
+            directory: directory.into(),
+        },
+        [
+            "release",
+            "index",
+            id,
+            bundle,
+            output,
+            sequence,
+            "--signing-key",
+            key,
+        ] => Command::ReleaseIndex {
+            distro: distro(id)?,
+            bundle: bundle.into(),
+            output: output.into(),
+            sequence: sequence
+                .parse()
+                .map_err(|_| Usage("index sequence must be an integer".into()))?,
+            signing_key: key.into(),
+        },
         ["release", "manifest", id, flavour, root, dir, flags @ ..] => {
             let signing_key = match flags {
                 [] => None,

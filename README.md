@@ -169,6 +169,30 @@ publication directory (using resolved paths). Key format and authority are
 checked before public release objects are written. Supply an external private
 key file; do not put key bytes in command arguments, defines or logs.
 
+The approved P14 production design starts with separate root, release and index
+roles and an explicit version-2 policy; it does not reinterpret the legacy
+`release.trust` key. These preparatory commands use configured public production
+policy and disposable or externally held private keys:
+
+```sh
+distro-builder --repo-root /path/to/LevitateOS release authorize \
+  levitate /path/to/public-role-document.json /path/to/feed/release-keys.json \
+  --root-key /private/root.pk8
+distro-builder --repo-root /path/to/LevitateOS release verify-feed \
+  levitate /path/to/feed
+```
+
+Authorization signs exact public document bytes and verifies role separation,
+scope, validity and monotonic replacement. It can renew expired, correctly
+root-signed authorization. Feed verification checks the root proof, index-role
+signature, audience/epoch/freshness, release-role signatures and transport maps
+against the existing system manifests. Its JSON explicitly reports that payloads
+were not fetched/verified and production was not enabled. These commands do not
+build, upload or change an installed system. Private key files must also exclude
+group/other access. Production readers, publication/promotion workflows and
+applicable runtime validation remain pending; existing variant defaults remain
+disabled. See `tools/recab/RELEASE-ENGINEERING.md` for the approved design.
+
 To configure online acquisition, set the variant's source and trust deliberately:
 
 ```toml

@@ -1,12 +1,129 @@
 //! Explicit local publication. No endpoint or signing key is invented here.
-use anyhow::{ensure, Context, Result};
-use distro_contract::{release::*, Variant};
+use anyhow::{Context, Result, ensure};
+use distro_contract::{Variant, release::*};
 use std::{
     fs,
     io::{Read, Write},
     os::unix::fs::PermissionsExt,
     path::Path,
 };
+fn now() -> Result<u64> {
+    Ok(std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)?
+        .as_secs())
+}
+
+/// Bootstrap public role authorization. Secret bytes stay outside source and output.
+pub fn authorize(variant: &Variant, document: &Path, output: &Path, key: &Path) -> Result<()> {
+    use production::*;
+    let policy = &variant.contract.release;
+    policy.validate()?;
+    let production = policy
+        .production
+        .as_ref()
+        .context("configure an explicit production root anchor first")?;
+    let raw = bytes(document, 16384)?;
+    let delegation: KeyDelegation = serde_json::from_slice(&raw)?;
+    delegation.validate()?;
+    ensure!(
+        delegation.root_version == production.root.version,
+        "successor-root authorization needs its dual-signed transition chain"
+    );
+    let parent = output
+        .parent()
+        .context("authorization output needs a directory")?;
+    fs::create_dir_all(parent)?;
+    let secret = crate::release_manifest::read_signing_key(variant, key, &[parent])?;
+    let proof = AuthorityProof {
+        document: String::from_utf8(raw.clone())?,
+        signature: sign(&raw, &secret, &production.root.key)?,
+        transitions: vec![],
+    };
+    let verified = proof.verify(
+        production,
+        &variant.contract.identity.os_id,
+        &policy.channel,
+        now()?,
+    )?;
+    if output.try_exists()? {
+        let previous = AuthorityProof::parse(&bytes(output, MAX_AUTHORITY as u64)?)?;
+        let previous = previous.verify_archived(
+            production,
+            &variant.contract.identity.os_id,
+            &policy.channel,
+        )?;
+        ensure!(
+            delegation.version > previous.delegation().version,
+            "key authorization version must advance"
+        );
+    }
+    let _ = verified;
+    write_public(output, &serde_json::to_vec_pretty(&proof)?)
+}
+
+/// Verify a real staged feed and its manifest/transport bindings, without fetching
+/// payloads, starting a build, changing installed state or enabling production.
+pub fn verify_feed(variant: &Variant, directory: &Path) -> Result<serde_json::Value> {
+    use production::*;
+    let policy = &variant.contract.release;
+    policy.validate()?;
+    let production = policy
+        .production
+        .as_ref()
+        .context("feed verification requires delegated production policy")?;
+    let proof = AuthorityProof::parse(&bytes(
+        &directory.join(AUTHORITY_FILE),
+        MAX_AUTHORITY as u64,
+    )?)?;
+    let authority = proof.verify(
+        production,
+        &variant.contract.identity.os_id,
+        &policy.channel,
+        now()?,
+    )?;
+    let raw = bytes(&directory.join(INDEX), MAX_MANIFEST as u64)?;
+    let signature = bytes(
+        &directory
+            .join("index-signatures")
+            .join(format!("{}.sig", digest(&raw))),
+        64,
+    )?;
+    let index = ReleaseIndexV2::authenticate(&raw, &signature, &authority, production, now()?)?;
+    let mut releases = Vec::new();
+    for entry in &index.releases {
+        let metadata = &entry.release;
+        ensure!(
+            metadata.identity.distro == variant.contract.identity.os_id
+                && metadata.identity.init == variant.contract.profile.init
+                && metadata.identity.libc == variant.contract.profile.libc,
+            "feed release differs from configured distro/profile"
+        );
+        let manifest = bytes(
+            &directory.join(&metadata.manifest.path),
+            MAX_MANIFEST as u64,
+        )?;
+        let signature = bytes(&directory.join(&metadata.signature.path), 64)?;
+        ensure!(
+            manifest.len() as u64 == metadata.manifest.size
+                && digest(&manifest) == metadata.manifest.sha256
+                && signature.len() as u64 == metadata.signature.size
+                && digest(&signature) == metadata.signature.sha256,
+            "indexed manifest/signature bytes differ"
+        );
+        authority.verify(SigningRole::Release, &manifest, &signature)?;
+        let manifest = ReleaseManifest::parse(&manifest)?;
+        manifest
+            .compatibility
+            .check(recab::release::RECAB_VERSION)?;
+        entry.for_manifest(&manifest, production)?;
+        releases.push(metadata.manifest.sha256.clone());
+    }
+    Ok(
+        serde_json::json!({"authenticated_metadata":true,"payloads_verified":false,"production_enabled":false,
+        "authority_version":authority.delegation().version,"index_sequence":index.sequence,
+        "audience":index.audience,"release_ids":releases}),
+    )
+}
 fn write_public(path: &Path, bytes: &[u8]) -> Result<()> {
     let parent = path.parent().context("publication needs a parent")?;
     fs::create_dir_all(parent)?;

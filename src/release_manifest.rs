@@ -24,6 +24,27 @@ pub(crate) fn signing_key(
     path: &Path,
     public_roots: &[&Path],
 ) -> Result<Vec<u8>> {
+    let secret = read_signing_key(variant, path, public_roots)?;
+    sign(
+        b"",
+        &secret,
+        variant
+            .contract
+            .release
+            .trust
+            .as_ref()
+            .context("configure release.trust before signing")?,
+    )?;
+    Ok(secret)
+}
+
+/// File custody checks shared by root authorization and release publication.
+/// The caller must additionally verify this key against the required role.
+pub(crate) fn read_signing_key(
+    variant: &Variant,
+    path: &Path,
+    public_roots: &[&Path],
+) -> Result<Vec<u8>> {
     let path = fs::canonicalize(path).context("opening distribution signing key")?;
     ensure!(
         !path.starts_with(fs::canonicalize(&variant.repo_root)?),
@@ -36,23 +57,17 @@ pub(crate) fn signing_key(
         );
     }
     let file = levitate_recipe::fsx::open_regular(&path)?;
+    use std::os::unix::fs::PermissionsExt;
+    ensure!(
+        file.metadata()?.permissions().mode() & 0o077 == 0,
+        "private release keys must not be accessible to group or other users"
+    );
     ensure!(
         file.metadata()?.len() <= 16384,
         "release signing key exceeds bound"
     );
     let mut secret = Vec::new();
     file.take(16385).read_to_end(&mut secret)?;
-    // Validate key format and authority before publishing any release content.
-    sign(
-        b"",
-        &secret,
-        variant
-            .contract
-            .release
-            .trust
-            .as_ref()
-            .context("configure release.trust before signing")?,
-    )?;
     Ok(secret)
 }
 
@@ -108,9 +123,9 @@ pub fn write(
     );
     let secret = match (&policy.trust, signing_key) {
         (Some(_), Some(key)) => Some(self::signing_key(variant, key, &[root, dir])?),
-        (Some(_), None) => anyhow::bail!(
-            "signed releases require an explicit distribution PKCS#8 signing key"
-        ),
+        (Some(_), None) => {
+            anyhow::bail!("signed releases require an explicit distribution PKCS#8 signing key")
+        }
         (None, Some(_)) => anyhow::bail!(
             "configure release.trust before signing; the signing key cannot select its own authority"
         ),

@@ -47,6 +47,25 @@ fn run(repo: &Path, command: Command) -> Result<()> {
     // If the launcher dies (cancel, abort), this build dies with it.
     process::die_with_parent().context("arming the parent-death signal for distro-builder")?;
     match command {
+        Command::ReleaseAuthorize {
+            distro,
+            document,
+            output,
+            root_key,
+        } => {
+            let variant = distro_contract::load(repo, &distro)?;
+            distro_builder::release_index::authorize(&variant, &document, &output, &root_key)?;
+            println!("{}", output.display());
+            Ok(())
+        }
+        Command::ReleaseVerifyFeed { distro, directory } => {
+            let variant = distro_contract::load(repo, &distro)?;
+            println!(
+                "{}",
+                distro_builder::release_index::verify_feed(&variant, &directory)?
+            );
+            Ok(())
+        }
         Command::ReleaseIndex {
             distro,
             bundle,

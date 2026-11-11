@@ -6,7 +6,7 @@
 // compiler against the distro's own C library, C++ runtime and Qt, the ones
 // the desktop system ships. The tree is never part of an image.
 const RECIPE_API = 2;
-const NEEDS = #{ inputs: #{ apks: "directory", apps_build_apks: "directory" }, outputs: #{ root: "directory" }, memory_mib: 4096, storage_max_objects: 196608, timeout_secs: 3600 };
+const NEEDS = #{ inputs: #{ apks: "directory", apps_build_apks: "directory" }, outputs: #{ root: "directory" }, memory_mib: 4096, storage_max_objects: 196608, timeout_secs: 7200 };
 import "sources/acorn-apk-lock.rhai" as lock;
 import "sources/acorn-apk-apps-build-lock.rhai" as build_lock;
 let ctx = #{

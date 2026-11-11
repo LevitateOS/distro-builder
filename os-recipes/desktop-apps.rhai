@@ -12,7 +12,7 @@ const NEEDS = #{
     inputs: #{ source: "directory" },
     outputs: #{ rootfs: "directory" },
     memory_mib: 8192,
-    timeout_secs: 3600,
+    timeout_secs: 7200,
 };
 let ctx = #{
     name: "desktop-apps",

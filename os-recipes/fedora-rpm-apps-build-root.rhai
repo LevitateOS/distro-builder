@@ -6,7 +6,7 @@
 // own C++ runtime and Qt, the ones the desktop system ships. The tree is
 // never part of an image.
 const RECIPE_API = 2;
-const NEEDS = #{ inputs: #{ rpms: "directory", apps_build_rpms: "directory" }, outputs: #{ root: "directory" }, memory_mib: 8192, storage_max_objects: 262144, timeout_secs: 3600 };
+const NEEDS = #{ inputs: #{ rpms: "directory", apps_build_rpms: "directory" }, outputs: #{ root: "directory" }, memory_mib: 8192, storage_max_objects: 262144, timeout_secs: 7200 };
 import "sources/levitate-rpm-lock.rhai" as lock;
 import "sources/levitate-rpm-apps-build-lock.rhai" as build_lock;
 let ctx = #{

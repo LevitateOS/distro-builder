@@ -25,6 +25,9 @@ pub(crate) const INSTALL_BINARY: &str = "usr/local/libexec/install-tui";
 /// The installed system's binary (system rootfs).
 pub(crate) const SYSTEM_BINARY: &str = "usr/local/libexec/system-tui";
 
+/// The one file of the TUI binary's prebuilt, and the recipe's output of that name.
+const PROGRAM: &str = "program";
+
 const LIB_DIRS: &[&str] = &["usr/lib", "usr/lib64", "lib", "lib64"];
 
 /// Compiles `apps` into one binary at `binary_path` (`INSTALL_BINARY` or `SYSTEM_BINARY`)
@@ -50,16 +53,33 @@ pub(crate) fn install(
     let work = repo_root.join(".artifacts/work").join(stem).join(target);
     fs::create_dir_all(&work)?;
     let source = prepare_source(repo_root, &work, apps)?;
-    let target_input = source.path().join("runtime-target");
-    fs::write(&target_input, format!("{target}\n"))?;
-    let result =
-        crate::recipe::Invocation::new(repo_root, "install", "tui-binary", work.join("recipe"))
+    // The local cache, then a download, then this compile (see `crate::prebuilt`).
+    // The key is taken before the target file joins the source tree.
+    let obtained = crate::prebuilt::obtain(
+        repo_root,
+        crate::prebuilt::Family::Tui,
+        stem,
+        || tui_key(repo_root, stem, target, source.path()),
+        &[PROGRAM],
+        || crate::prebuilt::source_commits(repo_root, source_dirs(repo_root).unwrap_or_default()),
+        || {
+            let target_input = source.path().join("runtime-target");
+            fs::write(&target_input, format!("{target}\n"))?;
+            let result = crate::recipe::Invocation::new(
+                repo_root,
+                "install",
+                "tui-binary",
+                work.join("recipe"),
+            )
             .input("source", source.path())
             .input("runtime_target", &target_input)
             .input("bun-toolchain::runtime_target", &target_input)
             .run()
             .context("building the TUI layer through Recipe")?;
-    let published = result.file("program")?;
+            Ok(vec![(PROGRAM.to_string(), result.file(PROGRAM)?)])
+        },
+    )?;
+    let published = obtained.path(PROGRAM)?.to_path_buf();
     let binary = layer.join(binary_path);
     if let Some(parent) = binary.parent() {
         fs::create_dir_all(parent)?;
@@ -115,6 +135,70 @@ pub(crate) fn install_system(repo_root: &Path, rootfs: &Path, profile: &Profile)
         &apps,
     )
     .context("building the installed system's TUI apps")
+}
+
+/// The key of the TUI binary `stem` (`install-tui` or `system-tui`) for `libc`'s
+/// target: its source closure, the target, both recipes (`bun-toolchain` pins the
+/// bun version), the compiler image and Recipe's declared behaviour.
+fn tui_key(repo_root: &Path, stem: &str, target: &str, source: &Path) -> Result<crate::prebuilt::Key> {
+    let recipes = repo_root.join("distro/builder/os-recipes");
+    Ok(crate::prebuilt::Key::new(&[
+        ("family", "tui".into()),
+        ("name", stem.into()),
+        ("target", target.into()),
+        ("source_closure", crate::prebuilt::dir_digest(source)?),
+        ("tui_binary_recipe", crate::prebuilt::file_digest(&recipes.join("tui-binary.rhai"))?),
+        ("bun_toolchain_recipe", crate::prebuilt::file_digest(&recipes.join("bun-toolchain.rhai"))?),
+        ("compiler_image", crate::recipe::compiler_image_reference(repo_root)?),
+        ("declared", levitate_recipe::identity::declared()),
+    ]))
+}
+
+/// `distro-builder prebuilt key tui <stem> --distro <id>`: prepares the source and
+/// computes the key. `stem` is the binary's file name, `install-tui` or `system-tui`.
+pub fn prebuilt_key(repo_root: &Path, stem: &str, libc: Libc) -> Result<crate::prebuilt::Key> {
+    let workspace = Workspace::load(repo_root)?;
+    let apps: Vec<&TuiApp> = if stem == file_stem(INSTALL_BINARY) {
+        crate::install_ux::Screen::resolve(&workspace)?.apps()
+    } else if stem == file_stem(SYSTEM_BINARY) {
+        SYSTEM_TUI_APPS
+            .iter()
+            .map(|name| workspace.app(name))
+            .collect::<Result<_>>()?
+    } else {
+        bail!(
+            "unknown TUI binary '{stem}'; expected {} or {}",
+            file_stem(INSTALL_BINARY),
+            file_stem(SYSTEM_BINARY)
+        );
+    };
+    let work = repo_root.join(".artifacts/work/prebuilt-key");
+    fs::create_dir_all(&work)?;
+    let source = prepare_source(repo_root, &work, &apps)?;
+    tui_key(repo_root, stem, libc.bun_target(), source.path())
+}
+
+fn file_stem(binary_path: &str) -> &str {
+    Path::new(binary_path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(binary_path)
+}
+
+/// The checkout directories the TUI source is read from (the workspace members).
+fn source_dirs(repo_root: &Path) -> Result<Vec<std::path::PathBuf>> {
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&fs::read(repo_root.join("package.json"))?)?;
+    Ok(manifest
+        .get("workspaces")
+        .and_then(serde_json::Value::as_array)
+        .map(|members| {
+            members
+                .iter()
+                .filter_map(|member| member.as_str().map(std::path::PathBuf::from))
+                .collect()
+        })
+        .unwrap_or_default())
 }
 
 /// A plain source snapshot: workspace manifests and authored files, without

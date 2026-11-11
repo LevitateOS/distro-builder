@@ -10,7 +10,7 @@ use std::process::ExitCode;
 
 mod workflows;
 
-use workflows::{artifacts, build};
+use workflows::{artifacts, build, prebuilt};
 
 fn main() -> ExitCode {
     let args: Result<Vec<String>, _> = std::env::args_os()
@@ -206,8 +206,12 @@ fn run(repo: &Path, command: Command) -> Result<()> {
             product,
             distro,
             exact,
+            no_prebuilt,
         } => {
             process::check_host_tools(HostNeed::Build)?;
+            if no_prebuilt {
+                distro_builder::prebuilt::select_no_prebuilt();
+            }
             if exact {
                 distro_builder::recipe::select_exact_identity();
             }
@@ -218,6 +222,12 @@ fn run(repo: &Path, command: Command) -> Result<()> {
                 );
             }
             build::build_one(repo, &distro, product)
+        }
+        Command::PrebuiltKey { family, name, distro } => {
+            prebuilt::key_cmd(repo, &family, &name, distro.as_deref())
+        }
+        Command::PrebuiltPublish { family, name, distro } => {
+            prebuilt::publish_cmd(repo, &family, &name, distro.as_deref())
         }
         Command::ProductPrepare {
             product,

@@ -212,6 +212,28 @@ Every line the builder prints starts with the local time (`HH:MM:SS`; `tprintln!
 
 `cargo xtask progress` reads these (see `xtask/README.md`). Nothing here can fail a build: an unwritable file is skipped.
 
+## Prebuilt programs
+
+Our own tools (`recpart`, `recstrap`, `recab`, `recipe`, `install-split`) and the TUI
+binary (`install-tui`, `system-tui`) are identified by a **key**, the SHA-256 of
+everything their compile depends on (`src/prebuilt.rs`): the prepared source closure,
+the compile recipe, the target, the compiler image digest and Recipe's declared behaviour
+versions (`levitate_recipe::identity::declared`). A build takes each program from the
+first of: the local cache `.artifacts/prebuilt/<family>/<key>/` (every file checked
+against `prebuilt.json`), a download of release `<family>-<key16>` from `LevitateOS/prebuilt`
+(`LEVITATE_PREBUILT_REPO` overrides; fetched by `os-recipes/prebuilt-fetch.rhai`, verified
+again), or a compile, which fills the cache. Any download failure is a miss. One line per
+program says which: `[prebuilt] recab: local|downloaded|compiled <key16>`.
+
+- `release build --exact` (and any signed build) never uses prebuilts and touches no cache.
+- `--no-prebuilt` (`cargo xtask build ... --no-prebuilt`) compiles but still fills the cache.
+- `distro-builder prebuilt key <tools|tui> <name> [--distro <id>]` prints the key (CI uses it);
+  a TUI key needs `--distro` for its libc.
+- `distro-builder prebuilt publish <tools|tui> <name> [--distro <id>]` (also `cargo xtask
+  prebuilt publish ...`, run as the user) uploads the cache entry of the current key with
+  `gh`: it creates the release if missing, never replaces an asset with different bytes, and
+  uploads `<family>-<name>.tar.gz` before `prebuilt.json`.
+
 ## License
 
 Licensed under either of:

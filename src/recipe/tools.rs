@@ -348,9 +348,12 @@ fn collect_local_dependencies(
 /// per binary. The result is shared by every init system and distro; the work
 /// directory is keyed by package alone. Two distro builds may run at once, so
 /// the whole invocation holds an exclusive lock: the second waits, then finds
-/// the first's published programs ready and reuses them.
+/// the first's published programs ready and reuses them. The programs come from
+/// the prebuilt cache or a download when one matches this exact source (`crate::prebuilt`),
+/// and are compiled only otherwise.
 pub(crate) fn compile_crate(repo: &Path, package: &str) -> Result<PathBuf> {
-    let (_, _, binaries) = tool(package)?;
+    use crate::prebuilt::{self, Family};
+    let (_, relative, binaries) = tool(package)?;
     let crates = repo.join(".artifacts/work/recipe-tools/crates");
     fs::create_dir_all(&crates)?;
     let lock = fs::OpenOptions::new()
@@ -368,13 +371,71 @@ pub(crate) fn compile_crate(repo: &Path, package: &str) -> Result<PathBuf> {
     let recipe = repo
         .join("distro/builder/os-recipes")
         .join("tool-crate.rhai");
-    let result = super::Invocation::new(repo, "install", &recipe, crates.join(package))
-        .define("BINS", &binaries.join(","))
-        .input("source", source.path())
-        .run()?;
-    let bins = result.directory("bins");
+    // The local cache, then a download, then this compile (see `crate::prebuilt`).
+    let obtained = prebuilt::obtain(
+        repo,
+        Family::Tools,
+        package,
+        || tool_key(repo, package, source.path()),
+        binaries,
+        || {
+            prebuilt::source_commits(
+                repo,
+                crate_closure_dirs(repo, Path::new(relative)).unwrap_or_default(),
+            )
+        },
+        || {
+            let result = super::Invocation::new(repo, "install", &recipe, crates.join(package))
+                .define("BINS", &binaries.join(","))
+                .input("source", source.path())
+                .run()?;
+            let bins = result.directory("bins")?;
+            Ok(binaries
+                .iter()
+                .map(|name| (name.to_string(), bins.join(name)))
+                .collect())
+        },
+    )?;
+    // Every program of the crate is in one directory, as the recipe published it
+    // or as the cache holds it.
+    let bins = obtained
+        .path(binaries[0])?
+        .parent()
+        .context("a program has a directory")?
+        .to_path_buf();
     drop(lock);
-    bins
+    Ok(bins)
+}
+
+/// The key of `package`'s prebuilt programs: its prepared source closure, the compile
+/// recipe, target, compiler image and Recipe's declared behaviour (`crate::prebuilt`).
+fn tool_key(repo: &Path, package: &str, source: &Path) -> Result<crate::prebuilt::Key> {
+    let (_, _, binaries) = tool(package)?;
+    let mut sorted = binaries.to_vec();
+    sorted.sort_unstable();
+    let recipe = repo.join("distro/builder/os-recipes/tool-crate.rhai");
+    Ok(crate::prebuilt::Key::new(&[
+        ("family", "tools".into()),
+        ("package", package.into()),
+        ("binaries", sorted.join(",")),
+        ("target", crate::prebuilt::TOOLS_TARGET.into()),
+        ("source_closure", crate::prebuilt::dir_digest(source)?),
+        ("tool_crate_recipe", crate::prebuilt::file_digest(&recipe)?),
+        ("compiler_image", super::compiler_image_reference(repo)?),
+        ("declared", levitate_recipe::identity::declared()),
+    ]))
+}
+
+/// `distro-builder prebuilt key tools <package>`: prepares the source closure and
+/// computes the key.
+pub fn prebuilt_key(repo: &Path, package: &str) -> Result<crate::prebuilt::Key> {
+    let source = prepare_tool_source(repo, package)?;
+    tool_key(repo, package, source.path())
+}
+
+/// The binaries `package` builds, the files of its prebuilt.
+pub fn tool_binaries(package: &str) -> Result<Vec<String>> {
+    Ok(tool(package)?.2.iter().map(|name| name.to_string()).collect())
 }
 
 /// Compile `package`'s `binary` (its default when `None`) through its recipe,

@@ -83,6 +83,24 @@ fn compiler_image(repo: &Path) -> Result<Option<(String, PathBuf)>> {
     Ok(Some((format!("oci:recipe-compiler@sha256:{digest}"), rootfs)))
 }
 
+/// The compiler image's reference, for keys computed without the image (CI): the
+/// ambient `GINUX_ROOT` when set, else `oci:recipe-compiler@sha256:<image_sha256>`
+/// from `product-ci.json`. The same string `compiler_image` selects.
+pub(crate) fn compiler_image_reference(repo: &Path) -> Result<String> {
+    if let Some(root) = std::env::var_os("GINUX_ROOT") {
+        return Ok(root.to_string_lossy().into_owned());
+    }
+    let pin_file = repo.join(COMPILER_IMAGE_PIN);
+    let pin: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(&pin_file).with_context(|| format!("reading '{}'", pin_file.display()))?,
+    )
+    .with_context(|| format!("parsing '{}'", pin_file.display()))?;
+    let digest = pin["image_sha256"]
+        .as_str()
+        .with_context(|| format!("'{}' has no image_sha256", pin_file.display()))?;
+    Ok(format!("oci:recipe-compiler@sha256:{digest}"))
+}
+
 /// Whether `release build --exact` selected exact identity for this process.
 static EXACT_FLAG: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 

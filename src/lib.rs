@@ -16,6 +16,7 @@ pub mod release_index;
 pub mod tui_apps;
 pub(crate) mod tui_binary;
 pub(crate) mod desktop_apps;
+pub mod prebuilt;
 pub mod process;
 pub mod timeline;
 pub mod recipe;

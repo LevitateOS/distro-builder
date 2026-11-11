@@ -76,6 +76,24 @@ pub enum Command {
         product: ProductId,
         distro: String,
         exact: bool,
+        /// Compile our own tools and the TUI binary instead of reusing or
+        /// downloading prebuilts (`prebuilt`); exact builds do so anyway.
+        no_prebuilt: bool,
+    },
+    /// Print the key of a prebuilt (`prebuilt::Key`): `family` is `tools` or
+    /// `tui`, `name` a tool package or a TUI binary (`install-tui`,
+    /// `system-tui`); a TUI's libc comes from `distro`.
+    PrebuiltKey {
+        family: String,
+        name: String,
+        distro: Option<String>,
+    },
+    /// Upload the local cache entry of a prebuilt's current key to the prebuilt
+    /// repository's release with `gh` (never replacing an asset that differs).
+    PrebuiltPublish {
+        family: String,
+        name: String,
+        distro: Option<String>,
     },
     /// Prepare `product`'s rootfs source and overlay for `distro` in `output`:
     /// copies of its parts' trees.
@@ -120,11 +138,13 @@ pub fn usage() -> String {
          release verify-feed <distro> <directory>           authenticate staged production metadata (no builds/network)\n  \
          release index <distro> <bundle> <publish_dir> <sequence> --signing-key PKCS8  publish a signed local update index\n  \
          release manifest <distro> <base|desktop> <root> <dir> [--signing-key PKCS8]  verify/package existing release artifacts\n  \
-         release build <product> <distro> [--exact]         build a release ISO from its cached parts ({releases}); --exact (implied when signed): reuse only what byte-identical Recipe and Ginux built\n  \
+         release build <product> <distro> [--exact] [--no-prebuilt]  build a release ISO from its cached parts ({releases}); --exact (implied when signed): reuse only what byte-identical Recipe and Ginux built, and use no prebuilt; --no-prebuilt: compile our tools and the TUI binary instead of reusing or downloading them\n  \
          product prepare <product> <distro> <dir>           prepare a product's rootfs and overlay ({products})\n  \
          transform build product-erofs <prepared_dir>       write a prepared product's EROFS images\n  \
          artifact prepare-tool-source <package> <dir>       write a tool's offline source tree\n  \
-         artifact preseed-rootfs-source <distro> [--desktop] [--refresh]  acquire a distro's base (or desktop) lock",
+         artifact preseed-rootfs-source <distro> [--desktop] [--refresh]  acquire a distro's base (or desktop) lock\n  \
+         prebuilt key <tools|tui> <name> [--distro <id>]    print the key of a prebuilt program (a tool package, or install-tui/system-tui, which needs --distro)\n  \
+         prebuilt publish <tools|tui> <name> [--distro <id>]  upload the local cache entry of that key to the prebuilt repository's release with gh",
         releases = ProductId::list(ProductId::releases()),
         products = ProductId::list(ProductId::ALL),
     )
@@ -260,10 +280,30 @@ impl Command {
                 product,
                 distro,
                 exact,
+                no_prebuilt,
             } => {
                 push(&[&"release", &"build", &product.name(), distro]);
                 if *exact {
                     push(&[&"--exact"]);
+                }
+                if *no_prebuilt {
+                    push(&[&"--no-prebuilt"]);
+                }
+            }
+            Self::PrebuiltKey {
+                family,
+                name,
+                distro,
+            }
+            | Self::PrebuiltPublish {
+                family,
+                name,
+                distro,
+            } => {
+                let verb = if matches!(self, Self::PrebuiltKey { .. }) { "key" } else { "publish" };
+                push(&[&"prebuilt", &verb, family, name]);
+                if let Some(distro) = distro {
+                    push(&[&"--distro", distro]);
                 }
             }
             Self::ProductPrepare {
@@ -419,7 +459,9 @@ pub fn parse(args: &[String]) -> Result<(PathBuf, Command), Usage> {
                 signing_key,
             }
         }
-        ["release", "build", name, id, flags @ ..] if flags.is_empty() || *flags == ["--exact"] => {
+        ["release", "build", name, id, flags @ ..]
+            if flags.iter().all(|flag| ["--exact", "--no-prebuilt"].contains(flag)) =>
+        {
             let product = product(name)?;
             if !product.is_release() {
                 return usage(format!(
@@ -430,7 +472,27 @@ pub fn parse(args: &[String]) -> Result<(PathBuf, Command), Usage> {
             Command::ReleaseBuild {
                 product,
                 distro: distro(id)?,
-                exact: !flags.is_empty(),
+                exact: flags.contains(&"--exact"),
+                no_prebuilt: flags.contains(&"--no-prebuilt"),
+            }
+        }
+        ["prebuilt", verb @ ("key" | "publish"), family, name, flags @ ..] => {
+            if crate::prebuilt::Family::parse(family).is_none() {
+                return usage(format!(
+                    "unsupported prebuilt family '{family}'; expected one of: {}",
+                    crate::prebuilt::Family::NAMES
+                ));
+            }
+            let selected = match flags {
+                [] => None,
+                ["--distro", id] => Some(distro(id)?),
+                _ => return usage("expected --distro <id>".into()),
+            };
+            let (family, name) = (family.to_string(), name.to_string());
+            if *verb == "key" {
+                Command::PrebuiltKey { family, name, distro: selected }
+            } else {
+                Command::PrebuiltPublish { family, name, distro: selected }
             }
         }
         ["product", "prepare", name, id, output] => Command::ProductPrepare {

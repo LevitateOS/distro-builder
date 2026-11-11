@@ -56,6 +56,11 @@ pub fn authorize(variant: &Variant, document: &Path, output: &Path, key: &Path) 
             delegation.version > previous.delegation().version,
             "key authorization version must advance"
         );
+        ensure!(
+            delegation.root_version >= previous.delegation().root_version
+                && delegation.index_epoch >= previous.delegation().index_epoch,
+            "root/index epoch rollback refused"
+        );
     }
     let _ = verified;
     write_public(output, &serde_json::to_vec_pretty(&proof)?)

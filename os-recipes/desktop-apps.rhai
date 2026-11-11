@@ -1,6 +1,6 @@
-// Compiles the desktop apps (gui/: recipe-gui, recab-gui, disk-gui) and
-// publishes the tree they install: the programs in usr/bin, their menu
-// entries and their polkit actions.
+// Compiles the desktop apps (gui/: recipe-gui, recab-gui, disk-gui and the
+// helper levitate-agent) and publishes the tree they install: the programs in
+// usr/bin, the three apps' menu entries and their polkit actions.
 //   --input source=<the gui/ folder>
 // This recipe does not run in Recipe's usual root. The builder runs it in the
 // variant's apps-build root (the `*-apps-build-root.rhai` recipe's tree, as a
@@ -16,15 +16,19 @@ const NEEDS = #{
 };
 let ctx = #{
     name: "desktop-apps",
-    programs: ["recipe-gui", "recab-gui", "disk-gui"],
+    programs: ["recipe-gui", "recab-gui", "disk-gui", "levitate-agent"],
     jobs: if is_def_var("JOBS") { JOBS } else { "1" },
 };
 
 fn source(ctx) { join_path(ctx.runtime.paths.inputs, "source") }
 fn work(ctx) { join_path(ctx.runtime.paths.build, "cmake") }
 fn tree(ctx) { join_path(ctx.runtime.paths.output, "rootfs") }
-// Where the one build of all three puts each program.
-fn built(ctx, program) { join_path(work(ctx), program.split("-")[0] + "/" + program) }
+// Where the one build of all four puts each program: the apps in the folder of
+// their first name part, the helper in agent/.
+fn built(ctx, program) {
+    let folder = if program == "levitate-agent" { "agent" } else { program.split("-")[0] };
+    join_path(work(ctx), folder + "/" + program)
+}
 fn tools_env(ctx) { #{ HOME: ctx.runtime.paths.build, LC_ALL: "C" } }
 
 fn is_acquired(ctx) {

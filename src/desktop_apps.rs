@@ -22,7 +22,7 @@
 
 use anyhow::{bail, Context, Result};
 use distro_contract::profile::Flavour;
-use distro_contract::{Variant, DESKTOP_APPS, DESKTOP_APP_ENTRIES};
+use distro_contract::{Variant, DESKTOP_APPS, DESKTOP_APP_ENTRIES, DESKTOP_HELPERS};
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::Read;
@@ -33,8 +33,8 @@ use crate::process::Cmd;
 use crate::recipe::{rootfs_source, Invocation};
 
 /// Compiles the desktop apps for `variant` and puts them into its desktop
-/// system `rootfs`: each program in `usr/bin`, its menu entry, and the polkit
-/// actions two of them ask the administrator's password through.
+/// system `rootfs`: each app and the helper in `usr/bin`, each app's menu entry,
+/// and the polkit actions two of the apps ask the administrator's password through.
 pub(crate) fn install_system(variant: &Variant, rootfs: &Path) -> Result<()> {
     let repo = &variant.repo_root;
     let (reference, image) = build_root(variant).context("making the root the desktop apps are compiled in")?;
@@ -62,13 +62,19 @@ pub(crate) fn install_system(variant: &Variant, rootfs: &Path) -> Result<()> {
     check(rootfs)
 }
 
-/// Refuses a desktop rootfs that lacks one of the desktop apps or its menu entry.
+/// Refuses a desktop rootfs that lacks one of the desktop apps, its menu entry
+/// or one of the helper programs ([`DESKTOP_HELPERS`], which have no menu entry).
 pub(crate) fn check(rootfs: &Path) -> Result<()> {
     for (app, entry) in DESKTOP_APPS.iter().zip(DESKTOP_APP_ENTRIES) {
         for path in [format!("usr/bin/{app}"), entry.to_string()] {
             if !rootfs.join(&path).is_file() {
                 bail!("the desktop system lacks /{path} (the desktop app {app})");
             }
+        }
+    }
+    for helper in DESKTOP_HELPERS {
+        if !rootfs.join(format!("usr/bin/{helper}")).is_file() {
+            bail!("the desktop system lacks /usr/bin/{helper} (the desktop helper)");
         }
     }
     Ok(())

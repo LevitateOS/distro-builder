@@ -92,6 +92,7 @@ pub fn publish(
     );
     let id = digest(&manifest_bytes);
     fs::create_dir_all(output)?;
+    let secret = crate::release_manifest::signing_key(variant, key, &[bundle, output])?;
     fs::set_permissions(output, fs::Permissions::from_mode(0o755))?;
     let lock = fs::OpenOptions::new()
         .create(true)
@@ -228,7 +229,6 @@ pub fn publish(
     index.sequence = sequence;
     index.validate()?;
     let raw = serde_json::to_vec_pretty(&index)?;
-    let secret = bytes(key, 16384)?;
     let signature = sign(&raw, &secret, trust)?;
     // The index signature is itself content addressed. Readers request its
     // index-hash name, so concurrent index publication cannot mix generations.

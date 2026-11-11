@@ -163,7 +163,11 @@ contract. The checked-in development channels have no production endpoint/key.
 Signed emission requires `--signing-key /private/release.pk8`; full release
 assembly reads that explicit path from `RECAB_RELEASE_SIGNING_KEY`. The key must
 match the configured distribution public key. Key custody and deployment of the
-published directory remain release operations.
+published directory remain release operations. Manifest and index publication
+refuse signing keys inside the checkout, prepared root, release bundle or
+publication directory (using resolved paths). Key format and authority are
+checked before public release objects are written. Supply an external private
+key file; do not put key bytes in command arguments, defines or logs.
 
 To configure online acquisition, set the variant's source and trust deliberately:
 
@@ -193,6 +197,21 @@ checks immutable `releases/<manifest SHA256>/` objects, signs the index, publish
 its content-addressed signature first and replaces `index.json` last. Retain
 older release objects/signatures for clients with pinned downloads. Serving or
 uploading that directory is explicit; this command performs no network publish.
+
+For production, the server must expose that directory's layout at the exact
+configured HTTPS index URL. Deploy immutable `releases/` objects and
+`index-signatures/` before replacing `index.json`, and retain older referenced
+objects. Copying only `index.sig` is insufficient: recab requests
+`index-signatures/<SHA256(index.json)>.sig`. Keep the index refreshable by clients
+and serve the signed bytes without rewriting them.
+
+P14 remains unconfigured: both distro contracts still have development sequence
+1 with no production origin or trust key. The real index URL/channel, public
+release key, external signing-key custody and deployment destination/access
+must be supplied before configuration or publication. Existing local fixture
+passes do not establish a production service. Installed check/download/apply
+against the published service and applicable current runtime evidence remain
+outstanding; no full build or VM run is implied by the publishing commands.
 
 The format and trust rules are in
 [the shared release contract](../contract/docs/releases.md). Full new distro,

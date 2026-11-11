@@ -16,6 +16,46 @@ pub struct ProducedRelease {
     pub inputs: recab::release::VerifiedRelease,
 }
 
+/// Read the explicitly supplied signing key without allowing it to become a
+/// checkout input or part of the prepared/published system. Call before writing
+/// public release objects; the configured public key remains the authority.
+pub(crate) fn signing_key(
+    variant: &Variant,
+    path: &Path,
+    public_roots: &[&Path],
+) -> Result<Vec<u8>> {
+    let path = fs::canonicalize(path).context("opening distribution signing key")?;
+    ensure!(
+        !path.starts_with(fs::canonicalize(&variant.repo_root)?),
+        "distribution signing key must stay outside the checkout"
+    );
+    for root in public_roots {
+        ensure!(
+            !path.starts_with(fs::canonicalize(root)?),
+            "distribution signing key must stay outside prepared and published trees"
+        );
+    }
+    let file = levitate_recipe::fsx::open_regular(&path)?;
+    ensure!(
+        file.metadata()?.len() <= 16384,
+        "release signing key exceeds bound"
+    );
+    let mut secret = Vec::new();
+    file.take(16385).read_to_end(&mut secret)?;
+    // Validate key format and authority before publishing any release content.
+    sign(
+        b"",
+        &secret,
+        variant
+            .contract
+            .release
+            .trust
+            .as_ref()
+            .context("configure release.trust before signing")?,
+    )?;
+    Ok(secret)
+}
+
 fn artifact(base: &Path, path: &str) -> Result<Artifact> {
     let mut file = levitate_recipe::fsx::open_regular(&base.join(path))?;
     let size = file.metadata()?.len();
@@ -66,6 +106,16 @@ pub fn write(
         root_policy == policy.installed(),
         "prepared rootfs release policy differs from the variant contract"
     );
+    let secret = match (&policy.trust, signing_key) {
+        (Some(_), Some(key)) => Some(self::signing_key(variant, key, &[root, dir])?),
+        (Some(_), None) => anyhow::bail!(
+            "signed releases require an explicit distribution PKCS#8 signing key"
+        ),
+        (None, Some(_)) => anyhow::bail!(
+            "configure release.trust before signing; the signing key cannot select its own authority"
+        ),
+        (None, None) => None,
+    };
     let sources = crate::pipeline::sources::recorded(dir)
         .context("release has no system-sources.sha256 provenance record")?;
     hash(&sources)?;
@@ -152,23 +202,9 @@ pub fn write(
     );
     manifest.validate()?;
     let bytes = serde_json::to_vec_pretty(&manifest)?;
-    if let Some(trust) = &policy.trust {
-        let key = signing_key
-            .context("signed releases require an explicit distribution PKCS#8 signing key")?;
-        let file = levitate_recipe::fsx::open_regular(key)?;
-        ensure!(
-            file.metadata()?.len() <= 16384,
-            "release signing key exceeds bound"
-        );
-        let mut secret = Vec::new();
-        file.take(16385).read_to_end(&mut secret)?;
-        let signature = sign(&bytes, &secret, trust)?;
+    if let (Some(trust), Some(secret)) = (&policy.trust, &secret) {
+        let signature = sign(&bytes, secret, trust)?;
         distro_contract::runs::write_atomic(&dir.join(SIGNATURE), &signature)?;
-    } else {
-        ensure!(
-            signing_key.is_none(),
-            "configure release.trust before signing; the signing key cannot select its own authority"
-        );
     }
     let mut candidate = tempfile::NamedTempFile::new_in(dir)?;
     std::io::Write::write_all(&mut candidate, &bytes)?;

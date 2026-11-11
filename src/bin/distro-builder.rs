@@ -47,6 +47,99 @@ fn run(repo: &Path, command: Command) -> Result<()> {
     // If the launcher dies (cancel, abort), this build dies with it.
     process::die_with_parent().context("arming the parent-death signal for distro-builder")?;
     match command {
+        Command::ReleaseTransport {
+            distro,
+            bundle,
+            root,
+            output,
+            commit,
+            part_bytes,
+        } => {
+            let variant = distro_contract::load(repo, &distro)?;
+            let value = distro_builder::release_index::production_publish::prepare(
+                &variant, &bundle, &root, &output, &commit, part_bytes,
+            )?;
+            println!("{}", serde_json::to_string(&value)?);
+            Ok(())
+        }
+        Command::ReleasePublish {
+            distro,
+            publication,
+            feed,
+            audience,
+            index_key,
+        } => {
+            let variant = distro_contract::load(repo, &distro)?;
+            let audience = if audience == "candidate" {
+                distro_contract::release::production::Audience::Candidate
+            } else {
+                distro_contract::release::production::Audience::Stable
+            };
+            println!(
+                "{}",
+                distro_builder::release_index::production_publish::publish(
+                    &variant,
+                    publication.as_deref(),
+                    &feed,
+                    audience,
+                    &index_key
+                )?
+            );
+            Ok(())
+        }
+        Command::ReleaseVerifyOnline {
+            distro,
+            directory,
+            audience,
+            representative,
+        } => {
+            let variant = distro_contract::load(repo, &distro)?;
+            let audience = if audience == "candidate" {
+                distro_contract::release::production::Audience::Candidate
+            } else {
+                distro_contract::release::production::Audience::Stable
+            };
+            println!(
+                "{}",
+                distro_builder::release_index::production_publish::verify_online(
+                    &variant,
+                    &directory,
+                    audience,
+                    representative
+                )?
+            );
+            Ok(())
+        }
+        Command::ReleaseInspectPublication { distro, directory } => {
+            let variant = distro_contract::load(repo, &distro)?;
+            println!(
+                "{}",
+                serde_json::to_string(
+                    &distro_builder::release_index::production_publish::read_publication(
+                        &variant,
+                        &directory,
+                        distro_contract::release::production::Audience::Candidate
+                    )?
+                )?
+            );
+            Ok(())
+        }
+        Command::ReleaseVerifyRemote {
+            distro,
+            directory,
+            representative,
+        } => {
+            let variant = distro_contract::load(repo, &distro)?;
+            println!(
+                "{}",
+                distro_builder::release_index::production_publish::verify_remote(
+                    &variant,
+                    &directory,
+                    representative
+                )?
+            );
+            Ok(())
+        }
         Command::ReleaseAuthorize {
             distro,
             document,

@@ -189,11 +189,12 @@ signature, audience/epoch/freshness, release-role signatures and transport maps
 against the existing system manifests. Its JSON explicitly reports that payloads
 were not fetched/verified and production was not enabled. These commands do not
 build, upload or change an installed system. Private key files must also exclude
-group/other access. Production readers, publication/promotion workflows and
-applicable runtime validation remain pending; existing variant defaults remain
-disabled. See `tools/recab/RELEASE-ENGINEERING.md` for the approved design.
+group/other access. The delegated reader, transport publisher and publication/refresh
+workflows are implemented. Public-origin installed scenario support and applicable
+runtime validation remain pending; existing variant defaults remain disabled.
+See `tools/recab/RELEASE-ENGINEERING.md` for the approved design.
 
-To configure online acquisition, set the variant's source and trust deliberately:
+For legacy development feeds, configure the single-key source explicitly:
 
 ```toml
 [release.source]
@@ -222,17 +223,18 @@ its content-addressed signature first and replaces `index.json` last. Retain
 older release objects/signatures for clients with pinned downloads. Serving or
 uploading that directory is explicit; this command performs no network publish.
 
-For production, the server must expose that directory's layout at the exact
+For this legacy feed, the server exposes that directory's layout at the exact
 configured HTTPS index URL. Deploy immutable `releases/` objects and
 `index-signatures/` before replacing `index.json`, and retain older referenced
 objects. Copying only `index.sig` is insufficient: recab requests
 `index-signatures/<SHA256(index.json)>.sig`. Keep the index refreshable by clients
 and serve the signed bytes without rewriting them.
 
-P14 remains unconfigured: both distro contracts still have development sequence
-1 with no production origin or trust key. The real index URL/channel, public
-release key, external signing-key custody and deployment destination/access
-must be supplied before configuration or publication. Existing local fixture
+Production enablement remains pending: both distro contracts still have development
+sequence 1 with no production origin or trust key. The approved Pages/immutable
+Release service and separate signing roles are implemented, but canonical origin
+confirmation, public authority, private-key custody, protected environments and
+release runtime provisioning still need to be completed. Existing local fixture
 passes do not establish a production service. Installed check/download/apply
 against the published service and applicable current runtime evidence remain
 outstanding; no full build or VM run is implied by the publishing commands.
@@ -240,3 +242,14 @@ outstanding; no full build or VM run is implied by the publishing commands.
 The format and trust rules are in
 [the shared release contract](../contract/docs/releases.md). Full new distro,
 ISO and kernel builds have not been run for P07/P08.
+
+
+Production x86_64 transport and metadata publication use `release transport`,
+`release publish` and `release verify-online`. `cargo xtask release` supplies the
+operator upload/refresh/deploy workflow; see the superproject's
+[production publication guide](https://github.com/LevitateOS/LevitateOS/blob/master/release/updates/README.md).
+These consume existing signed artifacts and explicit Recipe runtime inputs.
+They do not build systems or establish installed production readiness. The
+legacy `release index` command remains for development feeds and refuses a
+production policy. Production origins, keys and stable enablement remain
+pending provisioning and applicable validation.

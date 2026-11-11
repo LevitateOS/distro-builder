@@ -124,6 +124,7 @@ pub struct Invocation<'a> {
     args: Vec<OsString>,
     root: Option<(String, PathBuf)>,
     worker: Option<PathBuf>,
+    cwd: Option<PathBuf>,
 }
 
 impl<'a> Invocation<'a> {
@@ -141,7 +142,15 @@ impl<'a> Invocation<'a> {
             args: Vec::new(),
             root: None,
             worker: None,
+            cwd: None,
         }
+    }
+
+    /// Keep short-lived verification outputs in the invocation's private scope,
+    /// so Recipe's exported artifacts are removed with that scope.
+    pub fn working_directory(mut self, directory: &Path) -> Self {
+        self.cwd = Some(directory.to_path_buf());
+        self
     }
 
     /// Runs this recipe in another root than Recipe's usual one: the image
@@ -231,7 +240,7 @@ impl<'a> Invocation<'a> {
             .arg("--recipes-path")
             .arg(&os_recipes_path)
             .args(&self.args)
-            .dir(self.repo)
+            .dir(self.cwd.as_deref().unwrap_or(self.repo))
             .stdout_to_stderr()
             .error_msg(format!("recipe {} {}", self.phase, recipe.display()));
         for (key, _) in std::env::vars_os() {

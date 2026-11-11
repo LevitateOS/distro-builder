@@ -6,11 +6,41 @@
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
-use distro_contract::ProductId;
 use distro_contract::profile::Flavour;
+use distro_contract::ProductId;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
+    ReleaseTransport {
+        distro: String,
+        bundle: PathBuf,
+        root: PathBuf,
+        output: PathBuf,
+        commit: String,
+        part_bytes: u64,
+    },
+    ReleasePublish {
+        distro: String,
+        publication: Option<PathBuf>,
+        feed: PathBuf,
+        audience: String,
+        index_key: PathBuf,
+    },
+    ReleaseVerifyOnline {
+        distro: String,
+        directory: PathBuf,
+        audience: String,
+        representative: bool,
+    },
+    ReleaseInspectPublication {
+        distro: String,
+        directory: PathBuf,
+    },
+    ReleaseVerifyRemote {
+        distro: String,
+        directory: PathBuf,
+        representative: bool,
+    },
     ReleaseAuthorize {
         distro: String,
         document: PathBuf,
@@ -74,6 +104,11 @@ pub fn usage() -> String {
     format!(
         "Usage: distro-builder --repo-root <dir> <command>\n\n\
          Commands:\n  \
+         release transport <distro> <bundle> <root> <output> <source-commit> <part-bytes>  verify/split an existing signed x86_64 release\n  \
+         release publish <distro> <publication|refresh> <feed> <candidate|stable> --index-key PKCS8  sign discovery metadata\n  \
+         release inspect-publication <distro> <publication>  authenticate prepared public metadata\n  \
+         release verify-online <distro> <feed> <candidate|stable> [--representative]  check deployed Pages bytes through Recipe\n  \
+         release verify-remote <distro> <publication> [--representative]  verify public assets through Recipe\n  \
          release authorize <distro> <keys.json> <proof.json> --root-key PKCS8  sign public role authorization\n  \
          release verify-feed <distro> <directory>           authenticate staged production metadata (no builds/network)\n  \
          release index <distro> <bundle> <publish_dir> <sequence> --signing-key PKCS8  publish a signed local update index\n  \
@@ -96,6 +131,66 @@ impl Command {
             args.extend(words.iter().map(|word| word.as_ref().to_os_string()));
         };
         match self {
+            Self::ReleaseTransport {
+                distro,
+                bundle,
+                root,
+                output,
+                commit,
+                part_bytes,
+            } => push(&[
+                &"release",
+                &"transport",
+                distro,
+                bundle,
+                root,
+                output,
+                commit,
+                &part_bytes.to_string(),
+            ]),
+            Self::ReleasePublish {
+                distro,
+                publication,
+                feed,
+                audience,
+                index_key,
+            } => push(&[
+                &"release",
+                &"publish",
+                distro,
+                &publication
+                    .as_ref()
+                    .map(|p| p.as_os_str())
+                    .unwrap_or_else(|| std::ffi::OsStr::new("refresh")),
+                feed,
+                audience,
+                &"--index-key",
+                index_key,
+            ]),
+            Self::ReleaseVerifyOnline {
+                distro,
+                directory,
+                audience,
+                representative,
+            } => {
+                push(&[&"release", &"verify-online", distro, directory, audience]);
+                if *representative {
+                    push(&[&"--representative"]);
+                }
+            }
+            Self::ReleaseInspectPublication { distro, directory } => {
+                push(&[&"release", &"inspect-publication", distro, directory])
+            }
+            Self::ReleaseVerifyRemote {
+                distro,
+                directory,
+                representative,
+            } => {
+                push(&[&"release", &"verify-remote", distro, directory]);
+                if *representative {
+                    push(&[&"--representative"]);
+                }
+            }
             Self::ReleaseAuthorize {
                 distro,
                 document,
@@ -216,42 +311,73 @@ pub fn parse(args: &[String]) -> Result<(PathBuf, Command), Usage> {
     };
     let words: Vec<&str> = rest.iter().map(String::as_str).collect();
     let command = match words.as_slice() {
-        [
-            "release",
-            "authorize",
-            id,
-            document,
-            output,
-            "--root-key",
-            root_key,
-        ] => Command::ReleaseAuthorize {
+        ["release", "transport", id, bundle, root, output, commit, part_bytes] => {
+            Command::ReleaseTransport {
+                distro: distro(id)?,
+                bundle: bundle.into(),
+                root: root.into(),
+                output: output.into(),
+                commit: commit.to_string(),
+                part_bytes: part_bytes
+                    .parse()
+                    .map_err(|_| Usage("part-bytes must be an integer".into()))?,
+            }
+        }
+        ["release", "publish", id, publication, feed, audience @ ("candidate" | "stable"), "--index-key", key] => {
+            Command::ReleasePublish {
+                distro: distro(id)?,
+                publication: (*publication != "refresh").then(|| PathBuf::from(publication)),
+                feed: feed.into(),
+                audience: audience.to_string(),
+                index_key: key.into(),
+            }
+        }
+        ["release", "verify-online", id, directory, audience @ ("candidate" | "stable"), flags @ ..]
+            if flags.is_empty() || *flags == ["--representative"] =>
+        {
+            Command::ReleaseVerifyOnline {
+                distro: distro(id)?,
+                directory: directory.into(),
+                audience: audience.to_string(),
+                representative: !flags.is_empty(),
+            }
+        }
+        ["release", "inspect-publication", id, directory] => Command::ReleaseInspectPublication {
             distro: distro(id)?,
-            document: document.into(),
-            output: output.into(),
-            root_key: root_key.into(),
+            directory: directory.into(),
         },
+        ["release", "verify-remote", id, directory, flags @ ..]
+            if flags.is_empty() || *flags == ["--representative"] =>
+        {
+            Command::ReleaseVerifyRemote {
+                distro: distro(id)?,
+                directory: directory.into(),
+                representative: !flags.is_empty(),
+            }
+        }
+        ["release", "authorize", id, document, output, "--root-key", root_key] => {
+            Command::ReleaseAuthorize {
+                distro: distro(id)?,
+                document: document.into(),
+                output: output.into(),
+                root_key: root_key.into(),
+            }
+        }
         ["release", "verify-feed", id, directory] => Command::ReleaseVerifyFeed {
             distro: distro(id)?,
             directory: directory.into(),
         },
-        [
-            "release",
-            "index",
-            id,
-            bundle,
-            output,
-            sequence,
-            "--signing-key",
-            key,
-        ] => Command::ReleaseIndex {
-            distro: distro(id)?,
-            bundle: bundle.into(),
-            output: output.into(),
-            sequence: sequence
-                .parse()
-                .map_err(|_| Usage("index sequence must be an integer".into()))?,
-            signing_key: key.into(),
-        },
+        ["release", "index", id, bundle, output, sequence, "--signing-key", key] => {
+            Command::ReleaseIndex {
+                distro: distro(id)?,
+                bundle: bundle.into(),
+                output: output.into(),
+                sequence: sequence
+                    .parse()
+                    .map_err(|_| Usage("index sequence must be an integer".into()))?,
+                signing_key: key.into(),
+            }
+        }
         ["release", "manifest", id, flavour, root, dir, flags @ ..] => {
             let signing_key = match flags {
                 [] => None,

@@ -1,4 +1,5 @@
 //! Explicit local publication. No endpoint or signing key is invented here.
+pub mod production_publish;
 use anyhow::{Context, Result, ensure};
 use distro_contract::{Variant, release::*};
 use std::{

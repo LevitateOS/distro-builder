@@ -59,9 +59,21 @@ fn is_built(ctx) {
     verify_sha256(built(ctx), ctx.state.program_sha);
     ready(ctx)
 }
+// docs/content's page index (src/generated/index.ts) is generated and
+// gitignored, so the source closure never carries it: make it here, from the
+// same sources, before the TUI that imports it is compiled.
+fn generate_docs_index(ctx, work) {
+    let docs = join_path(work, "docs/content");
+    if !is_file(join_path(docs, "scripts/build.ts")) { return; }
+    exec_checked(compiler(ctx), ["scripts/build.ts"], #{ cwd: docs, env: #{ PWD: docs } });
+    if !is_file(join_path(docs, "src/generated/index.ts")) {
+        throw "docs/content/scripts/build.ts wrote no src/generated/index.ts";
+    }
+}
 fn build(ctx) {
     let work = workspace(ctx);
     verify_sha256(join_path(work, "bun.lock"), ctx.state.lock_sha);
+    generate_docs_index(ctx, work);
     exec_checked(compiler(ctx), ["build", "entry.ts", "--compile", "--minify", "--target=" + ctx.target,
         "--compile-executable-path", runtime(ctx), "--outfile", built(ctx)], #{ cwd: work, env: #{ PWD: work } });
     if !is_file(built(ctx)) { throw "Bun wrote no TUI program"; }

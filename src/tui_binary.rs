@@ -150,7 +150,7 @@ fn tui_key(repo_root: &Path, stem: &str, target: &str, source: &Path) -> Result<
         ("tui_binary_recipe", crate::prebuilt::file_digest(&recipes.join("tui-binary.rhai"))?),
         ("bun_toolchain_recipe", crate::prebuilt::file_digest(&recipes.join("bun-toolchain.rhai"))?),
         ("compiler_image", crate::recipe::compiler_image_reference(repo_root)?),
-        ("declared", levitate_recipe::identity::declared()),
+        ("behaviour", crate::prebuilt::behaviour()),
     ]))
 }
 

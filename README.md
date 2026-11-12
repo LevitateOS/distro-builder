@@ -271,8 +271,11 @@ Every line the builder prints starts with the local time (`HH:MM:SS`; `tprintln!
 Our own tools (`recpart`, `recstrap`, `recab`, `recipe`, `install-split`) and the TUI
 binary (`install-tui`, `system-tui`) and the Qt desktop apps (family `desktop-apps`, one whole tree per distro: programs, menu entries, polkit actions, Recipe's metadata, kept with exact modes and links) are identified by a **key**, the SHA-256 of
 everything their compile depends on (`src/prebuilt.rs`): the prepared source closure,
-the compile recipe, the target, the compiler image digest and Recipe's declared behaviour
-versions (`levitate_recipe::identity::declared`). A build takes each program from the
+the compile recipe, the target, the compiler image digest and Recipe's two behaviour
+versions (`ENGINE_BEHAVIOUR`, `GINUX_BEHAVIOUR`; `prebuilt::behaviour`). Nothing that does
+not change what the compile writes is in it: not Ginux's contract digests, and not a
+lock's `locked_on` date. So CI builds and publishes a part only when the program would
+differ. A build takes each program from the
 first of: the local cache `.artifacts/prebuilt/<family>/<key>/` (every file checked
 against `prebuilt.json`), a download of release `<family>-<key16>` from `LevitateOS/prebuilt`
 (`LEVITATE_PREBUILT_REPO` overrides; fetched by `os-recipes/prebuilt-fetch.rhai`, verified

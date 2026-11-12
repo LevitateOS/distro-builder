@@ -933,7 +933,19 @@ fn recipe_closure(repo: &Path, recipe: &Path, found: &mut BTreeMap<String, Strin
         return Ok(());
     }
     let text = fs::read_to_string(recipe).with_context(|| format!("reading '{}'", recipe.display()))?;
-    found.insert(label, file_digest(recipe)?);
+    // A lock's `locked_on()` date says when it was re-locked, not what it locks:
+    // leave it out, so a re-lock that changes no package changes no key.
+    let digest = if label.ends_with("-lock.rhai") {
+        let mut hash = Sha256::new();
+        for line in text.lines().filter(|line| !line.trim_start().starts_with("fn locked_on()")) {
+            hash.update(line.as_bytes());
+            hash.update(b"\n");
+        }
+        hex(&hash.finalize())
+    } else {
+        file_digest(recipe)?
+    };
+    found.insert(label, digest);
     let dir = recipe.parent().context("a recipe has a directory")?;
     let os_recipes = repo.join("distro/builder/os-recipes");
     for line in text.lines() {
@@ -1006,6 +1018,20 @@ fn lock_digest(files: &BTreeMap<String, String>) -> String {
     closure_digest(&files.iter().filter(|(label, _)| label.ends_with("-lock.rhai")).map(|(l, d)| (l.clone(), d.clone())).collect())
 }
 
+/// What of Recipe's declared identity a prebuilt key carries: only the two
+/// behaviour versions, which are bumped exactly when a Recipe or Ginux change can
+/// alter what a compile produces. The rest of `identity::declared()` (Ginux's
+/// contract digests, transport and catalog numbers) changes with what the
+/// sandbox permits, not with what a compile writes, so it must not force a
+/// rebuild of an identical program.
+pub(crate) fn behaviour() -> String {
+    format!(
+        "engine={} ginux={}",
+        levitate_recipe::identity::ENGINE_BEHAVIOUR,
+        levitate_recipe::identity::GINUX_BEHAVIOUR
+    )
+}
+
 /// The key of the desktop apps tree for `variant`: the `gui/` tree, the base and apps-build
 /// locks (the root the apps compile in is made from both), the apps-build root recipe, both
 /// preseed recipes and `desktop-apps.rhai` with everything they import, the compiler image,
@@ -1036,7 +1062,7 @@ pub fn desktop_apps_key(repo: &Path, variant: &distro_contract::Variant) -> Resu
         ("apps_build_root_recipe", closure_digest(&root)),
         ("desktop_apps_recipe", closure_digest(&compile)),
         ("compiler_image", crate::recipe::compiler_image_reference(repo)?),
-        ("declared", levitate_recipe::identity::declared()),
+        ("behaviour", behaviour()),
     ]))
 }
 

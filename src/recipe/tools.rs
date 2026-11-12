@@ -427,7 +427,7 @@ fn tool_key(repo: &Path, package: &str, source: &Path) -> Result<crate::prebuilt
         ("source_closure", crate::prebuilt::dir_digest(source)?),
         ("tool_crate_recipe", crate::prebuilt::file_digest(&recipe)?),
         ("compiler_image", super::compiler_image_reference(repo)?),
-        ("declared", levitate_recipe::identity::declared()),
+        ("behaviour", crate::prebuilt::behaviour()),
     ]))
 }
 

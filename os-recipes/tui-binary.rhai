@@ -59,16 +59,22 @@ fn is_built(ctx) {
     verify_sha256(built(ctx), ctx.state.program_sha);
     ready(ctx)
 }
+// docs/content's page index (src/generated/index.ts) is generated and
+// gitignored, so the source snapshot never carries it: make it here, from the
+// same sources, before the TUI that imports it is compiled. (Bun's JavaScript
+// needs /dev/urandom, which Recipe assigns where the launcher serves it.)
+fn generate_docs_index(ctx, work) {
+    let docs = join_path(work, "docs/content");
+    if !is_file(join_path(docs, "scripts/build.ts")) { return; }
+    exec_checked(compiler(ctx), ["scripts/build.ts"], #{ cwd: docs, env: #{ PWD: docs } });
+    if !is_file(join_path(docs, "src/generated/index.ts")) {
+        throw "docs/content/scripts/build.ts wrote no src/generated/index.ts";
+    }
+}
 fn build(ctx) {
     let work = workspace(ctx);
     verify_sha256(join_path(work, "bun.lock"), ctx.state.lock_sha);
-    // The builder's source snapshot carries docs/content's generated page
-    // index (it generates it on the host: Bun cannot run JavaScript inside a
-    // Ginux domain yet).
-    let index = join_path(work, "docs/content/src/generated/index.ts");
-    if is_file(join_path(work, "docs/content/scripts/build.ts")) && !is_file(index) {
-        throw "the TUI source has no docs/content/src/generated/index.ts; the builder generates it";
-    }
+    generate_docs_index(ctx, work);
     exec_checked(compiler(ctx), ["build", "entry.ts", "--compile", "--minify", "--target=" + ctx.target,
         "--compile-executable-path", runtime(ctx), "--outfile", built(ctx)], #{ cwd: work, env: #{ PWD: work } });
     if !is_file(built(ctx)) { throw "Bun wrote no TUI program"; }

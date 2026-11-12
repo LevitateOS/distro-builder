@@ -202,12 +202,15 @@ fn boot_directory(root, init, name, path, mode, owner) {
 // program as root in place of login. A serial login prompt runs only when
 // the boot names the port as a console: systemd's getty generator starts it
 // then; busybox init's line runs `serial-login`, which checks the same.
-fn consoles(root, init, gettys) {
+fn consoles(root, init, gettys) { consoles_in_runlevel(root, init, gettys, "default") }
+// `consoles`, with OpenRC's last runlevel named `runlevel` (the live desktop
+// installer boots its own, without the display manager); systemd ignores it.
+fn consoles_in_runlevel(root, init, gettys, runlevel) {
     check_init(init);
     if init == "systemd" {
         for getty in gettys { systemd_getty(root, getty[0], getty[1]); }
     } else {
-        openrc_inittab(root, gettys);
+        openrc_inittab(root, gettys, runlevel);
     }
 }
 fn systemd_getty(root, console, login) {
@@ -224,8 +227,9 @@ fn systemd_getty(root, console, login) {
     else { agetty += " --noclear %I $TERM"; }
     put(root, instance + ".d/zz-autologin.conf", "[Service]\nExecStart=\nExecStart=" + agetty + "\n", 0o644);
 }
-// Busybox init's inittab: OpenRC's runlevels in order, and one getty per console.
-fn openrc_inittab(root, gettys) {
+// Busybox init's inittab: OpenRC's runlevels in order (the last one
+// `runlevel`), and one getty per console.
+fn openrc_inittab(root, gettys, runlevel) {
     let inittab = "::sysinit:/sbin/openrc sysinit\n::sysinit:/sbin/openrc boot\n";
     let root_login = "usr/local/libexec/root-login";
     let serial_login = "usr/local/libexec/serial-login";
@@ -244,7 +248,7 @@ fn openrc_inittab(root, gettys) {
         else { line += "38400 " + console + " linux\n"; }
         inittab += line;
     }
-    inittab += "::wait:/sbin/openrc default\n::ctrlaltdel:/sbin/reboot\n::shutdown:/sbin/openrc shutdown\n";
+    inittab += "::wait:/sbin/openrc " + runlevel + "\n::ctrlaltdel:/sbin/reboot\n::shutdown:/sbin/openrc shutdown\n";
     put(root, "etc/inittab", inittab, 0o644);
     if inittab.contains("/" + root_login + " ") {
         put(root, root_login,

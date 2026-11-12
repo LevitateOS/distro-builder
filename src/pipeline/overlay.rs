@@ -4,7 +4,6 @@ use anyhow::{Context, Result};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use distro_contract::install_ux::{LIVE_DESKTOP_PASSWORD, LIVE_DESKTOP_PASSWORD_HASH, LIVE_DESKTOP_USER};
 use distro_contract::profile::{Flavour, InitSystem};
 use distro_contract::{ProductId, Variant};
 use serde::Serialize;
@@ -27,8 +26,10 @@ pub(crate) struct LiveSession {
     /// Units (systemd) or services (OpenRC) the session starts besides the
     /// installed system's.
     services: Vec<String>,
-    /// On the desktop system: whom its display manager logs in.
-    desktop: Option<LiveDesktop>,
+    /// On the desktop system: its display manager, which the live installer
+    /// does not start (the install screen has tty1, as on every live ISO; the
+    /// desktop starts once the system is installed).
+    desktop: Option<LiveInstallerDesktop>,
     /// Where recinit's live init keeps the boot medium mounted.
     live_media_dir: &'static str,
     /// The overlay's payload role file (recinit's payload-role protocol).
@@ -36,24 +37,15 @@ pub(crate) struct LiveSession {
     role: &'static str,
 }
 
-/// The live desktop's autologin: the user the display manager logs into
-/// `session` without asking, and the user's password for the privilege tool
-/// (`privilege`, which the desktop's "Install" launcher runs the install
-/// screen through; the launcher's entry shows `password` and is named
-/// `<os_id>-install`).
+/// The desktop system under the live installer: the display manager it
+/// keeps off. On OpenRC the overlay boots a `live` runlevel made of the
+/// installed system's `default` runlevel (`default_runlevel`, read from the
+/// rootfs when the overlay is made) without the display manager; on systemd
+/// it boots `multi-user.target`.
 #[derive(Debug, Serialize)]
-struct LiveDesktop {
-    user: &'static str,
-    password: &'static str,
-    password_hash: &'static str,
-    session: &'static str,
+struct LiveInstallerDesktop {
     display_manager: String,
-    os_id: String,
-    privilege: &'static str,
-    /// The groups the user joins where the system has them: the admin group
-    /// and the desktop session's (`distro_profile::DESKTOP_SESSION_GROUPS`, as
-    /// recsetup gives an installed desktop's users).
-    groups: Vec<&'static str>,
+    default_runlevel: Vec<String>,
 }
 
 impl LiveSession {
@@ -74,17 +66,9 @@ impl LiveSession {
             },
             launcher: install_screen.then(|| format!("/{}", crate::install_ux::LAUNCHER)),
             services: contract.live_service_units(),
-            desktop: (product.flavour() == Flavour::Desktop).then(|| LiveDesktop {
-                user: LIVE_DESKTOP_USER,
-                password: LIVE_DESKTOP_PASSWORD,
-                password_hash: LIVE_DESKTOP_PASSWORD_HASH,
-                session: contract.profile.desktop.session(),
+            desktop: (product.flavour() == Flavour::Desktop).then(|| LiveInstallerDesktop {
                 display_manager: contract.desktop.display_manager.clone(),
-                os_id: contract.identity.os_id.clone(),
-                privilege: contract.profile.privilege.as_str(),
-                groups: std::iter::once(distro_profile::ADMIN_GROUP)
-                    .chain(distro_profile::DESKTOP_SESSION_GROUPS.iter().copied())
-                    .collect(),
+                default_runlevel: Vec::new(),
             }),
             live_media_dir: recinit::live::LIVE_MEDIA_DIR,
             role_file: recinit::live::PAYLOAD_ROLE_FILE,
@@ -110,7 +94,11 @@ pub(crate) fn create_live_overlay(
         fs::write(&path, text).with_context(|| format!("writing {}", path.display()))?;
         Ok(path)
     };
-    let config = write("config", serde_json::to_string(session)?)?;
+    let mut config = serde_json::to_value(session)?;
+    if session.desktop.is_some() && session.init == InitSystem::Openrc {
+        config["desktop"]["default_runlevel"] = serde_json::to_value(default_runlevel(rootfs)?)?;
+    }
+    let config = write("config", serde_json::to_string(&config)?)?;
     let values = [
         ("OS_NAME", Value::Text(&session.os_name)),
         ("LIVE_MEDIA_DIR", Value::Word(session.live_media_dir)),
@@ -122,8 +110,6 @@ pub(crate) fn create_live_overlay(
         crate::recipe::recipe_work_dir(repo, &variant.id)?.join("live-overlay"),
     )
     .input("config", &config)
-    .input("passwd", &rootfs.join("etc/passwd"))
-    .input("group", &rootfs.join("etc/group"))
     .input("shadow", &rootfs.join("etc/shadow"));
     for (input, file) in [
         ("shell_ux", &guest::LIVE_SHELL),
@@ -142,4 +128,17 @@ pub(crate) fn create_live_overlay(
         .run()
         .context("preparing the live overlay with Recipe")?;
     levitate_recipe::target::merge_tree(&result.directory("overlay")?, overlay)
+}
+
+/// The services in the OpenRC `default` runlevel of the system at `rootfs`,
+/// by name, in name order.
+fn default_runlevel(rootfs: &Path) -> Result<Vec<String>> {
+    let dir = rootfs.join("etc/runlevels/default");
+    let mut names = Vec::new();
+    for entry in fs::read_dir(&dir).with_context(|| format!("reading {}", dir.display()))? {
+        let name = entry?.file_name();
+        names.push(name.to_str().context("non-UTF-8 runlevel entry")?.to_string());
+    }
+    names.sort();
+    Ok(names)
 }

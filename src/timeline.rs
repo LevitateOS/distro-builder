@@ -268,7 +268,7 @@ impl Active {
             recipe: self.recipe.clone(),
         };
         if let Ok(bytes) = serde_json::to_vec_pretty(&value) {
-            let _ = distro_contract::runs::write_atomic(&state_path(&self.repo, &self.distro), &bytes);
+            let _ = distro_contract::runs::write_replace(&state_path(&self.repo, &self.distro), &bytes);
         }
     }
 

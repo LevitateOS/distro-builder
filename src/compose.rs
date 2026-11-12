@@ -933,7 +933,7 @@ impl Progress {
             "updated": distro_contract::runs::now_rfc3339(),
             "state": state,
         });
-        let _ = distro_contract::runs::write_atomic(&self.path, record.to_string().as_bytes());
+        let _ = distro_contract::runs::write_replace(&self.path, record.to_string().as_bytes());
     }
 
     fn finish(&mut self) {

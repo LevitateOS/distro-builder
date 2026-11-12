@@ -12,7 +12,40 @@ mod workflows;
 
 use workflows::{artifacts, build, prebuilt};
 
+/// Ginux reserves one descriptor per storage object a recipe may create, plus a
+/// few (the desktop steps declare up to 262,144 objects), and refuses to start
+/// when the open-file hard limit is lower. Hosts differ (524,288 here, much
+/// less on CI runners): as root, raise both limits to what the kernel allows,
+/// capped at 1,048,576, so every Recipe run below inherits enough. Unprivileged
+/// runs leave the limits as they are.
+fn raise_open_file_limit() {
+    if unsafe { libc::geteuid() } != 0 {
+        return;
+    }
+    let ceiling = std::fs::read_to_string("/proc/sys/fs/nr_open")
+        .ok()
+        .and_then(|text| text.trim().parse::<u64>().ok())
+        .unwrap_or(1 << 20)
+        .min(1 << 20);
+    let mut current = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
+    if unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &mut current) } != 0 {
+        return;
+    }
+    let target = ceiling.max(current.rlim_max);
+    if current.rlim_cur >= target && current.rlim_max >= target {
+        return;
+    }
+    let wanted = libc::rlimit { rlim_cur: target, rlim_max: target };
+    if unsafe { libc::setrlimit(libc::RLIMIT_NOFILE, &wanted) } != 0 {
+        eprintln!(
+            "distro-builder: could not raise the open-file limit to {target}: {}",
+            std::io::Error::last_os_error()
+        );
+    }
+}
+
 fn main() -> ExitCode {
+    raise_open_file_limit();
     let args: Result<Vec<String>, _> = std::env::args_os()
         .skip(1)
         .map(|arg| arg.into_string())

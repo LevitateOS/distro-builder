@@ -335,7 +335,7 @@ fn os_release_optional(inputs, field) {
     for line in read_file(join_path(inputs, "os_release")).split("\n") {
         if line.starts_with(field + "=") {
             let value = trim(line.sub_string(field.len() + 1));
-            value.replace("\"", "");
+            value = value.replace("\"", "");
             return value;
         }
     }
@@ -360,7 +360,7 @@ fn pretty_name(inputs) {
     for line in read_file(join_path(inputs, "os_release")).split("\n") {
         if line.starts_with("PRETTY_NAME=") {
             let name = line.sub_string(12);
-            name.replace("\"", "");
+            name = name.replace("\"", "");
             return name;
         }
     }
@@ -671,7 +671,7 @@ fn menu_entries(root, inputs) {
         if !is_file(join_path(root, path)) { throw "the desktop packages no longer ship the menu entry " + name; }
         let text = read_file(join_path(root, path));
         if !text.contains("[Desktop Entry]\n") || text.contains("\nNoDisplay=") { throw "the menu entry " + name + " is not one this recipe can hide"; }
-        text.replace("[Desktop Entry]\n", "[Desktop Entry]\nNoDisplay=true\n");
+        text = text.replace("[Desktop Entry]\n", "[Desktop Entry]\nNoDisplay=true\n");
         write_file(join_path(root, path), text);
     }
 }
@@ -726,7 +726,7 @@ fn start_button(root, inputs) {
             for script in tree_files(root, scripts, ".js") {
                 let text = read_file(script);
                 if !text.contains(fedora) { continue; }
-                text.replace(fedora, "writeConfig(\"icon\", \"" + name + "\")");
+                text = text.replace(fedora, "writeConfig(\"icon\", \"" + name + "\")");
                 write_file(script, text);
                 set += 1;
             }
@@ -739,7 +739,7 @@ fn start_button(root, inputs) {
         let text = read_file_or_empty(join_path(root, conf));
         let section = "[fancymenu]\n";
         if !text.contains(section) { throw "the LXQt panel's settings have no fancymenu button"; }
-        text.replace(section, section + "ownIcon=true\nicon=/" + icon + "\n");
+        text = text.replace(section, section + "ownIcon=true\nicon=/" + icon + "\n");
         put(root, conf, text, 0o644);
     }
 }

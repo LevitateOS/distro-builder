@@ -237,10 +237,8 @@ fn adduser_args(words, where) {
         else if word == "-s" { user.shell = value; i += 1; }
         else if word == "-G" { user.group = value; i += 1; }
         else if word == "-g" {
-            // Rhai's replace edits the string in place.
-            let gecos = value;
-            gecos.replace("_", " ");
-            user.gecos = gecos;
+            // Recipe's replace returns the new string (it does not edit in place).
+            user.gecos = value.replace("_", " ");
             i += 1;
         }
         else if word == "-u" { user.id = parse_int(value); i += 1; }

@@ -48,6 +48,29 @@ fn is_built(ctx) {
     ready(ctx)
 }
 
+// Configure; when CMake cannot find its build tools, say what this root's
+// PATH and tools look like before failing, since CMake only reports "not set".
+fn configure(ctx, dir) {
+    try {
+        exec_checked("cmake", ["-S", source(ctx), "-B", dir, "-G", "Unix Makefiles",
+            "-DCMAKE_BUILD_TYPE=Release", "-DCMAKE_INSTALL_PREFIX=/usr"], #{ env: tools_env(ctx) });
+    } catch (err) {
+        report_tools(ctx);
+        throw err;
+    }
+}
+
+fn report_tools(ctx) {
+    let probe = "echo \"PATH=$PATH\"; for t in make gmake cc gcc c++ g++; do " +
+        "printf '%s: ' \"$t\"; command -v \"$t\" || echo missing; done; " +
+        "ls -l /usr/bin/make /usr/bin/gcc /usr/bin/g++ /usr/bin/cc 2>&1; " +
+        "for t in /usr/bin/make /usr/bin/gcc /usr/bin/g++; do " +
+        "test -x \"$t\" && echo \"$t: executable\" || echo \"$t: not executable\"; done; " +
+        "/usr/bin/make --version 2>&1 | head -1";
+    try { log("tools in this root:\n" + exec_output("sh", ["-c", probe], #{ env: tools_env(ctx) })); }
+    catch (err) { log("could not inspect this root's tools: " + err); }
+}
+
 fn build(ctx) {
     if !is_file("/usr/bin/cmake") {
         throw "this root has no cmake: the desktop apps are compiled in the variant's apps-build root, not in Recipe's usual one";
@@ -55,8 +78,7 @@ fn build(ctx) {
     let dir = work(ctx);
     if is_dir(dir) { rm(dir); }
     progress(0, 0, "configuring (cmake)");
-    exec_checked("cmake", ["-S", source(ctx), "-B", dir, "-G", "Unix Makefiles",
-        "-DCMAKE_BUILD_TYPE=Release", "-DCMAKE_INSTALL_PREFIX=/usr"], #{ env: tools_env(ctx) });
+    configure(ctx, dir);
     progress(0, ctx.programs.len(), "compiling the apps (cmake --build)");
     exec_checked("cmake", ["--build", dir, "--parallel", ctx.jobs], #{ env: tools_env(ctx) });
     let found = 0;

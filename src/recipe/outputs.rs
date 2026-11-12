@@ -30,6 +30,11 @@ impl RecipeResult {
         Ok(Self { ctx })
     }
 
+    /// The whole ctx, as Recipe reported it.
+    pub(crate) fn ctx(&self) -> &Value {
+        &self.ctx
+    }
+
     fn outputs(&self) -> Result<&serde_json::Map<String, Value>> {
         self.ctx
             .get("outputs")

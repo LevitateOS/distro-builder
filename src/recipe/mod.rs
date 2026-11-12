@@ -8,6 +8,7 @@
 
 pub mod linux;
 mod outputs;
+mod stamp;
 pub mod rootfs_source;
 pub mod tools;
 
@@ -364,6 +365,40 @@ impl<'a> Invocation<'a> {
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_else(|| recipe.display().to_string());
+        // An install whose recipe, inputs, root and Recipe behaviour are
+        // unchanged and whose outputs are intact is not run again (`stamp`).
+        let root_reference = match &self.root {
+            Some((reference, _)) => reference.clone(),
+            None => match compiler_image(self.repo)? {
+                Some((reference, _)) => reference,
+                None => std::env::var("GINUX_ROOT").unwrap_or_else(|_| "Recipe's default root".into()),
+            },
+        };
+        let stamp = stamp::Stamp::for_run(
+            self.repo,
+            self.phase,
+            recipe,
+            work,
+            &self.args,
+            &root_reference,
+            self.worker.as_deref(),
+        )
+        .with_context(|| format!("computing the done stamp of {}", recipe.display()))?;
+        if let Some(result) = stamp.as_ref().and_then(stamp::Stamp::reuse) {
+            let step = self.concurrent.is_none().then(|| {
+                crate::timeline::Step::begin("recipe", &format!("recipe {} {recipe_name} (unchanged)", self.phase))
+            });
+            crate::tprintln!(
+                "  recipe {} {}: unchanged since its last run (stamp {}); reusing its result",
+                self.phase,
+                recipe.display(),
+                stamp.as_ref().map(stamp::Stamp::short).unwrap_or_default()
+            );
+            if let Some(step) = step {
+                step.finish();
+            }
+            return Ok(result);
+        }
         let step = self
             .concurrent
             .is_none()
@@ -489,6 +524,11 @@ impl<'a> Invocation<'a> {
         let bytes = std::fs::read(result.path())
             .context("reading this invocation's recipe JSON result")?;
         let result = RecipeResult::from_json(&bytes)?;
+        if let Some(stamp) = &stamp {
+            if let Err(error) = stamp.save(&result) {
+                crate::teprintln!("  (no done stamp for {}: {error:#})", recipe.display());
+            }
+        }
         if let Some(file) = &progress {
             let _ = std::fs::remove_file(file);
         }

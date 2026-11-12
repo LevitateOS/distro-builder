@@ -12,6 +12,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::compose;
+use crate::pipeline::configured;
 use crate::pipeline::paths::resolve_repo_path;
 use crate::recipe::rootfs_source::{
     lock_rows, materialize_rootfs_from_recipe, preseed_inputs, LockRow, RootfsSourceRecipeSpec,
@@ -149,15 +150,32 @@ pub fn materialize_rootfs_source(variant: &Variant, flavour: Flavour) -> Result<
     if flavour == Flavour::Desktop {
         locks.push(Flavour::Desktop);
     }
+    let effects_recipe = repo.join(match variant.contract.profile.packages {
+        PackageBackend::Rpm => RPM_EFFECTS_RECIPE,
+        PackageBackend::Apk => APK_EFFECTS_RECIPE,
+    });
+    let texts = system_texts(variant, flavour)?;
     let seq = crate::timeline::Seq::new();
     let step = |what: &str| {
         crate::tprintln!("[rootfs:{id}:{flavour}] {what}");
         seq.step(what);
     };
 
+    // The configured tree comes from the store when nothing it is made from
+    // changed (`configured`).
+    let mut configured = configured::Entry::new(
+        repo,
+        configured_fields(variant, flavour, &locks, &effects_recipe, &recipe, &texts)?,
+    )?;
+    if let Some(tree) = configured.reuse_or_lock()? {
+        step(&format!("configured tree {} reused", configured.short()));
+        seq.finish();
+        return Ok(tree);
+    }
+
     // 1 and 2: the locked packages as one tree.
     let mut effects_inputs = BTreeMap::new();
-    let (effects_recipe, view) = match variant.contract.profile.packages {
+    let view = match variant.contract.profile.packages {
         PackageBackend::Rpm => {
             step("unpacking the locked packages (fedora-rpm-unpack.rhai)");
             let mut layers = Vec::new();
@@ -178,7 +196,7 @@ pub fn materialize_rootfs_source(variant: &Variant, flavour: Flavour) -> Result<
                 Flavour::Base => base,
                 Flavour::Desktop => compose::compose(repo, Some(&base), desktop_layer)?,
             };
-            (RPM_EFFECTS_RECIPE, compose::input_view(repo, &composed)?)
+            compose::input_view(repo, &composed)?
         }
         PackageBackend::Apk => {
             step("installing the base tree (alpine-apk-base-tree.rhai)");
@@ -193,12 +211,11 @@ pub fn materialize_rootfs_source(variant: &Variant, flavour: Flavour) -> Result<
                 .clone();
             let archive = compose::apk_base_tree(repo, id, &apks)?;
             let rows = lock_rows(&preseed_recipe(variant, Flavour::Base))?;
-            (APK_EFFECTS_RECIPE, compose::archive_view(repo, &archive, &rows)?)
+            compose::archive_view(repo, &archive, &rows)?
         }
     };
 
     // 3: the packages' effects.
-    let effects_recipe = repo.join(effects_recipe);
     step(&format!("package effects ({})", file_name(&effects_recipe)?));
     add_input(&mut effects_inputs, "composed", view.path().to_path_buf())?;
     let flavour_file = rendered.join("flavour");
@@ -225,21 +242,7 @@ pub fn materialize_rootfs_source(variant: &Variant, flavour: Flavour) -> Result<
     step(&format!("system configuration ({})", file_name(&recipe)?));
     let mut inputs = BTreeMap::new();
     add_input(&mut inputs, "system", system)?;
-    // What the system recipe installs from the builder: the setup program
-    // and the system's identity; the desktop system also starts its
-    // display manager and shows the variant's branding.
-    let privilege = variant.contract.profile.privilege;
-    let mut texts = vec![
-        ("system_setup", crate::guest::render(&crate::guest::SYSTEM_SETUP, &[])?),
-        ("os_release", os_release(&variant.contract, flavour)),
-        ("capabilities", distro_contract::capabilities_text().to_string()),
-        ("admin_rule_file", privilege.admin_rule_file().to_string()),
-        ("admin_rule", privilege.admin_rule()),
-    ];
-    if flavour == Flavour::Desktop {
-        texts.push(("display_manager", variant.contract.desktop.display_manager.clone()));
-    }
-    for (name, text) in texts {
+    for (name, text) in &texts {
         let path = rendered.join(name);
         fs::write(&path, text).with_context(|| format!("writing {}", path.display()))?;
         add_input(&mut inputs, name, path)?;
@@ -261,8 +264,87 @@ pub fn materialize_rootfs_source(variant: &Variant, flavour: Flavour) -> Result<
         },
     )
     .with_context(|| format!("materializing the {id} {flavour} rootfs source"))?;
+    step(&format!("storing the configured tree {}", configured.short()));
+    let tree = configured.store(&rootfs)?;
     seq.finish();
-    Ok(rootfs)
+    Ok(tree)
+}
+
+/// What the system recipe installs from the builder: the setup program and
+/// the system's identity; the desktop system also starts its display manager.
+fn system_texts(variant: &Variant, flavour: Flavour) -> Result<Vec<(&'static str, String)>> {
+    let privilege = variant.contract.profile.privilege;
+    let mut texts = vec![
+        ("system_setup", crate::guest::render(&crate::guest::SYSTEM_SETUP, &[])?),
+        ("os_release", os_release(&variant.contract, flavour)),
+        ("capabilities", distro_contract::capabilities_text().to_string()),
+        ("admin_rule_file", privilege.admin_rule_file().to_string()),
+        ("admin_rule", privilege.admin_rule()),
+    ];
+    if flavour == Flavour::Desktop {
+        texts.push(("display_manager", variant.contract.desktop.display_manager.clone()));
+    }
+    Ok(texts)
+}
+
+/// The fields of the configured tree's key: everything steps 1 to 4 read,
+/// and no more (see `configured`).
+fn configured_fields(
+    variant: &Variant,
+    flavour: Flavour,
+    locks: &[Flavour],
+    effects_recipe: &Path,
+    recipe: &Path,
+    texts: &[(&'static str, String)],
+) -> Result<Vec<(String, String)>> {
+    use sha2::{Digest, Sha256};
+    let repo = &variant.repo_root;
+    let sha256 = |bytes: &[u8]| Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect::<String>();
+    let mut fields = vec![
+        ("distro".to_string(), variant.id.clone()),
+        ("flavour".to_string(), flavour.to_string()),
+    ];
+    for lock in locks {
+        let rows = lock_rows(&preseed_recipe(variant, *lock))?;
+        let text: String = rows.iter().map(|row| format!("{} {}\n", row.sha256, row.id)).collect();
+        fields.push((format!("lock-{lock}"), sha256(text.as_bytes())));
+    }
+    match variant.contract.profile.packages {
+        PackageBackend::Rpm => {
+            fields.push(("backend".into(), "rpm".into()));
+            fields.push((
+                "unpack-recipe".into(),
+                compose::recipe_identity(repo, &repo.join(compose::RPM_UNPACK_RECIPE))?,
+            ));
+            fields.push(("unpack-format".into(), compose::UNPACK_FORMAT.to_string()));
+            fields.push(("compose-format".into(), compose::COMPOSE_FORMAT.to_string()));
+        }
+        PackageBackend::Apk => {
+            fields.push(("backend".into(), "apk".into()));
+            fields.push((
+                "base-tree-recipe".into(),
+                compose::recipe_identity(repo, &repo.join(compose::APK_BASE_TREE_RECIPE))?,
+            ));
+        }
+    }
+    fields.push(("effects-recipe".into(), compose::recipe_identity(repo, effects_recipe)?));
+    fields.push(("system-recipe".into(), compose::recipe_identity(repo, recipe)?));
+    for (name, text) in texts {
+        fields.push((format!("text-{name}"), sha256(text.as_bytes())));
+    }
+    if flavour == Flavour::Desktop {
+        for (name, file) in distro_contract::BRANDING {
+            fields.push((format!("branding-{name}"), crate::prebuilt::file_digest(&variant.path(file))?));
+        }
+    }
+    fields.push(("behaviour".into(), crate::prebuilt::behaviour()));
+    fields.push(("compiler-image".into(), crate::recipe::compiler_image_reference(repo)?));
+    if crate::recipe::exact_identity() {
+        fields.push(("declared".into(), levitate_recipe::identity::declared()));
+        fields.push(("recipe-cli".into(), crate::parts::file_sha256(crate::recipe::binary(repo)?)?.0));
+        fields.push(("ginux-launcher".into(), crate::parts::file_sha256(crate::recipe::ginux_binary(repo)?)?.0));
+    }
+    Ok(fields)
 }
 
 /// A recipe's file stem, for its work directory.

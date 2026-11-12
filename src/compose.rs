@@ -47,10 +47,10 @@ use crate::recipe::Invocation;
 pub(crate) const RPM_UNPACK_RECIPE: &str = "distro/builder/os-recipes/fedora-rpm-unpack.rhai";
 /// The version of the unpack store's layout (`root/`, `members.json`,
 /// `unpacked.json`); part of every unpack key.
-const UNPACK_FORMAT: u32 = 1;
+pub(crate) const UNPACK_FORMAT: u32 = 1;
 /// The version of composition and of the composed tree's layout; part of
 /// every compose key.
-const COMPOSE_FORMAT: u32 = 1;
+pub(crate) const COMPOSE_FORMAT: u32 = 1;
 /// At most this many package bytes (compressed) and packages go to one
 /// unpack shard: a Ginux domain keeps its files in memory, and the unpack
 /// recipe's object limit is sized for one shard.
@@ -59,7 +59,7 @@ const SHARD_PACKAGES: usize = 250;
 /// At most this many shards run at once.
 const MAX_WORKERS: usize = 6;
 
-fn store(repo: &Path) -> PathBuf {
+pub(crate) fn store(repo: &Path) -> PathBuf {
     repo.join(".artifacts/store")
 }
 
@@ -72,7 +72,7 @@ fn hex(bytes: &[u8]) -> String {
 }
 
 /// A key over named fields, each length-prefixed.
-fn key(fields: &[(&str, &str)]) -> String {
+pub(crate) fn key(fields: &[(&str, &str)]) -> String {
     let mut hasher = Sha256::new();
     for (name, value) in fields {
         for text in [name, value] {
@@ -145,7 +145,7 @@ pub(crate) fn package_files(repo: &Path, rows: &[LockRow], preseed_dirs: &[PathB
 
 /// What the unpack recipe's results depend on besides the package: its
 /// sources (the recipe and its imports, by content), as one line.
-fn recipe_identity(repo: &Path, recipe: &Path) -> Result<String> {
+pub(crate) fn recipe_identity(repo: &Path, recipe: &Path) -> Result<String> {
     let os_recipes = repo.join("distro/builder/os-recipes");
     let declaration = levitate_recipe::needs::declaration(recipe, Some(&os_recipes))
         .with_context(|| format!("reading the declaration of '{}'", recipe.display()))?;
@@ -778,7 +778,7 @@ fn clone_tree(src: &Path, dst: &Path) -> Result<()> {
 
 /// Removes what earlier compositions of `key` left when they died; only
 /// under the key's lock.
-fn remove_unfinished(parent: &Path, key: &str) -> Result<()> {
+pub(crate) fn remove_unfinished(parent: &Path, key: &str) -> Result<()> {
     let prefix = format!(".tmp-{key}-");
     for entry in fs::read_dir(parent)? {
         let entry = entry?;
@@ -867,7 +867,7 @@ fn lock_buckets<'a>(dir: &Path, keys: impl Iterator<Item = &'a str>, doing: &str
 }
 
 /// `flock(operation)`: false when a non-blocking lock is held elsewhere.
-fn flock(file: &fs::File, operation: libc::c_int) -> Result<bool> {
+pub(crate) fn flock(file: &fs::File, operation: libc::c_int) -> Result<bool> {
     loop {
         // SAFETY: flock only reads the descriptor of the open lock file.
         if unsafe { libc::flock(file.as_raw_fd(), operation) } == 0 {

@@ -1,3 +1,4 @@
+pub(crate) mod configured;
 pub(crate) mod io;
 pub mod kernel;
 pub(crate) mod live_tools;

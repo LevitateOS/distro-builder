@@ -69,6 +69,15 @@ fn report_tools(ctx) {
         "/usr/bin/make --version 2>&1 | head -1";
     try { log("tools in this root:\n" + exec_output("sh", ["-c", probe], #{ env: tools_env(ctx) })); }
     catch (err) { log("could not inspect this root's tools: " + err); }
+    // CMake's own account of where it looked for the build program, and why
+    // each candidate was refused.
+    let trace = "cmake -S \"$1\" -B \"$2\" -G 'Unix Makefiles' --debug-find-var=CMAKE_MAKE_PROGRAM 2>&1 | " +
+        "grep -v '^$' | tail -60";
+    try {
+        log("cmake's search for the build program:\n" + exec_output("sh",
+            ["-c", trace, "trace", source(ctx), join_path(ctx.runtime.paths.build, "cmake-trace")],
+            #{ env: tools_env(ctx) }));
+    } catch (err) { log("could not trace cmake's search: " + err); }
 }
 
 fn build(ctx) {

@@ -478,9 +478,7 @@ pub(crate) fn build_tool_tree(
     // Explicit inputs give the recipe no ambient access to the host image.
     let reference_file = tempfile::NamedTempFile::new()?;
     if package == "levitate-recipe" {
-        let reference = levitate_recipe::runtime::root_reference()?;
-        levitate_recipe::runtime::root_digest(&reference)?;
-        let image = levitate_recipe::runtime::rootfs_path(&reference)?;
+        let (reference, image) = super::runtime_image(repo)?;
         fs::write(reference_file.path(), format!("{reference}\n"))?;
         invocation = invocation
             .input("catalog", &repo.join("recipes"))

@@ -141,6 +141,21 @@ pub fn exact_identity() -> bool {
         || std::env::var_os(crate::parts::SIGNING_KEY_ENV).is_some()
 }
 
+/// The root image Recipe runs in, as `(reference, rootfs tar)`: the ambient
+/// `GINUX_ROOT`/`GINUX_ROOTFS` when the builder's environment sets them (as
+/// Recipe itself reads them), else the pinned compiler image `compiler_image`
+/// selects. The same image the builder's Recipe runs use, and the one the
+/// installed Recipe ships.
+pub(crate) fn runtime_image(repo: &Path) -> Result<(String, PathBuf)> {
+    if let Some(selected) = compiler_image(repo)? {
+        return Ok(selected);
+    }
+    let reference = levitate_recipe::runtime::root_reference()?;
+    levitate_recipe::runtime::root_digest(&reference)?;
+    let image = levitate_recipe::runtime::rootfs_path(&reference)?;
+    Ok((reference, image))
+}
+
 /// The Ginux crate's directory, the cargo target it builds for, and its binary.
 const GINUX_DIR: &str = "tools/ginux";
 const GINUX_TARGET: &str = "x86_64-unknown-linux-gnu";

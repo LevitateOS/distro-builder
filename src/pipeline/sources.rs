@@ -62,7 +62,7 @@ pub fn system_sources_digest(repo: &Path, distro_id: &str) -> Result<String> {
     // This pinned tar ships with Recipe in the installed system. Recipe verifies
     // the selected input's bytes against this reference before publishing it.
     hasher.update(b"recipe runtime image\0");
-    hasher.update(levitate_recipe::runtime::root_reference()?.as_bytes());
+    hasher.update(crate::recipe::compiler_image_reference(&repo)?.as_bytes());
     hasher.update([0]);
     // The workspace's manifest and locks pick the tools' and TUI's dependencies.
     for file in ["Cargo.toml", "Cargo.lock", "package.json", "bun.lock"] {

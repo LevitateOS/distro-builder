@@ -79,7 +79,7 @@ pub fn create_erofs(
         .args(["-z", &compression_arg])
         .args(["-C", &chunk_size.to_string()])
         .arg("--tar=f")
-        .arg("-T0")
+        .arg(format!("-T{IMAGE_TIMESTAMP}"))
         .arg(output)
         .arg(pinned_archive)
         .error_msg("mkfs.erofs importing the rootfs tar")
@@ -132,6 +132,14 @@ fn format_size_human(bytes: u64) -> String {
         format!("{value:.1} {}", UNITS[unit])
     }
 }
+
+/// The one modification time every inode of an image gets: fixed, so images
+/// stay reproducible, but not the Unix epoch. SDDM rereads its configuration
+/// only when a file is newer than what it last read, and treats files dated
+/// 1970-01-01 as never changed: with `-T0` it ignored every sddm.conf.d drop-in
+/// on both systems (no autologin; on LevitateOS no KWin greeter, so its default
+/// weston greeter failed in a loop). 2026-01-01 00:00:00 UTC.
+pub(crate) const IMAGE_TIMESTAMP: u64 = 1_767_225_600;
 
 /// EROFS settings for the rootfs and live overlay images.
 pub(crate) const EROFS_COMPRESSION: &str = "zstd";

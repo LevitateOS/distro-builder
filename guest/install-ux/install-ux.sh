@@ -15,7 +15,7 @@ if [ "${1:-}" = "--probe" ]; then
 fi
 
 if [ "${@SMOKE@:-0}" = "1" ]; then
-    exec @SPLIT@ --smoke --left @LEFT@ --right @DOCS_ARGV@
+    exec @SPLIT@ --smoke @LOOK@ --left @LEFT@ --right @DOCS_ARGV@
 fi
 
 # A serial console runs the screen only when the boot asks for it; a boot
@@ -28,6 +28,6 @@ for serial in @SERIAL_CONSOLES@; do
     fi
 done
 
-@SPLIT@ --left @LEFT@ --right @DOCS_ARGV@ ||
+@SPLIT@ @LOOK@ --left @LEFT@ --right @DOCS_ARGV@ ||
     echo "The install screen stopped with an error; starting a shell."
 exec "$SHELL" -l

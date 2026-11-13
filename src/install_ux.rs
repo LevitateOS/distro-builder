@@ -15,7 +15,8 @@
 
 use anyhow::{bail, Context, Result};
 use distro_contract::install_ux::{APPS, BIN_DIR, CONSOLES, DOCS, DOCS_PAGE, DOCS_PANE, HUB, SHELL};
-use distro_contract::Profile;
+use distro_contract::profile::Appearance;
+use distro_contract::{LookContract, Profile};
 use std::path::Path;
 
 use crate::artifact::filesystem::write_file;
@@ -92,6 +93,28 @@ pub(crate) fn consoles() -> Vec<String> {
     CONSOLES.iter().map(|console| console.to_string()).collect()
 }
 
+/// The split pane's colours: `--look ROLE=#RRGGBB` for each role it draws with, from
+/// the palette of the mode the variant starts in. Roles, not names: the key bar is
+/// `surface_sunken` with `text_muted` labels, keycaps `text` on `rule`, a pane's
+/// notice `warn`, and a dimmed pane fades toward `surface`.
+fn split_look_args(appearance: Appearance, look: &LookContract) -> Vec<String> {
+    let palette = match appearance {
+        Appearance::Light => &look.light,
+        Appearance::Dark => &look.dark,
+    };
+    [
+        ("surface", &palette.surface),
+        ("surface_sunken", &palette.surface_sunken),
+        ("text", &palette.text),
+        ("text_muted", &palette.text_muted),
+        ("rule", &palette.rule),
+        ("warn", &palette.warn),
+    ]
+    .into_iter()
+    .flat_map(|(role, hex)| ["--look".to_string(), format!("{role}={hex}")])
+    .collect()
+}
+
 /// Writes the install screen into `overlay`: the TUI apps and the launcher. The
 /// split pane must already be there; `rootfs` is the root the overlay goes on.
 pub(crate) fn write_payload(
@@ -100,6 +123,7 @@ pub(crate) fn write_payload(
     overlay: &Path,
     os_name: &str,
     profile: &Profile,
+    look: &LookContract,
 ) -> Result<()> {
     if !overlay.join(SPLIT).is_file() {
         bail!(
@@ -137,6 +161,7 @@ pub(crate) fn write_payload(
         .context("building the install screen's TUI apps")?;
 
     let [hub, docs] = screen.panes(os_name)?;
+    let look_args = split_look_args(profile.appearance, look);
     let serial: Vec<String> = CONSOLES
         .iter()
         .filter(|console| console.starts_with("ttyS"))
@@ -150,6 +175,7 @@ pub(crate) fn write_payload(
             ("SHELL", Word(SHELL)),
             ("LEFT", Argv(&hub)),
             ("SPLIT", Word(&split)),
+            ("LOOK", Argv(&look_args)),
             ("DOCS_ARGV", Argv(&docs)),
             ("SERIAL_CONSOLES", Argv(&serial)),
             ("SERIAL_KEY", Word(SERIAL_KEY)),

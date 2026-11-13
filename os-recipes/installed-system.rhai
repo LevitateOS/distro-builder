@@ -634,34 +634,318 @@ fn cursor_theme(desktop) {
     if desktop == "plasma" { "breeze_cursors" } else if desktop == "lxqt" { "Adwaita" } else { throw "no cursor theme for the desktop " + desktop }
 }
 
-// The desktop's look for every user who has not chosen another, until the
-// variants' own themes exist: one cursor theme for X, GTK, Qt and the login
-// screen (the `default` icon theme, which every toolkit falls back to);
-// Plasma dark, with Fedora's dark Global Theme (Breeze Dark colours and
-// icons; its wallpaper is the variant's, through wallpaper()), and the About
-// page showing the variant's mark and website; LXQt light, as its packaged
-// settings already are (Fusion widgets, Breeze icons), with GTK apps
-// (Firefox, Mousepad, Simple Scan) in Adwaita with the same icons, cursor and
-// font.
+// ---------------------------------------------------------------------------
+// The look: the mode the desktop starts in (REC_APPEARANCE, from the variant's
+// `profile.appearance`) and the variant's colours in each mode (the builder's
+// `look` input, from `[look.light]` and `[look.dark]`). Every choice below is
+// keyed on the mode, never on the desktop; the desktop only says which files
+// carry it.
+// ---------------------------------------------------------------------------
+
+// The mode the desktop starts in: "light" or "dark".
+fn appearance(inputs) {
+    let mode = os_release_field(inputs, "REC_APPEARANCE");
+    if mode != "light" && mode != "dark" { throw "unknown appearance " + mode + " (light or dark)"; }
+    mode
+}
+// The roles of a palette (distro_contract::Palette).
+fn palette_roles() {
+    ["surface", "surface_raised", "surface_sunken", "text", "text_secondary", "text_muted", "rule", "hairline",
+     "accent", "highlight", "band", "on_band", "ok", "warn", "bad"]
+}
+// Mode `mode`'s palette from the `look` input: role -> "#RRGGBB".
+fn palette(inputs, mode) {
+    let colours = #{};
+    let prefix = mode + ".";
+    for line in read_file(join_path(inputs, "look")).split("\n") {
+        if !line.starts_with(prefix) { continue; }
+        let pair = line.sub_string(prefix.len()).split("=");
+        if pair.len() != 2 { throw "malformed look line: " + line; }
+        colours[pair[0]] = trim(pair[1]);
+    }
+    for role in palette_roles() {
+        if !colours.contains(role) { throw "the look input has no " + mode + "." + role; }
+        let hex = colours[role];
+        if hex.len() != 7 || !hex.starts_with("#") { throw "look colour " + mode + "." + role + " is not #RRGGBB: " + hex; }
+    }
+    colours
+}
+// A palette's colours as [r, g, b] (0-255).
+fn rgb_palette(p) {
+    let out = #{};
+    for role in palette_roles() {
+        out[role] = rgb(p[role]);
+    }
+    out
+}
+// `a` moved towards `b` by `t` (0.0 to 1.0); both [r, g, b].
+fn mix(a, b, t) {
+    let out = [];
+    for i in 0..3 { out.push((a[i].to_float() * (1.0 - t) + b[i].to_float() * t).round().to_int()); }
+    out
+}
+// "r,g,b", as KDE and Konsole write a colour.
+fn kde(c) { "" + c[0] + "," + c[1] + "," + c[2] }
+// Whether a colour is dark (relative luminance under one half).
+fn is_dark(c) {
+    (0.2126 * c[0].to_float() + 0.7152 * c[1].to_float() + 0.0722 * c[2].to_float()) / 255.0 < 0.5
+}
+// The palette (as [r, g, b]) whose accent and status colours read on `bg`:
+// the dark mode's on a dark background, the light mode's on a light one.
+fn palette_on(inputs, bg) {
+    let mode = if is_dark(bg) { "dark" } else { "light" };
+    rgb_palette(palette(inputs, mode))
+}
+// The icon theme of the mode (Breeze on both desktops).
+fn icon_theme(mode) { if mode == "dark" { "breeze-dark" } else { "breeze" } }
+// The colour schemes' name for mode `mode`: the OS's name and the mode
+// ("LevitateOSLight"), the name of a KDE colour scheme and of a terminal scheme.
+fn scheme_name(inputs, mode) {
+    let name = pretty_name(inputs).replace(" ", "");
+    name + (if mode == "dark" { "Dark" } else { "Light" })
+}
+
+// `text` (an INI file) with `key` in `section` set to `value`: the line
+// replaced where the key is there, added at the end of the section where it
+// is not, and the section added at the end where the file lacks it.
+fn ini_set(text, section, key, value) {
+    if text.ends_with("\n") { text = text.sub_string(0, text.len() - 1); }
+    let out = "";
+    let current = "";
+    let seen = false;
+    let done = false;
+    for line in text.split("\n") {
+        let t = trim(line);
+        if t.starts_with("[") && t.ends_with("]") {
+            if current == section && !done { out += key + "=" + value + "\n"; done = true; }
+            current = t.sub_string(1, t.len() - 2);
+            if current == section { seen = true; }
+        } else if current == section && t.starts_with(key + "=") {
+            if !done { out += key + "=" + value + "\n"; done = true; }
+            continue;
+        }
+        out += line + "\n";
+    }
+    if !done {
+        if !seen { out += "\n[" + section + "]\n"; }
+        out += key + "=" + value + "\n";
+    }
+    out
+}
+
+// One group of a KDE colour scheme: backgrounds `bg` and `alt`, text `fg`,
+// `inactive` text, the `active`, link and focus colour `active`, `visited`
+// links, and `status`'s ok, warn and bad as positive, neutral and negative.
+fn kde_group(name, bg, alt, fg, inactive, active, visited, status) {
+    let t = "[" + name + "]\n";
+    t += "BackgroundAlternate=" + kde(alt) + "\nBackgroundNormal=" + kde(bg) + "\n";
+    t += "DecorationFocus=" + kde(active) + "\nDecorationHover=" + kde(active) + "\n";
+    t += "ForegroundActive=" + kde(active) + "\nForegroundInactive=" + kde(inactive) + "\n";
+    t += "ForegroundLink=" + kde(active) + "\nForegroundNegative=" + kde(status.bad) + "\n";
+    t += "ForegroundNeutral=" + kde(status.warn) + "\nForegroundNormal=" + kde(fg) + "\n";
+    t += "ForegroundPositive=" + kde(status.ok) + "\nForegroundVisited=" + kde(visited) + "\n\n";
+    t
+}
+// The colour groups of mode `mode`'s KDE colour scheme, from its palette:
+// window surface, views raised with sunken alternate rows, the accent for
+// selection (with surface text), focus, hover and links, the highlight for
+// visited links, ok/warn/bad for positive/neutral/negative, and the band
+// (with on_band text) for headers, title bars and the complementary areas
+// (login and lock screens, OSDs). The effects are Breeze's.
+fn kde_colour_groups(inputs, mode) {
+    let p = rgb_palette(palette(inputs, mode));
+    let s = palette_on(inputs, p.accent);
+    let b = palette_on(inputs, p.band);
+    let t = "[ColorEffects:Disabled]\nColor=56,56,56\nColorAmount=0\nColorEffect=0\nContrastAmount=0.65\nContrastEffect=1\nIntensityAmount=0.1\nIntensityEffect=2\n\n";
+    t += "[ColorEffects:Inactive]\nChangeSelectionColor=true\nColor=112,111,110\nColorAmount=0.025\nColorEffect=2\nContrastAmount=0.1\nContrastEffect=2\nEnable=false\nIntensityAmount=0\nIntensityEffect=0\n\n";
+    t += kde_group("Colors:Button", p.surface_raised, mix(p.surface_raised, p.accent, 0.25), p.text, p.text_muted, p.accent, p.highlight, p);
+    t += kde_group("Colors:Complementary", p.band, mix(p.band, p.on_band, 0.1), p.on_band, mix(p.on_band, p.band, 0.35), b.accent, b.highlight, b);
+    t += kde_group("Colors:Header", p.band, mix(p.band, p.on_band, 0.1), p.on_band, mix(p.on_band, p.band, 0.35), b.accent, b.highlight, b);
+    t += kde_group("Colors:Header][Inactive", p.surface, p.surface_sunken, p.text, p.text_muted, p.accent, p.highlight, p);
+    t += kde_group("Colors:Selection", p.accent, mix(p.accent, p.surface, 0.5), p.surface, mix(p.surface, p.accent, 0.3), p.surface, p.surface, s);
+    t += kde_group("Colors:Tooltip", p.surface_raised, p.surface, p.text, p.text_muted, p.accent, p.highlight, p);
+    t += kde_group("Colors:View", p.surface_raised, p.surface_sunken, p.text, p.text_muted, p.accent, p.highlight, p);
+    t += kde_group("Colors:Window", p.surface, p.surface_sunken, p.text, p.text_muted, p.accent, p.highlight, p);
+    t += "[WM]\nactiveBackground=" + kde(p.band) + "\nactiveBlend=" + kde(p.band) + "\nactiveForeground=" + kde(p.on_band) + "\n";
+    t += "inactiveBackground=" + kde(p.surface_sunken) + "\ninactiveBlend=" + kde(p.surface_sunken) + "\ninactiveForeground=" + kde(p.text_muted) + "\n\n";
+    t
+}
+// Mode `mode`'s whole KDE colour scheme file.
+fn kde_colour_scheme(inputs, mode) {
+    let t = kde_colour_groups(inputs, mode);
+    t += "[General]\nColorScheme=" + scheme_name(inputs, mode) + "\nName=" + pretty_name(inputs) + (if mode == "dark" { " Dark" } else { " Light" }) + "\nshadeSortColumn=true\n\n";
+    t += "[KDE]\ncontrast=4\n";
+    t
+}
+
+// The terminal's blue, magenta and cyan for mode `mode` (the same on both
+// distros): the look palette has no such hues, and its accent and highlight
+// sit too close to green and yellow to tell apart in `ls`, diffs and
+// compiler output.
+fn terminal_hues(mode) {
+    if mode == "dark" { #{ blue: "#9BB8D9", magenta: "#D4A5C9", cyan: "#9ACFC4" } }
+    else { #{ blue: "#2A5C8A", magenta: "#7A3F6E", cyan: "#1F6F6B" } }
+}
+// "#RRGGBB" as [r, g, b].
+fn rgb(hex) { [parse_int(hex.sub_string(1, 2), 16), parse_int(hex.sub_string(3, 2), 16), parse_int(hex.sub_string(5, 2), 16)] }
+
+// Mode `mode`'s terminal colour scheme (Konsole's and QTermWidget's format):
+// the palette's surface behind its text, and a 16-colour set at least 3:1 on
+// that surface: black the text on light (on dark, the muted text dimmed
+// towards the surface, which still reads), bright black the muted text,
+// white the secondary text and bright white the text; red, green, yellow
+// bad, ok, warn; blue, magenta, cyan terminal_hues. Bright colours lean
+// towards the text, faint ones towards the surface.
+fn terminal_scheme(inputs, mode) {
+    let p = rgb_palette(palette(inputs, mode));
+    let hues = terminal_hues(mode);
+    let blue = rgb(hues.blue);
+    let magenta = rgb(hues.magenta);
+    let cyan = rgb(hues.cyan);
+    let black = if mode == "dark" { mix(p.text_muted, p.surface, 0.35) } else { p.text };
+    let colours = [
+        [black, p.text_muted],
+        [p.bad, mix(p.bad, p.text, 0.25)],
+        [p.ok, mix(p.ok, p.text, 0.25)],
+        [p.warn, mix(p.warn, p.text, 0.25)],
+        [blue, mix(blue, p.text, 0.25)],
+        [magenta, mix(magenta, p.text, 0.25)],
+        [cyan, mix(cyan, p.text, 0.25)],
+        [p.text_secondary, p.text],
+    ];
+    let t = "[Background]\nColor=" + kde(p.surface) + "\n\n[BackgroundFaint]\nColor=" + kde(p.surface) + "\n\n[BackgroundIntense]\nColor=" + kde(p.surface) + "\n\n";
+    for i in 0..8 {
+        let c = colours[i];
+        t += "[Color" + i + "]\nColor=" + kde(c[0]) + "\n\n";
+        t += "[Color" + i + "Faint]\nColor=" + kde(mix(c[0], p.surface, 0.5)) + "\n\n";
+        t += "[Color" + i + "Intense]\nColor=" + kde(c[1]) + "\n\n";
+    }
+    t += "[Foreground]\nColor=" + kde(p.text) + "\n\n[ForegroundFaint]\nColor=" + kde(p.text_secondary) + "\n\n[ForegroundIntense]\nColor=" + kde(p.text) + "\n\n";
+    t += "[General]\nBlur=false\nColorRandomization=false\nDescription=" + pretty_name(inputs) + (if mode == "dark" { " Dark" } else { " Light" }) + "\nOpacity=1\nWallpaper=\n";
+    t
+}
+
+// The desktop's look for every user who has not chosen another, in the mode
+// it starts in (appearance) and the variant's colours: one cursor theme for
+// X, GTK, Qt and the login screen (the `default` icon theme, which every
+// toolkit falls back to), then the desktop's own files (plasma_look,
+// lxqt_look) and its terminal's colours.
 fn look_defaults(root, inputs) {
     let desktop = os_release_field(inputs, "REC_DESKTOP");
+    let mode = appearance(inputs);
     let cursor = cursor_theme(desktop);
     if !is_dir(join_path(root, "usr/share/icons/" + cursor + "/cursors")) { throw "the desktop packages lack the cursor theme " + cursor; }
+    if !is_file(join_path(root, "usr/share/icons/" + icon_theme(mode) + "/index.theme")) { throw "the desktop packages lack the icon theme " + icon_theme(mode); }
     put(root, "usr/share/icons/default/index.theme", "[Icon Theme]\nInherits=" + cursor + "\n", 0o644);
-    if desktop == "plasma" {
-        let look = "org.fedoraproject.fedoradark.desktop";
-        if !is_dir(join_path(root, "usr/share/plasma/look-and-feel/" + look)) { throw "the Plasma packages lack the Global Theme " + look; }
-        put(root, "etc/xdg/kdeglobals",
-            "[KDE]\nLookAndFeelPackage=" + look + "\n\n[General]\nColorScheme=BreezeDark\n\n[Icons]\nTheme=breeze-dark\n", 0o644);
-        let about = "[General]\nLogoPath=/usr/share/icons/hicolor/scalable/apps/distributor-logo-" + os_release_field(inputs, "ID") + ".svg\nVariant=Desktop\n";
-        let home = os_release_optional(inputs, "HOME_URL");
-        if home != "" { about += "Website=" + home + "\n"; }
-        put(root, "etc/xdg/kcm-about-distrorc", about, 0o644);
-    } else {
-        let gtk = "[Settings]\ngtk-theme-name=Adwaita\ngtk-icon-theme-name=breeze\ngtk-cursor-theme-name=" + cursor + "\ngtk-font-name=Sans 11\n";
-        put(root, "etc/gtk-3.0/settings.ini", gtk, 0o644);
-        put(root, "etc/gtk-4.0/settings.ini", gtk, 0o644);
+    if desktop == "plasma" { plasma_look(root, inputs, mode); }
+    else if desktop == "lxqt" { lxqt_look(root, inputs, mode, cursor); }
+    else { throw "no look for the desktop " + desktop; }
+}
+
+// Plasma: the colour schemes <OS>Light and <OS>Dark from the palettes; the
+// starting mode's scheme, Fedora's Global Theme of that mode, Breeze icons of
+// that mode and the scheme's own accent in /etc/xdg/kdeglobals, with the
+// scheme's colours there too (the login screen and apps outside the session
+// read them). Plasma copies the Global Theme's defaults into each user's
+// kdedefaults at login, ahead of /etc/xdg, so Fedora's light and dark Global
+// Themes name our schemes in place of Breeze's. The About page shows the
+// start button's mark and the website. Konsole's default profile uses the
+// starting mode's terminal scheme.
+fn plasma_look(root, inputs, mode) {
+    let lnf = "usr/share/plasma/look-and-feel/";
+    let look = if mode == "dark" { "org.fedoraproject.fedoradark.desktop" } else { "org.fedoraproject.fedoralight.desktop" };
+    if !is_dir(join_path(root, lnf + look)) { throw "the Plasma packages lack the Global Theme " + look; }
+    for m in ["light", "dark"] {
+        put(root, "usr/share/color-schemes/" + scheme_name(inputs, m) + ".colors", kde_colour_scheme(inputs, m), 0o644);
     }
+    let set = false;
+    for pair in [["org.fedoraproject.fedora.desktop", "BreezeLight", "light"], ["org.fedoraproject.fedoralight.desktop", "BreezeLight", "light"],
+                 ["org.fedoraproject.fedoradark.desktop", "BreezeDark", "dark"]] {
+        let defaults = lnf + pair[0] + "/contents/defaults";
+        if !is_file(join_path(root, defaults)) { continue; }
+        let text = read_file(join_path(root, defaults));
+        let packaged = "ColorScheme=" + pair[1] + "\n";
+        if !text.contains(packaged) { continue; }
+        text = text.replace(packaged, "ColorScheme=" + scheme_name(inputs, pair[2]) + "\n");
+        write_file(join_path(root, defaults), text);
+        if pair[0] == look { set = true; }
+    }
+    if !set { throw "the Global Theme " + look + " no longer names a Breeze colour scheme in its defaults"; }
+    let globals = "[KDE]\nLookAndFeelPackage=" + look + "\n\n";
+    globals += "[General]\nColorScheme=" + scheme_name(inputs, mode) + "\naccentColorFromWallpaper=false\n\n";
+    globals += "[Icons]\nTheme=" + icon_theme(mode) + "\n\n";
+    globals += kde_colour_groups(inputs, mode);
+    put(root, "etc/xdg/kdeglobals", globals, 0o644);
+    let about = "[General]\nLogoPath=/usr/share/icons/hicolor/scalable/apps/distributor-logo-" + os_release_field(inputs, "ID") + ".svg\nVariant=Desktop\n";
+    let home = os_release_optional(inputs, "HOME_URL");
+    if home != "" { about += "Website=" + home + "\n"; }
+    put(root, "etc/xdg/kcm-about-distrorc", about, 0o644);
+    // Konsole finds colour schemes and profiles in the data directories'
+    // konsole/; konsolerc names the profile new windows use.
+    if !is_file(join_path(root, "usr/bin/konsole")) { throw "the Plasma packages lack Konsole"; }
+    for m in ["light", "dark"] {
+        put(root, "usr/share/konsole/" + scheme_name(inputs, m) + ".colorscheme", terminal_scheme(inputs, m), 0o644);
+    }
+    let profile = pretty_name(inputs).replace(" ", "");
+    put(root, "usr/share/konsole/" + profile + ".profile",
+        "[Appearance]\nColorScheme=" + scheme_name(inputs, mode) + "\n\n[General]\nName=" + profile + "\nParent=FALLBACK/\n", 0o644);
+    let konsolerc = read_file_or_empty(join_path(root, "etc/xdg/konsolerc"));
+    put(root, "etc/xdg/konsolerc", ini_set(konsolerc, "Desktop Entry", "DefaultProfile", profile + ".profile"), 0o644);
+}
+
+// LXQt: its packaged settings (lxqt.conf) with the packaged LXQt theme of
+// the starting mode ("light" or "dark"), Breeze icons of that mode, Fusion
+// widgets and the Qt palette from the mode's colours; GTK apps (Firefox,
+// Mousepad, Simple Scan) in Adwaita with the same icons, cursor and font,
+// dark when the mode is; Openbox's packaged decoration that fits the mode;
+// and QTerminal's colours. The wallpaper and the desktop's text colours are
+// pcmanfm-qt's (wallpaper()).
+fn lxqt_look(root, inputs, mode, cursor) {
+    let p = palette(inputs, mode);
+    let packaged = join_path(root, "usr/share/lxqt/lxqt.conf");
+    if !is_file(packaged) { throw "the LXQt packages lack LXQt's settings"; }
+    // LXQt's light and dark themes are named after the mode.
+    if !is_dir(join_path(root, "usr/share/lxqt/themes/" + mode)) { throw "the LXQt packages lack the LXQt theme " + mode; }
+    let conf = read_file(packaged);
+    conf = ini_set(conf, "General", "theme", mode);
+    conf = ini_set(conf, "General", "icon_theme", icon_theme(mode));
+    conf = ini_set(conf, "Qt", "style", "Fusion");
+    // The keys LXQt's Qt platform plugin reads, as its packaged palettes
+    // (/usr/share/lxqt/palettes) write them.
+    for pair in [["window_color", p.surface], ["window_text_color", p.text], ["base_color", p.surface_raised],
+                 ["text_color", p.text], ["highlight_color", p.accent], ["highlighted_text_color", p.surface],
+                 ["link_color", p.accent], ["link_visited_color", p.highlight],
+                 ["tooltip_base_color", p.surface_raised], ["tooltip_text_color", p.text]] {
+        conf = ini_set(conf, "Palette", pair[0], pair[1]);
+    }
+    put(root, "etc/xdg/lxqt/lxqt.conf", conf, 0o644);
+    let gtk = "[Settings]\ngtk-theme-name=Adwaita\ngtk-icon-theme-name=" + icon_theme(mode) + "\ngtk-cursor-theme-name=" + cursor + "\ngtk-font-name=Sans 11\n";
+    gtk += "gtk-application-prefer-dark-theme=" + (if mode == "dark" { "true" } else { "false" }) + "\n";
+    put(root, "etc/gtk-3.0/settings.ini", gtk, 0o644);
+    put(root, "etc/gtk-4.0/settings.ini", gtk, 0o644);
+    // Openbox reads /etc/xdg/openbox/rc.xml when the user has none. Its
+    // packaged themes have no fully dark one: Onyx has dark active title bars
+    // and menus; Clearlooks (the packaged choice) is light.
+    let decoration = if mode == "dark" { "Onyx" } else { "Clearlooks" };
+    if !is_file(join_path(root, "usr/share/themes/" + decoration + "/openbox-3/themerc")) { throw "the LXQt packages lack the Openbox theme " + decoration; }
+    let rc = "etc/xdg/openbox/rc.xml";
+    if !is_file(join_path(root, rc)) { throw "the LXQt packages lack Openbox's settings"; }
+    let xml = read_file(join_path(root, rc));
+    let theme = xml.index_of("<theme>");
+    let open = if theme < 0 { -1 } else { xml.index_of("<name>", theme) };
+    let close = if open < 0 { -1 } else { xml.index_of("</name>", open) };
+    if close < 0 { throw "Openbox's settings name no theme"; }
+    xml = xml.sub_string(0, open + 6) + decoration + xml.sub_string(close);
+    put(root, rc, xml, 0o644);
+    // QTermWidget finds colour schemes by file name in its color-schemes
+    // directory; QTerminal reads its settings (QSettings, qterminal.org) from
+    // /etc/xdg when the user has none.
+    let schemes = "usr/share/qtermwidget6/color-schemes/";
+    if !is_dir(join_path(root, schemes)) { throw "the LXQt packages lack QTermWidget's colour schemes"; }
+    for m in ["light", "dark"] {
+        put(root, schemes + scheme_name(inputs, m) + ".colorscheme", terminal_scheme(inputs, m), 0o644);
+    }
+    put(root, "etc/xdg/qterminal.org/qterminal.ini", "[General]\ncolorScheme=" + scheme_name(inputs, mode) + "\n", 0o644);
 }
 
 // Menu entries of the packages that do nothing useful here, hidden (still
@@ -706,13 +990,15 @@ fn desktop_polkit(root, inputs) {
 
 // The variant's mark (the builder's `logo_*` inputs) as the icon
 // distributor-logo-<os id> of the fallback icon theme, and on the start
-// button of the desktop (REC_DESKTOP), in the colour its panel needs.
+// button of the desktop (REC_DESKTOP), in the colour its panel needs: the
+// panel follows the mode the desktop starts in (appearance), so the ink mark
+// on light and the paper mark on dark. The About page shows the same icon.
 fn start_button(root, inputs) {
     let icons = "usr/share/icons/hicolor/";
     if !is_file(join_path(root, icons + "index.theme")) { throw "the desktop packages lack the hicolor icon theme"; }
     let desktop = os_release_field(inputs, "REC_DESKTOP");
-    // Plasma's panel is dark under Fedora's look; LXQt's default theme has a light one.
-    let tone = if desktop == "plasma" { "paper" } else if desktop == "lxqt" { "ink" } else { throw "no start button for the desktop " + desktop };
+    if desktop != "plasma" && desktop != "lxqt" { throw "no start button for the desktop " + desktop; }
+    let tone = if appearance(inputs) == "dark" { "paper" } else { "ink" };
     let name = "distributor-logo-" + os_release_field(inputs, "ID");
     let icon = icons + "scalable/apps/" + name + ".svg";
     for file in [[icon, "logo_" + tone], [icons + "16x16/apps/" + name + ".svg", "logo_micro_" + tone]] {
@@ -751,15 +1037,19 @@ fn start_button(root, inputs) {
 // The variant's wallpapers (the builder's `wallpaper_light` and
 // `wallpaper_dark` inputs, 3840x2160 JPEGs) as a wallpaper package under the
 // OS's name, and the default background of the desktop (REC_DESKTOP) for
-// every user who has not chosen another. Returns the dark one's path in the
-// system.
+// every user who has not chosen another: the one of the mode the desktop
+// starts in (appearance). Returns that one's path in the system.
 fn wallpaper(root, inputs) {
     let name = pretty_name(inputs);
     let wallpapers = "usr/share/wallpapers/" + name;
     // Plasma reads an image's size from its file name, and shows the
-    // images_dark one under a dark colour scheme.
+    // images_dark one under a dark colour scheme, the images one under a
+    // light one: the starting mode's scheme picks the mode's image.
+    let light = wallpapers + "/contents/images/3840x2160.jpg";
     let dark = wallpapers + "/contents/images_dark/3840x2160.jpg";
-    for image in [[wallpapers + "/contents/images/3840x2160.jpg", "wallpaper_light"], [dark, "wallpaper_dark"]] {
+    let mode = appearance(inputs);
+    let shown = if mode == "dark" { dark } else { light };
+    for image in [[light, "wallpaper_light"], [dark, "wallpaper_dark"]] {
         mkdir(dirname(join_path(root, image[0])));
         copy_file(join_path(inputs, image[1]), join_path(root, image[0]));
         target_mode(root, image[0], 0o644);
@@ -777,28 +1067,36 @@ fn wallpaper(root, inputs) {
     } else if desktop == "lxqt" {
         // pcmanfm-qt draws the desktop and reads one whole settings file, the
         // first on the configuration path: the packaged one, with our
-        // wallpaper, in /etc/xdg ahead of it. LXQt does not follow a light or
-        // dark look, so it shows the dark one; the light one is in the package.
+        // wallpaper, the mode's icons and desktop text in the mode's colours
+        // (text with a shadow of the surface, which reads on that mode's
+        // wallpaper), in /etc/xdg ahead of it. LXQt does not switch the
+        // wallpaper with the look; the other one is in the package.
         let packaged = join_path(root, "usr/share/pcmanfm-qt/lxqt/settings.conf");
         if !is_file(packaged) { throw "the LXQt packages lack pcmanfm-qt's desktop settings"; }
-        let text = "";
-        let set = 0;
-        for line in read_file(packaged).split("\n") {
-            if line.starts_with("Wallpaper=") { line = "Wallpaper=/" + dark; set += 1; }
-            else if line.starts_with("WallpaperMode=") { line = "WallpaperMode=zoom"; set += 1; }
-            text += line + "\n";
+        let text = read_file(packaged);
+        for key in ["Wallpaper=", "WallpaperMode=", "BgColor=", "FgColor=", "ShadowColor="] {
+            if !text.contains("\n" + key) { throw "pcmanfm-qt's desktop settings have no " + key; }
         }
-        if set != 2 { throw "pcmanfm-qt's desktop settings do not name a wallpaper and its mode"; }
+        let p = palette(inputs, mode);
+        text = ini_set(text, "System", "IconThemeName", icon_theme(mode));
+        text = ini_set(text, "Desktop", "Wallpaper", "/" + shown);
+        text = ini_set(text, "Desktop", "WallpaperMode", "zoom");
+        text = ini_set(text, "Desktop", "BgColor", p.surface);
+        text = ini_set(text, "Desktop", "FgColor", p.text);
+        text = ini_set(text, "Desktop", "ShadowColor", p.surface);
         put(root, "etc/xdg/pcmanfm-qt/lxqt/settings.conf", text, 0o644);
     } else {
         throw "no default wallpaper for the desktop " + desktop;
     }
-    "/" + dark
+    "/" + shown
 }
 
 // The login screen: the display manager's theme of the desktop (REC_DESKTOP)
-// with `background`, the dark wallpaper, behind it, and the desktop's cursor
-// theme.
+// with `background`, the wallpaper of the starting mode, behind it, and the
+// desktop's cursor theme. Breeze's theme also takes a background colour (its
+// `color`, shown while the image loads): the mode's surface. Breeze draws in
+// the scheme of /etc/xdg/kdeglobals (plasma_look); the Maldives theme has no
+// colour settings.
 fn login_screen(root, inputs, display_manager, background) {
     if display_manager != "sddm" { throw "no login screen for the display manager " + display_manager; }
     let themes = "usr/share/sddm/themes/";
@@ -811,7 +1109,8 @@ fn login_screen(root, inputs, display_manager, background) {
         // a theme's theme.conf overrides it.
         theme = "breeze";
         if !is_file(join_path(root, themes + theme + "/theme.conf")) { throw "the Plasma packages lack SDDM's Breeze theme"; }
-        put(root, themes + theme + "/theme.conf.user", conf, 0o644);
+        let p = palette(inputs, appearance(inputs));
+        put(root, themes + theme + "/theme.conf.user", conf + "color=" + p.surface + "\n", 0o644);
         // Fedora's copy is not offered at all.
         let fedora = join_path(root, themes + "01-breeze-fedora");
         if exists(fedora) { rm(fedora); }

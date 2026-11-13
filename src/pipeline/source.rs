@@ -271,7 +271,9 @@ pub fn materialize_rootfs_source(variant: &Variant, flavour: Flavour) -> Result<
 }
 
 /// What the system recipe installs from the builder: the setup program and
-/// the system's identity; the desktop system also starts its display manager.
+/// the system's identity; the desktop system also starts its display manager
+/// and takes its colours (`look`). Each text is a field of the configured
+/// tree's key, so a palette change remakes the desktop tree.
 fn system_texts(variant: &Variant, flavour: Flavour) -> Result<Vec<(&'static str, String)>> {
     let privilege = variant.contract.profile.privilege;
     let mut texts = vec![
@@ -283,8 +285,24 @@ fn system_texts(variant: &Variant, flavour: Flavour) -> Result<Vec<(&'static str
     ];
     if flavour == Flavour::Desktop {
         texts.push(("display_manager", variant.contract.desktop.display_manager.clone()));
+        texts.push(("look", look(&variant.contract.look)?));
     }
     Ok(texts)
+}
+
+/// The variant's colours in both modes (`[look.light]` and `[look.dark]`), for
+/// the desktop's look: one `<mode>.<role>=#RRGGBB` line each, sorted.
+fn look(look: &distro_contract::LookContract) -> Result<String> {
+    let mut text = String::new();
+    for (mode, palette) in [("light", &look.light), ("dark", &look.dark)] {
+        let roles = serde_json::to_value(palette).context("rendering the look palette")?;
+        let roles = roles.as_object().context("a look palette is not a table")?;
+        for (role, colour) in roles {
+            let colour = colour.as_str().context("a look colour is not a string")?;
+            text.push_str(&format!("{mode}.{role}={colour}\n"));
+        }
+    }
+    Ok(text)
 }
 
 /// The fields of the configured tree's key: everything steps 1 to 4 read,

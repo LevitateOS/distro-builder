@@ -58,18 +58,91 @@ const HOST_KEYS: &[(HostKey, char, &str, &str)] = &[
     (HostKey::Quit, 'q', "Ctrl-q", "quit"),
 ];
 
-/// The colours of the key bar, from tui/kit/core/src/theme/palette.ts (the TypeScript
-/// theme is not available to this crate): `ink` is the dark surface, `rule` the
-/// keycap's cell, `paper` the key's text, `lichen` the labels, `night` the screen
-/// surface a dimmed pane fades toward, `sand` a pane's notice.
-const INK: Color = Color::Rgb(0x14, 0x22, 0x1a);
-const RULE: Color = Color::Rgb(0x3a, 0x4b, 0x40);
-const PAPER: Color = Color::Rgb(0xf2, 0xee, 0xe4);
-const LICHEN: Color = Color::Rgb(0x9a, 0xa8, 0x9d);
-const NIGHT: Color = Color::Rgb(0x0d, 0x17, 0x11);
-const SAND: Color = Color::Rgb(0xe4, 0xcb, 0xa6);
+/// The palette roles the host draws with, given on the command line as
+/// `--look ROLE=#RRGGBB`, one per role, from the distro's palette of its starting
+/// mode (the builder writes them into the launcher from the contract's `[look]`;
+/// the terminal apps in the panes draw from the same palette). There is no built-in
+/// palette: without all of them the host stops with a message.
+const LOOK_ROLES: [&str; 6] = [
+    "surface",
+    "surface_sunken",
+    "text",
+    "text_muted",
+    "rule",
+    "warn",
+];
+
 /// How far a pane without the keyboard fades toward its background, in percent.
 const DIM_PERCENT: u16 = 45;
+
+/// The key bar's and the dimming's colours, by palette role.
+#[derive(Clone, Copy)]
+struct Look {
+    /// The screen surface a dimmed pane fades toward (a light surface in light mode).
+    surface: Color,
+    /// The key bar's background.
+    bar: Color,
+    /// A keycap's text, and a default foreground when dimming.
+    text: Color,
+    /// The key bar's labels.
+    label: Color,
+    /// A keycap's cell.
+    rule: Color,
+    /// A pane's notice on the key bar.
+    warn: Color,
+}
+
+static LOOK: std::sync::OnceLock<Look> = std::sync::OnceLock::new();
+
+fn look() -> &'static Look {
+    LOOK.get().expect("the look is set before anything is drawn")
+}
+
+fn parse_hex(role: &str, value: &str) -> Result<Color> {
+    let digits = value.strip_prefix('#').unwrap_or("");
+    if digits.len() != 6 || !digits.chars().all(|c| c.is_ascii_hexdigit()) {
+        bail!("--look {role}={value}: expected #RRGGBB");
+    }
+    let byte = |i: usize| u8::from_str_radix(&digits[i..i + 2], 16).unwrap_or_default();
+    Ok(Color::Rgb(byte(0), byte(2), byte(4)))
+}
+
+impl Look {
+    /// The look from `--look ROLE=#RRGGBB` words; every role in [`LOOK_ROLES`] is required.
+    fn from_words(words: &[String]) -> Result<Self> {
+        let mut found: Vec<(&str, Color)> = Vec::new();
+        for word in words {
+            let (role, value) = word
+                .split_once('=')
+                .with_context(|| format!("--look {word}: expected ROLE=#RRGGBB"))?;
+            let Some(known) = LOOK_ROLES.iter().find(|known| **known == role) else {
+                bail!("--look {role}: unknown role (known: {})", LOOK_ROLES.join(", "));
+            };
+            found.push((known, parse_hex(role, value)?));
+        }
+        let get = |role: &str| -> Result<Color> {
+            found
+                .iter()
+                .find(|(name, _)| *name == role)
+                .map(|(_, color)| *color)
+                .with_context(|| {
+                    format!(
+                        "the install screen's colours are missing --look {role}=#RRGGBB \
+                         (the builder passes the distro's palette in the launcher; give all of: {})",
+                        LOOK_ROLES.join(", ")
+                    )
+                })
+        };
+        Ok(Self {
+            surface: get("surface")?,
+            bar: get("surface_sunken")?,
+            text: get("text")?,
+            label: get("text_muted")?,
+            rule: get("rule")?,
+            warn: get("warn")?,
+        })
+    }
+}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum HostKey {
@@ -81,8 +154,14 @@ fn main() -> Result<()> {
     match Command::parse(env::args().skip(1))? {
         Command::Help => print_help(),
         Command::Version => println!("install-split {}", env!("CARGO_PKG_VERSION")),
-        Command::Run(args) if args.smoke => run_smoke(&args)?,
-        Command::Run(args) => run_ui(&args)?,
+        Command::Run(args) => {
+            let _ = LOOK.set(args.look);
+            if args.smoke {
+                run_smoke(&args)?
+            } else {
+                run_ui(&args)?
+            }
+        }
     }
     Ok(())
 }
@@ -93,9 +172,10 @@ enum Command {
     Run(Args),
 }
 
-/// `install-split [--smoke] --left PROGRAM [ARGS...] --right PROGRAM [ARGS...]`
+/// `install-split [--smoke] --look ROLE=#RRGGBB... --left PROGRAM [ARGS...] --right PROGRAM [ARGS...]`
 struct Args {
     smoke: bool,
+    look: Look,
     /// The left and right panes' argv.
     panes: [Vec<String>; 2],
 }
@@ -103,11 +183,13 @@ struct Args {
 impl Command {
     fn parse(mut args: impl Iterator<Item = String>) -> Result<Self> {
         let mut smoke = false;
+        let mut look_words = Vec::new();
         let mut left = Vec::new();
         let mut right = Vec::new();
         while let Some(arg) = args.next() {
             match arg.as_str() {
                 "--smoke" => smoke = true,
+                "--look" => look_words.push(args.next().context("--look needs ROLE=#RRGGBB")?),
                 "-h" | "--help" => return Ok(Self::Help),
                 "--version" => return Ok(Self::Version),
                 "--left" => {
@@ -132,8 +214,10 @@ impl Command {
                 bail!("{} pane: '{program}' is not a program on PATH", side.name());
             }
         }
+        let look = Look::from_words(&look_words)?;
         Ok(Self::Run(Args {
             smoke,
+            look,
             panes: [left, right],
         }))
     }
@@ -141,12 +225,14 @@ impl Command {
 
 fn print_help() {
     println!("Usage:");
-    println!("  install-split --left PROGRAM [ARGS...] --right PROGRAM [ARGS...]");
-    println!("  install-split --smoke --left PROGRAM [ARGS...] --right PROGRAM [ARGS...]");
+    println!("  install-split --look ROLE=#RRGGBB... --left PROGRAM [ARGS...] --right PROGRAM [ARGS...]");
+    println!("  install-split --smoke --look ROLE=#RRGGBB... --left PROGRAM [ARGS...] --right PROGRAM [ARGS...]");
     println!();
     println!("Runs the left command (the install hub) beside the right one (the docs).");
     println!();
     println!("Options:");
+    println!("  --look R=#H Palette colours, repeated, one per role: {} (the builder", LOOK_ROLES.join(", "));
+    println!("              passes the distro's palette of its starting mode; required).");
     println!("  --smoke     Start both panes at the screen's pane sizes (this terminal's, or");
     println!("              an 80x24 console's without one) and check that each draws and");
     println!("              keeps running; prints '{SMOKE_OK} ...' when they do.");
@@ -656,15 +742,15 @@ fn draw(frame: &mut Frame, panes: &[Pane; 2], focus: Side) {
     draw_key_bar(frame, layout.footer, panes);
 }
 
-/// The bottom row on the dark surface: the host's keys as keycaps at the right, and
+/// The bottom row on the palette's sunken surface: the host's keys as keycaps at the right, and
 /// at the left what a pane whose program ended says, with Enter to restart it.
 fn draw_key_bar(frame: &mut Frame, area: Rect, panes: &[Pane; 2]) {
     let buffer = frame.buffer_mut();
-    let surface = Style::default().fg(LICHEN).bg(INK);
+    let surface = Style::default().fg(look().label).bg(look().bar);
     for x in area.left()..area.right() {
         buffer[(x, area.y)].set_symbol(" ").set_style(surface);
     }
-    let cap = Style::default().fg(PAPER).bg(RULE);
+    let cap = Style::default().fg(look().text).bg(look().rule);
     let mut keys: Vec<(String, &str)> = Vec::new();
     for (_, _, key, action) in HOST_KEYS {
         keys.push((format!(" {key} "), action));
@@ -705,7 +791,7 @@ fn draw_key_bar(frame: &mut Frame, area: Rect, panes: &[Pane; 2]) {
             area.left() + 1,
             area,
             &text,
-            Style::default().fg(SAND).bg(INK),
+            Style::default().fg(look().warn).bg(look().bar),
         );
     }
 }
@@ -766,7 +852,7 @@ fn screen_lines(
 }
 
 /// A cell's style; when `dim`, its foreground faded toward its background (the
-/// screen surface where the cell sets none; a default foreground counts as paper).
+/// palette's surface where the cell sets none; a default foreground counts as its text).
 fn cell_style(cell: &vt100::Cell, dim: bool) -> Style {
     let mut fg = color(cell.fgcolor());
     let mut bg = color(cell.bgcolor());
@@ -774,8 +860,8 @@ fn cell_style(cell: &vt100::Cell, dim: bool) -> Style {
         std::mem::swap(&mut fg, &mut bg);
     }
     if dim {
-        let toward = bg.and_then(rgb_of).unwrap_or(rgb_of(NIGHT).unwrap_or_default());
-        let from = fg.and_then(rgb_of).unwrap_or(rgb_of(PAPER).unwrap_or_default());
+        let toward = bg.and_then(rgb_of).unwrap_or(rgb_of(look().surface).unwrap_or_default());
+        let from = fg.and_then(rgb_of).unwrap_or(rgb_of(look().text).unwrap_or_default());
         fg = Some(fade(from, toward));
     }
     let mut style = Style::default();

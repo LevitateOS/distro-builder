@@ -152,6 +152,7 @@ pub(crate) fn build_overlay(variant: &Variant, product: ProductId, rootfs: &Path
             overlay,
             &contract.identity.os_name,
             &contract.profile,
+            &contract.look,
         )
         .with_context(|| format!("writing the install screen for {}", variant.id))?;
     }

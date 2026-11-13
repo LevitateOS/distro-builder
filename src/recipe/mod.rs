@@ -455,6 +455,10 @@ impl<'a> Invocation<'a> {
         let mut cmd = Cmd::new(bin)
             // OS composition consumes products without activating host packages.
             .arg("--no-activate")
+            // OS producers always run inside Ginux, in the pinned image, even
+            // those that start no program and would run host-side under auto.
+            .arg("--execution")
+            .arg("ginux")
             .arg(self.phase)
             .arg(recipe)
             .arg("--build-dir")

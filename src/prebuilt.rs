@@ -903,6 +903,85 @@ pub fn publish(repo: &Path, family: Family, name: &str, key: &Key) -> Result<()>
     Ok(())
 }
 
+/// Compresses the Recipe runtime image the installed Recipe ships and uploads it to the
+/// release `recipe-runtime-<digest16>` of the prebuilt repository with `gh`.
+///
+/// Recipe downloads `rootfs.tar.zst` from that release on first use (when the image is not
+/// shipped) and verifies the *decompressed* bytes against the SHA-256 digest of its
+/// reference (`oci:NAME@sha256:<digest>`), so the compressed bytes need no fixed form. The
+/// tag is named by the uncompressed digest: a release that already has `rootfs.tar.zst` is
+/// complete and is left alone (zstd output differs between versions, so it is not compared).
+/// `runtime.json` records the reference, digest and sizes. Plain `zstd -19` with the default
+/// window, so a default decoder reads it.
+pub fn publish_runtime(repo: &Path) -> Result<()> {
+    let slug = repository()?;
+    let (reference, tar) = crate::recipe::runtime_image(repo)?;
+    let digest = levitate_recipe::runtime::root_digest(&reference)?.to_string();
+    let (tar_sha, tar_bytes) = sha256_file(&tar)?;
+    if tar_sha != digest {
+        bail!("the runtime image '{}' has SHA-256 {tar_sha}, but its reference {reference} names {digest}", tar.display());
+    }
+    let short = &digest[..16];
+    let tag = format!("recipe-runtime-{short}");
+    let asset = "rootfs.tar.zst";
+
+    let listing = Cmd::new("gh")
+        .args(["release", "view", &tag, "-R", &slug, "--json", "assets", "-q", ".assets[].name"])
+        .run();
+    let (release_exists, existing): (bool, Vec<String>) = match listing {
+        Ok(output) => (true, output.stdout.lines().map(str::to_string).collect()),
+        Err(error) if format!("{error:#}").contains("release not found") => (false, Vec::new()),
+        Err(error) => return Err(error.context(format!("looking up release {tag} in {slug}"))),
+    };
+    if existing.iter().any(|name| name == asset) {
+        crate::tprintln!("[prebuilt] recipe runtime {short}: already published as {asset} in {slug} release {tag}");
+        return Ok(());
+    }
+
+    let staging = tempfile::Builder::new().prefix("prebuilt-runtime-").tempdir()?;
+    let zst = staging.path().join(asset);
+    crate::tprintln!("[prebuilt] recipe runtime {short}: compressing {tar_bytes} bytes");
+    Cmd::new("zstd")
+        .args(["-T0", "-19", "-q", "-o"])
+        .arg(&zst)
+        .arg(&tar)
+        .error_msg("compressing the runtime image with zstd")
+        .run()?;
+    let (zst_sha, zst_bytes) = sha256_file(&zst)?;
+    let manifest = staging.path().join("runtime.json");
+    fs::write(
+        &manifest,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "format": 1,
+            "reference": reference,
+            "digest": digest,
+            "tar_bytes": tar_bytes,
+            "zst_sha256": zst_sha,
+            "zst_bytes": zst_bytes,
+        }))?,
+    )?;
+
+    if !release_exists {
+        Cmd::new("gh")
+            .args(["release", "create", &tag, "-R", &slug, "--latest=false"])
+            .args(["--title", &format!("recipe runtime {short}")])
+            .args(["--notes", &format!("Recipe runtime image {reference}")])
+            .error_msg(format!("creating release {tag} in {slug}"))
+            .run()?;
+        crate::tprintln!("[prebuilt] created release {tag} in {slug}");
+    }
+    for (name, local) in [(asset, &zst), ("runtime.json", &manifest)] {
+        let mut upload = Cmd::new("gh").args(["release", "upload", &tag, "-R", &slug]).arg(local);
+        if name == "runtime.json" && existing.iter().any(|n| n == name) {
+            upload = upload.arg("--clobber");
+        }
+        upload.error_msg(format!("uploading {name} to release {tag} in {slug}")).run()?;
+        crate::tprintln!("[prebuilt] uploaded {name} to {slug} release {tag}");
+    }
+    crate::tprintln!("[prebuilt] recipe runtime {short}: published in {slug}");
+    Ok(())
+}
+
 /// Whether the published `prebuilt.json` at `path` is for this key and archive.
 fn same_prebuilt(path: &Path, key: &Key, archive_sha: &str) -> bool {
     read_manifest(path).is_ok_and(|m| m.key == key.hex && m.archive.is_some_and(|a| a.sha256 == archive_sha))

@@ -96,6 +96,9 @@ pub enum Command {
         name: String,
         distro: Option<String>,
     },
+    /// Compress the Recipe runtime image the installed Recipe ships and upload it to the
+    /// prebuilt repository's release `recipe-runtime-<digest16>` with `gh`.
+    PrebuiltPublishRuntime,
     /// Compile a prebuilt (no download, no ISO) into the local cache and print its key and
     /// cache directory: what CI publishes. Needs root, like every compile.
     PrebuiltBuild {
@@ -157,7 +160,8 @@ pub fn usage() -> String {
          prebuilt key <tools|tui|desktop-apps|display-server> <name> [--distro <id>]    print the key of a prebuilt (a tool package; install-tui/system-tui, which needs --distro; or desktop-apps/display-server <distro>)\n  \
          prebuilt list                                      print every prebuilt part (<family> <name> [--distro <id>]), one per line\n  \
          prebuilt build <tools|tui|desktop-apps|display-server> <name> [--distro <id>]  compile that part into the local cache (no download, no ISO; needs root) and print its key and cache directory\n  \
-         prebuilt publish <tools|tui|desktop-apps|display-server> <name> [--distro <id>]  upload the local cache entry of that key to the prebuilt repository's release with gh",
+         prebuilt publish <tools|tui|desktop-apps|display-server> <name> [--distro <id>]  upload the local cache entry of that key to the prebuilt repository's release with gh\n  \
+         prebuilt publish-runtime                           compress the Recipe runtime image and upload it to the release recipe-runtime-<digest16> with gh",
         releases = ProductId::list(ProductId::releases()),
         products = ProductId::list(ProductId::ALL),
     )
@@ -304,6 +308,7 @@ impl Command {
                 }
             }
             Self::PrebuiltList => push(&[&"prebuilt", &"list"]),
+            Self::PrebuiltPublishRuntime => push(&[&"prebuilt", &"publish-runtime"]),
             Self::PrebuiltKey {
                 family,
                 name,
@@ -500,6 +505,7 @@ pub fn parse(args: &[String]) -> Result<(PathBuf, Command), Usage> {
             }
         }
         ["prebuilt", "list"] => Command::PrebuiltList,
+        ["prebuilt", "publish-runtime"] => Command::PrebuiltPublishRuntime,
         ["prebuilt", verb @ ("key" | "build" | "publish"), family, name, flags @ ..] => {
             if crate::prebuilt::Family::parse(family).is_none() {
                 return usage(format!(

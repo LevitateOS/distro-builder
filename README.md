@@ -295,6 +295,10 @@ program says which: `[prebuilt] recab: local|downloaded|compiled <key16>`.
   prebuilt publish ...`, run as the user) uploads the cache entry of the current key with
   `gh`: it creates the release if missing, never replaces an asset with different bytes, and
   uploads `<family>-<name>.tar.gz` before `prebuilt.json`.
+- `distro-builder prebuilt publish-runtime` (also `cargo xtask prebuilt publish-runtime`, run as the
+  user) compresses the Recipe runtime image the installed Recipe ships (`zstd -T0 -19`) and uploads
+  it as `rootfs.tar.zst`, with `runtime.json`, to release `recipe-runtime-<digest16>`; a release that
+  already has `rootfs.tar.zst` is left alone. Recipe downloads it on first use.
 
 ## License
 

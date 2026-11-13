@@ -121,51 +121,12 @@ fn recipe_inputs(ctx) {
 fn recipe_runtime(ctx) {
     recipe_inputs(ctx);
     let inputs = ctx.runtime.paths.inputs;
-    let root = ctx.rootfs;
-    let reference = trim(read_file(join_path(inputs, "runtime_reference")));
-    let digest = reference.split("@sha256:")[1];
-    // Check the exact imported tar that will ship, not just its pathname.
-    verify_sha256(join_path(inputs, "runtime_image"), digest);
-    let runtime = join_path(root, "usr/share/recipe/runtime");
-    mkdir(runtime);
-    copy_file(join_path(inputs, "runtime_image"), join_path(runtime, "rootfs.tar"));
-    chmod(join_path(runtime, "rootfs.tar"), 0o644);
-    write_file(join_path(runtime, "root-reference"), reference + "\n");
-    chmod(join_path(runtime, "root-reference"), 0o644);
-    let launcher = join_path(root, "usr/libexec/recipe/ginux");
-    mkdir(dirname(launcher));
-    copy_file(join_path(inputs, "launcher"), launcher);
-    chmod(launcher, 0o755);
-    // The image ships the official source of recipes, not a folder of them:
-    // the file that says where it is fetched from, and a copy of it as it is
-    // at the pinned commit. Recipe lists and installs from the copy until it
-    // has fetched a newer index, so the shipped recipes need no network. The
-    // file's name is the name the source gives itself in its repo.toml.
-    let sources = join_path(root, "usr/share/recipe/sources");
-    let copy = join_path(sources, "levitate");
-    mkdir(copy);
-    copy_tree_contents(join_path(inputs, "catalog"), copy);
-    let named = join_path(sources, "levitate.toml");
-    write_file(named,
-        "files = \"https://raw.githubusercontent.com/LevitateOS/recipes/{rev}/{path}\"\n" +
-        "branch = \"master\"\n");
-    chmod(named, 0o644);
-    let profile = join_path(root, "etc/profile.d/recipe.sh");
-    mkdir(dirname(profile));
-    write_file(profile,
-        "# System software belongs to the booted generation; user profiles remain independent.\n" +
-        "if [ -f /usr/lib/recab/immutable ]; then\n" +
-        "    case \":$PATH:\" in *:/usr/lib/recipe/profile/bin:*) ;; *) PATH=\"/usr/lib/recipe/profile/bin:$PATH\" ;; esac\n" +
-        "    recipe_user_bin=\n" +
-        "elif [ \"$(id -u)\" -eq 0 ]; then\n" +
-        "    recipe_user_bin=/var/lib/recipe/profile/bin\n" +
-        "else\n" +
-        "    recipe_user_bin=\"${XDG_DATA_HOME:-$HOME/.local/share}/recipe/profile/bin\"\n" +
-        "fi\n" +
-        "if [ \"$(id -u)\" -ne 0 ]; then recipe_user_bin=\"${XDG_DATA_HOME:-$HOME/.local/share}/recipe/profile/bin\"; fi\n" +
-        "if [ -n \"$recipe_user_bin\" ]; then case \":$PATH:\" in *:\"$recipe_user_bin\":*) ;; *) PATH=\"$recipe_user_bin:$PATH\" ;; esac; fi\n" +
-        "export PATH\nunset recipe_user_bin\n");
-    chmod(profile, 0o644);
+    // Recipe's `runtime stage` owns the runtime's layout and verifies the image against the reference's digest.
+    exec_checked(ctx.program, ["runtime", "stage", "--root", ctx.rootfs,
+        "--launcher", join_path(inputs, "launcher"),
+        "--reference", trim(read_file(join_path(inputs, "runtime_reference"))),
+        "--image", join_path(inputs, "runtime_image"),
+        "--catalog", join_path(inputs, "catalog")]);
 }
 
 fn is_installed(ctx) {

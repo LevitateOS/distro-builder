@@ -20,6 +20,11 @@ pub(crate) fn publish_cmd(repo: &Path, family_name: &str, name: &str, distro: Op
     prebuilt::publish(repo, family, name, &key)
 }
 
+/// `prebuilt publish-runtime`: uploads the Recipe runtime image to its release.
+pub(crate) fn publish_runtime_cmd(repo: &Path) -> Result<()> {
+    prebuilt::publish_runtime(repo)
+}
+
 /// `prebuilt list`: every part CI publishes, one `<family> <name> [--distro <id>]` per line.
 pub(crate) fn list_cmd(repo: &Path) -> Result<()> {
     for part in prebuilt::list(repo)? {

@@ -260,6 +260,7 @@ fn run(repo: &Path, command: Command) -> Result<()> {
             prebuilt::key_cmd(repo, &family, &name, distro.as_deref())
         }
         Command::PrebuiltList => prebuilt::list_cmd(repo),
+        Command::PrebuiltPublishRuntime => prebuilt::publish_runtime_cmd(repo),
         Command::PrebuiltBuild { family, name, distro } => {
             prebuilt::build_cmd(repo, &family, &name, distro.as_deref())
         }

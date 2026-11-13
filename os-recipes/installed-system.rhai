@@ -882,13 +882,15 @@ fn plasma_look(root, inputs, mode) {
     put(root, "etc/xdg/kcm-about-distrorc", about, 0o644);
     // Konsole finds colour schemes and profiles in the data directories'
     // konsole/; konsolerc names the profile new windows use.
+    // The profile takes the dark scheme whatever the desktop's mode: a terminal
+    // is dark on both distros.
     if !is_file(join_path(root, "usr/bin/konsole")) { throw "the Plasma packages lack Konsole"; }
     for m in ["light", "dark"] {
         put(root, "usr/share/konsole/" + scheme_name(inputs, m) + ".colorscheme", terminal_scheme(inputs, m), 0o644);
     }
     let profile = pretty_name(inputs).replace(" ", "");
     put(root, "usr/share/konsole/" + profile + ".profile",
-        "[Appearance]\nColorScheme=" + scheme_name(inputs, mode) + "\n\n[General]\nName=" + profile + "\nParent=FALLBACK/\n", 0o644);
+        "[Appearance]\nColorScheme=" + scheme_name(inputs, "dark") + "\n\n[General]\nName=" + profile + "\nParent=FALLBACK/\n", 0o644);
     let konsolerc = read_file_or_empty(join_path(root, "etc/xdg/konsolerc"));
     put(root, "etc/xdg/konsolerc", ini_set(konsolerc, "Desktop Entry", "DefaultProfile", profile + ".profile"), 0o644);
 }
@@ -940,12 +942,14 @@ fn lxqt_look(root, inputs, mode, cursor) {
     // QTermWidget finds colour schemes by file name in its color-schemes
     // directory; QTerminal reads its settings (QSettings, qterminal.org) from
     // /etc/xdg when the user has none.
+    // The default is the dark scheme whatever the desktop's mode: a terminal
+    // is dark on both distros.
     let schemes = "usr/share/qtermwidget6/color-schemes/";
     if !is_dir(join_path(root, schemes)) { throw "the LXQt packages lack QTermWidget's colour schemes"; }
     for m in ["light", "dark"] {
         put(root, schemes + scheme_name(inputs, m) + ".colorscheme", terminal_scheme(inputs, m), 0o644);
     }
-    put(root, "etc/xdg/qterminal.org/qterminal.ini", "[General]\ncolorScheme=" + scheme_name(inputs, mode) + "\n", 0o644);
+    put(root, "etc/xdg/qterminal.org/qterminal.ini", "[General]\ncolorScheme=" + scheme_name(inputs, "dark") + "\n", 0o644);
 }
 
 // Menu entries of the packages that do nothing useful here, hidden (still

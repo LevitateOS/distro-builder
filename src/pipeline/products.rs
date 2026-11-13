@@ -11,7 +11,7 @@
 //! product's rootfs and overlay trees from its parts.
 use anyhow::{bail, Context, Result};
 use distro_contract::profile::Flavour;
-use distro_contract::{ConformanceContract, ProductId, Variant};
+use distro_contract::{ProductId, Variant};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -209,10 +209,12 @@ pub(crate) fn prepare_system(variant: &Variant, flavour: Flavour, rootfs: &Path)
     crate::tui_binary::install_system(&variant.repo_root, rootfs, &variant.contract.profile)
         .with_context(|| format!("adding the installed system's TUI apps for {}", variant.id))?;
     if flavour == Flavour::Desktop {
+        crate::display_server::install_system(variant, rootfs)
+            .with_context(|| format!("adding the display server for {}", variant.id))?;
         crate::desktop_apps::install_system(variant, rootfs)
             .with_context(|| format!("adding the desktop apps for {}", variant.id))?;
     }
-    check_installable(rootfs, &variant.contract, flavour).with_context(|| {
+    check_installable(rootfs, variant, flavour).with_context(|| {
         format!(
             "the rootfs recipe's tree {} predates the current system recipe; remove it to rebuild it",
             source.display()
@@ -223,7 +225,8 @@ pub(crate) fn prepare_system(variant: &Variant, flavour: Flavour, rootfs: &Path)
 /// Refuses a rootfs that is not the current installable `flavour` system:
 /// one without the setup program, or whose `/etc/os-release` is not the
 /// contract's for that flavour.
-fn check_installable(root: &Path, contract: &ConformanceContract, flavour: Flavour) -> Result<()> {
+fn check_installable(root: &Path, variant: &Variant, flavour: Flavour) -> Result<()> {
+    let contract = &variant.contract;
     if !root.join(SETUP_PROGRAM).is_file() {
         bail!("{} has no setup program /{SETUP_PROGRAM}", root.display());
     }
@@ -232,10 +235,11 @@ fn check_installable(root: &Path, contract: &ConformanceContract, flavour: Flavo
     if found != os_release(contract, flavour) {
         bail!("{} is not the contract's identity and profile of the {flavour} system", path.display());
     }
-    // A desktop system from before the desktop apps existed is not the
-    // current one.
+    // A desktop system from before the desktop apps (or the display server
+    // compiled from source) existed is not the current one.
     if flavour == Flavour::Desktop {
         crate::desktop_apps::check(root)?;
+        crate::display_server::check(variant, root)?;
     }
     Ok(())
 }

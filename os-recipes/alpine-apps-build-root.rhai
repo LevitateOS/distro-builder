@@ -1,10 +1,11 @@
-// The root the desktop apps (gui/) are compiled in on an Alpine variant: the
-// base lock's APKs (the `apks` input) and the apps-build lock's (the
-// `apps_build_apks` input) installed into one tree by the locked apk.static,
-// without their scripts. The builder makes a root image of the tree and runs
-// `desktop-apps.rhai` in it, so the apps are compiled by the distro's own
-// compiler against the distro's own C library, C++ runtime and Qt, the ones
-// the desktop system ships. The tree is never part of an image.
+// The root the desktop apps (gui/) and the display server (xlibre.rhai) are
+// compiled in on an Alpine variant: the base lock's APKs (the `apks` input)
+// and the apps-build lock's (the `apps_build_apks` input) installed into one
+// tree by the locked apk.static, without their scripts. The builder makes a
+// root image of the tree and runs `desktop-apps.rhai` and `xlibre.rhai` in
+// it, so they are compiled by the distro's own compiler against the distro's
+// own C library, C++ runtime, Qt and X libraries, the ones the desktop system
+// ships. The tree is never part of an image.
 const RECIPE_API = 2;
 const NEEDS = #{ inputs: #{ apks: "directory", apps_build_apks: "directory" }, outputs: #{ root: "directory" }, memory_mib: 4096, storage_max_objects: 196608, timeout_secs: 7200 };
 import "sources/acorn-apk-lock.rhai" as lock;
@@ -35,10 +36,13 @@ fn verify_inputs(ctx) {
     }
 }
 
-// What the tree must have to compile the apps: the first one missing, or "".
+// What the tree must have to compile the apps and XLibre: the first one
+// missing, or "".
 fn missing(root) {
     for path in ["usr/bin/g++", "usr/bin/ld", "usr/bin/make", "usr/bin/cmake", "bin/sh",
-                 "usr/lib/cmake/Qt6Widgets/Qt6WidgetsConfig.cmake", "usr/lib/cmake/Qt6Svg/Qt6SvgConfig.cmake"] {
+                 "usr/lib/cmake/Qt6Widgets/Qt6WidgetsConfig.cmake", "usr/lib/cmake/Qt6Svg/Qt6SvgConfig.cmake",
+                 "usr/bin/meson", "usr/bin/samu", "usr/bin/git", "usr/bin/pkg-config",
+                 "usr/lib/pkgconfig/xfont2.pc", "usr/lib/pkgconfig/epoxy.pc", "usr/lib/pkgconfig/libinput.pc"] {
         if !exists(join_path(root, path)) { return "/" + path; }
     }
     ""

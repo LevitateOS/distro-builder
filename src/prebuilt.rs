@@ -1,4 +1,5 @@
-//! Prebuilt programs of our own tools, the TUI binary and the desktop apps (Qt).
+//! Prebuilt programs of our own tools, the TUI binary, the desktop apps (Qt) and the
+//! display server compiled from source (XLibre on AcornOS).
 //!
 //! An OS build needs the same few programs again and again. Each is identified by a
 //! **key**: the SHA-256 of everything its compile depends on (the source closure the
@@ -24,7 +25,10 @@
 //! Recipe's target metadata), one entry per distro, `desktop-apps/<key>/{prebuilt.json,tree/}`.
 //! Its entries record every path with kind, exact mode, size and SHA-256, and verification
 //! compares the whole tree both ways (no missing and no extra entries). See
-//! [`desktop_apps_key`], [`lookup_desktop_apps`] and [`store_desktop_apps`].
+//! [`desktop_apps_key`], [`lookup_desktop_apps`] and [`store_desktop_apps`]. The display
+//! server family is such a tree too, one entry per distro that names a
+//! `desktop.display_server_recipe_script` ([`display_server_key`], [`lookup_display_server`],
+//! [`store_display_server`]).
 //!
 //! The key leaves out Ginux and Recipe's bytes on purpose: they change how a compile
 //! is supervised, not what comes out of it (their declared behaviour versions are in).
@@ -67,16 +71,20 @@ pub enum Family {
     Tui,
     /// The Qt desktop apps tree (`gui/`), one entry per distro: its `name` is the distro id.
     DesktopApps,
+    /// The display server tree compiled from source (`desktop.display_server_recipe_script`),
+    /// one entry per distro that has one: its `name` is the distro id.
+    DisplayServer,
 }
 
 impl Family {
-    pub const NAMES: &'static str = "tools, tui, desktop-apps";
+    pub const NAMES: &'static str = "tools, tui, desktop-apps, display-server";
 
     pub fn name(self) -> &'static str {
         match self {
             Self::Tools => "tools",
             Self::Tui => "tui",
             Self::DesktopApps => "desktop-apps",
+            Self::DisplayServer => "display-server",
         }
     }
 
@@ -85,8 +93,14 @@ impl Family {
             "tools" => Some(Self::Tools),
             "tui" => Some(Self::Tui),
             "desktop-apps" => Some(Self::DesktopApps),
+            "display-server" => Some(Self::DisplayServer),
             _ => None,
         }
+    }
+
+    /// Whether the family's name is a distro id (one tree per distro).
+    pub fn per_distro(self) -> bool {
+        matches!(self, Self::DesktopApps | Self::DisplayServer)
     }
 }
 
@@ -304,7 +318,7 @@ impl Payload {
         match family {
             Family::Tools => Ok(Self::Files(crate::recipe::tools::tool_binaries(name)?)),
             Family::Tui => Ok(Self::Files(vec!["program".into()])),
-            Family::DesktopApps => Ok(Self::Tree),
+            Family::DesktopApps | Family::DisplayServer => Ok(Self::Tree),
         }
     }
 }
@@ -687,6 +701,7 @@ pub fn key_for(repo: &Path, family: Family, name: &str, distro: Option<&str>) ->
             crate::tui_binary::prebuilt_key(repo, name, variant.contract.profile.libc)
         }
         Family::DesktopApps => desktop_apps_key(repo, &distro_contract::load(repo, name)?),
+        Family::DisplayServer => display_server_key(repo, &distro_contract::load(repo, name)?),
     }
 }
 
@@ -698,7 +713,8 @@ pub struct Part {
     pub distro: Option<String>,
 }
 
-/// Every prebuilt part: each tool package, the desktop apps of every distro, and each TUI binary once per libc (the first
+/// Every prebuilt part: each tool package, the desktop apps of every distro, the display
+/// server of every distro that compiles one, and each TUI binary once per libc (the first
 /// distro with that libc stands for the others: the key depends on the libc alone).
 pub fn list(repo: &Path) -> Result<Vec<Part>> {
     let mut parts: Vec<Part> = crate::recipe::tools::tool_packages()
@@ -709,6 +725,9 @@ pub fn list(repo: &Path) -> Result<Vec<Part>> {
     for id in distro_contract::distro_ids(repo) {
         parts.push(Part { family: Family::DesktopApps, name: id.clone(), distro: None });
         let variant = distro_contract::load(repo, &id)?;
+        if variant.contract.desktop.display_server_recipe_script.is_some() {
+            parts.push(Part { family: Family::DisplayServer, name: id.clone(), distro: None });
+        }
         if !libcs.insert(variant.contract.profile.libc.bun_target()) {
             continue;
         }
@@ -769,6 +788,10 @@ pub fn build(repo: &Path, family: Family, name: &str, distro: Option<&str>) -> R
         Family::DesktopApps => {
             let variant = distro_contract::load(repo, name)?;
             crate::desktop_apps::build_cache(&variant)?;
+        }
+        Family::DisplayServer => {
+            let variant = distro_contract::load(repo, name)?;
+            crate::display_server::build_cache(&variant)?;
         }
         Family::Tools => {
             crate::recipe::tools::compile_crate(repo, name)?;
@@ -1047,6 +1070,32 @@ pub(crate) fn behaviour() -> String {
 /// Not covered: the builder's own Rust that composes the root (`compose.rs`) and runs the
 /// compile (`desktop_apps.rs`), which the other prebuilts leave out too.
 pub fn desktop_apps_key(repo: &Path, variant: &distro_contract::Variant) -> Result<Key> {
+    let mut fields = vec![
+        ("family", "desktop-apps".into()),
+        ("distro", variant.id.clone()),
+        ("libc", variant.contract.profile.libc.as_str().into()),
+        ("gui_tree", gui_digest(repo)?),
+    ];
+    fields.extend(build_root_fields(repo, variant)?);
+    fields.extend([
+        ("desktop_apps_recipe", recipe_digest(repo, &repo.join("distro/builder/os-recipes/desktop-apps.rhai"))?),
+        ("compiler_image", crate::recipe::compiler_image_reference(repo)?),
+        ("behaviour", behaviour()),
+    ]);
+    Ok(Key::new(&fields))
+}
+
+/// The digest of `recipe` and everything it imports ([`recipe_closure`]).
+fn recipe_digest(repo: &Path, recipe: &Path) -> Result<String> {
+    let mut found = BTreeMap::new();
+    recipe_closure(repo, recipe, &mut found)?;
+    Ok(closure_digest(&found))
+}
+
+/// The key fields of the apps-build root a tree is compiled in: the base and apps-build locks
+/// (the root is made from both), both preseed recipes and the root recipe, each with what it
+/// imports.
+fn build_root_fields(repo: &Path, variant: &distro_contract::Variant) -> Result<Vec<(&'static str, String)>> {
     use crate::pipeline::source::{apps_build_preseed_recipe, apps_build_root_recipe, preseed_recipe};
     let closure = |recipe: &Path| -> Result<BTreeMap<String, String>> {
         let mut found = BTreeMap::new();
@@ -1056,50 +1105,92 @@ pub fn desktop_apps_key(repo: &Path, variant: &distro_contract::Variant) -> Resu
     let base_preseed = closure(&preseed_recipe(variant, distro_contract::profile::Flavour::Base))?;
     let build_preseed = closure(&apps_build_preseed_recipe(variant))?;
     let root = closure(&apps_build_root_recipe(variant))?;
-    let compile = closure(&repo.join("distro/builder/os-recipes/desktop-apps.rhai"))?;
-    Ok(Key::new(&[
-        ("family", "desktop-apps".into()),
-        ("distro", variant.id.clone()),
-        ("libc", variant.contract.profile.libc.as_str().into()),
-        ("gui_tree", gui_digest(repo)?),
+    Ok(vec![
         ("base_lock", lock_digest(&base_preseed)),
         ("apps_build_lock", lock_digest(&build_preseed)),
         ("base_preseed_recipe", closure_digest(&base_preseed)),
         ("apps_build_preseed_recipe", closure_digest(&build_preseed)),
         ("apps_build_root_recipe", closure_digest(&root)),
-        ("desktop_apps_recipe", closure_digest(&compile)),
+    ])
+}
+
+/// The key of the display server tree for `variant` (`desktop.display_server_recipe_script`):
+/// that recipe with everything it imports (it holds the source pins), the apps-build root it
+/// compiles in ([`build_root_fields`]: both locks and the root's recipes), the compiler
+/// image, Recipe's declared behaviour versions, and the distro and its libc. Fails for a
+/// distro that names no display server recipe.
+pub fn display_server_key(repo: &Path, variant: &distro_contract::Variant) -> Result<Key> {
+    let recipe = crate::display_server::recipe(variant)
+        .with_context(|| format!("{} compiles no display server (no desktop.display_server_recipe_script)", variant.id))?;
+    let mut fields = vec![
+        ("family", "display-server".into()),
+        ("distro", variant.id.clone()),
+        ("libc", variant.contract.profile.libc.as_str().into()),
+        ("display_server_recipe", recipe_digest(repo, &recipe)?),
+    ];
+    fields.extend(build_root_fields(repo, variant)?);
+    fields.extend([
         ("compiler_image", crate::recipe::compiler_image_reference(repo)?),
         ("behaviour", behaviour()),
-    ]))
+    ]);
+    Ok(Key::new(&fields))
 }
 
 /// The verified desktop apps tree for `variant`, from the local cache, else downloaded; `None`
 /// on a miss (or any failure), without compiling. Never looks in exact mode or with
 /// `--no-prebuilt`. The path is a directory holding the tree itself, ready to merge.
 pub fn lookup_desktop_apps(repo: &Path, variant: &distro_contract::Variant) -> Result<Option<PathBuf>> {
-    let name = variant.id.as_str();
+    lookup_tree(repo, Family::DesktopApps, variant, || desktop_apps_key(repo, variant))
+}
+
+/// Puts a freshly compiled desktop apps `tree` into the local cache (origin `local`) under the
+/// key the checkout has now and returns the cached tree. Exact mode stores nothing and returns
+/// `tree` itself. `--no-prebuilt` still stores.
+pub fn store_desktop_apps(repo: &Path, variant: &distro_contract::Variant, tree: &Path) -> Result<PathBuf> {
+    store_tree(repo, Family::DesktopApps, variant, tree, || desktop_apps_key(repo, variant), &[PathBuf::from("gui")])
+}
+
+/// [`lookup_desktop_apps`] for the display server tree.
+pub fn lookup_display_server(repo: &Path, variant: &distro_contract::Variant) -> Result<Option<PathBuf>> {
+    lookup_tree(repo, Family::DisplayServer, variant, || display_server_key(repo, variant))
+}
+
+/// [`store_desktop_apps`] for the display server tree.
+pub fn store_display_server(repo: &Path, variant: &distro_contract::Variant, tree: &Path) -> Result<PathBuf> {
+    let recipe = crate::display_server::recipe(variant).context("no display server recipe")?;
+    let dir = recipe.parent().map(Path::to_path_buf).unwrap_or_default();
+    let relative = dir.strip_prefix(repo).map(Path::to_path_buf).unwrap_or(dir);
+    store_tree(repo, Family::DisplayServer, variant, tree, || display_server_key(repo, variant), &[relative])
+}
+
+fn lookup_tree(
+    repo: &Path,
+    family: Family,
+    variant: &distro_contract::Variant,
+    key: impl FnOnce() -> Result<Key>,
+) -> Result<Option<PathBuf>> {
+    let (label, name) = (family.name(), variant.id.as_str());
     if crate::recipe::exact_identity() {
-        crate::tprintln!("[prebuilt] desktop-apps {name}: compiling (exact build: nothing prebuilt is used)");
+        crate::tprintln!("[prebuilt] {label} {name}: compiling (exact build: nothing prebuilt is used)");
         return Ok(None);
     }
-    let key = desktop_apps_key(repo, variant)?;
+    let key = key()?;
     let short = key.short().to_string();
     if NO_PREBUILT.load(Ordering::SeqCst) {
-        crate::tprintln!("[prebuilt] desktop-apps {name}: compiling {short} (--no-prebuilt)");
+        crate::tprintln!("[prebuilt] {label} {name}: compiling {short} (--no-prebuilt)");
         return Ok(None);
     }
-    let family = Family::DesktopApps;
     if let Some(dir) = lookup(repo, family, name, &key, &Payload::Tree) {
-        crate::tprintln!("[prebuilt] desktop-apps {name}: local {short}");
+        crate::tprintln!("[prebuilt] {label} {name}: local {short}");
         return Ok(Some(payload_dir(&dir, &Payload::Tree)));
     }
     match fetch(repo, family, name, &key, &Payload::Tree) {
         Ok(dir) => {
-            crate::tprintln!("[prebuilt] desktop-apps {name}: downloaded {short}");
+            crate::tprintln!("[prebuilt] {label} {name}: downloaded {short}");
             Ok(Some(payload_dir(&dir, &Payload::Tree)))
         }
         Err(error) => {
-            crate::tprintln!("[prebuilt] desktop-apps {name}: no prebuilt for {short}, compiling");
+            crate::tprintln!("[prebuilt] {label} {name}: no prebuilt for {short}, compiling");
             let reason = format!("{error:#}");
             crate::teprintln!("  ({})", reason.lines().next().unwrap_or("no reason given"));
             Ok(None)
@@ -1107,18 +1198,22 @@ pub fn lookup_desktop_apps(repo: &Path, variant: &distro_contract::Variant) -> R
     }
 }
 
-/// Puts a freshly compiled desktop apps `tree` into the local cache (origin `local`) under the
-/// key the checkout has now and returns the cached tree. Exact mode stores nothing and returns
-/// `tree` itself. `--no-prebuilt` still stores.
-pub fn store_desktop_apps(repo: &Path, variant: &distro_contract::Variant, tree: &Path) -> Result<PathBuf> {
-    let name = variant.id.as_str();
+fn store_tree(
+    repo: &Path,
+    family: Family,
+    variant: &distro_contract::Variant,
+    tree: &Path,
+    key: impl FnOnce() -> Result<Key>,
+    source_dirs: &[PathBuf],
+) -> Result<PathBuf> {
+    let (label, name) = (family.name(), variant.id.as_str());
     if crate::recipe::exact_identity() {
         return Ok(tree.to_path_buf());
     }
-    let key = desktop_apps_key(repo, variant)?;
-    let sources = source_commits(repo, [PathBuf::from("gui")]);
-    let dir = store(repo, Family::DesktopApps, name, &key, sources, Content::Tree(tree), "local", None)
-        .with_context(|| format!("caching the compiled desktop apps of {name}"))?;
-    crate::tprintln!("[prebuilt] desktop-apps {name}: compiled {}", key.short());
+    let key = key()?;
+    let sources = source_commits(repo, source_dirs.iter().cloned());
+    let dir = store(repo, family, name, &key, sources, Content::Tree(tree), "local", None)
+        .with_context(|| format!("caching the compiled {label} of {name}"))?;
+    crate::tprintln!("[prebuilt] {label} {name}: compiled {}", key.short());
     Ok(payload_dir(&dir, &Payload::Tree))
 }

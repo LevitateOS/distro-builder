@@ -5,7 +5,7 @@
 // command.
 
 fn release() { "v3.24" }
-fn locked_on() { "2026-11-11" }
+fn locked_on() { "2026-11-13" }
 fn mirror() { "https://dl-cdn.alpinelinux.org/alpine/v3.24" }
 
 // The key Alpine signs the release's packages with: [file name, PEM].
@@ -766,13 +766,10 @@ fn packages() {
         ["xdg-document-portal-openrc", "xdg-document-portal-openrc-1.21.2-r0", "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/xdg-document-portal-openrc-1.21.2-r0.apk", "a9dfbfb03ae397cd1a7601761a6769d7b533599a73617e6727a367c8fa07616e"],
         ["xdg-user-dirs", "xdg-user-dirs-0.20-r0", "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/xdg-user-dirs-0.20-r0.apk", "88dc8038fbf8b8d02d25ce75e77d152cda6d74a85e1d596f8a57c988ab72613e"],
         ["xdg-utils", "xdg-utils-1.2.1-r1", "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/xdg-utils-1.2.1-r1.apk", "fc4d01fed7f88ca6f3fd72596aa2d6b408dfba3a3757a8dd8e38f002bf4e77f8"],
-        ["xf86-input-libinput", "xf86-input-libinput-1.5.0-r0", "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/xf86-input-libinput-1.5.0-r0.apk", "2bd4b9257f755bc68c7460068821e954ee6ca484e6b05637e673d5b9abace0e8"],
         ["xfconf", "xfconf-4.20.0-r2", "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/xfconf-4.20.0-r2.apk", "c936df109484021fb9d903f77acdd1b5b6365127a654280e3d835b82aa93dfd1"],
         ["xfconf-bash-completion", "xfconf-bash-completion-4.20.0-r2", "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/xfconf-bash-completion-4.20.0-r2.apk", "5693c2c21a2a78980cedf6220a455a49974015de7f765105e8095f4b6c411498"],
         ["xkbcomp", "xkbcomp-1.5.0-r0", "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/xkbcomp-1.5.0-r0.apk", "8bfbd3c8ce7180e8cf599d5a0b791993b61fa98f3a19c47aaf5fcbe30c12d0ba"],
         ["xkeyboard-config", "xkeyboard-config-2.47-r0", "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/xkeyboard-config-2.47-r0.apk", "8c8f9af2b78f8e955480aa88103e495d2637edac659a417075e877c88a41fed0"],
-        ["xorg-server", "xorg-server-21.1.26-r0", "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/xorg-server-21.1.26-r0.apk", "c98ac23b63ea372c7a872505c4f5a7de5bdd1eefe22f60c71b32d0cffb2b5b33"],
-        ["xorg-server-common", "xorg-server-common-21.1.26-r0", "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/xorg-server-common-21.1.26-r0.apk", "6515d22b4b2ac4895d662f5dc680f7b0a7eafedd071f8d471441a6dfce08f70c"],
         ["xorgproto", "xorgproto-2025.1-r0", "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/xorgproto-2025.1-r0.apk", "8e43324c60aa227a1a335aef357dc2c0c26afcc536952f992b4a32293d230d76"],
         ["xprop", "xprop-1.2.8-r0", "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/xprop-1.2.8-r0.apk", "abefa362321a585acf93193e1068b1a52016b4ee4383b0d2ae5f753c217c8112"],
         ["xrandr", "xrandr-1.5.4-r0", "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/xrandr-1.5.4-r0.apk", "4f8d9302be2d7587b3b6c1f1fa967d618dc2aeee8b9081875f2d1cc1d4959b8d"],

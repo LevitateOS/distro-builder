@@ -69,6 +69,15 @@ fn obtain_tree(variant: &Variant) -> Result<PathBuf> {
 /// `prebuilt build desktop-apps`: compiles the apps into the local cache, with no download
 /// and no ISO. The package locks it reads are acquired first, as an ISO build does.
 pub(crate) fn build_cache(variant: &Variant) -> Result<()> {
+    acquire_build_locks(variant)?;
+    let tree = compile_tree(variant)?;
+    crate::prebuilt::store_desktop_apps(&variant.repo_root, variant, &tree)?;
+    Ok(())
+}
+
+/// Acquires the package locks the apps-build root is made from (the base lock and the
+/// apps-build lock), as an ISO build does, for a `prebuilt build` of a tree compiled in it.
+pub(crate) fn acquire_build_locks(variant: &Variant) -> Result<()> {
     use crate::recipe::rootfs_source::{preseed_apps_build, preseed_rootfs_source};
     let (repo, id) = (&variant.repo_root, &variant.id);
     if crate::recipe::exact_identity() {
@@ -78,8 +87,6 @@ pub(crate) fn build_cache(variant: &Variant) -> Result<()> {
         .with_context(|| format!("acquiring the base package lock for '{id}'"))?;
     preseed_apps_build(repo, id, &apps_build_preseed_recipe(variant), false)
         .with_context(|| format!("acquiring the apps-build package lock for '{id}'"))?;
-    let tree = compile_tree(variant)?;
-    crate::prebuilt::store_desktop_apps(repo, variant, &tree)?;
     Ok(())
 }
 
@@ -87,27 +94,40 @@ pub(crate) fn build_cache(variant: &Variant) -> Result<()> {
 /// `cmake --install` wrote (Recipe's output `rootfs`).
 fn compile_tree(variant: &Variant) -> Result<PathBuf> {
     let repo = &variant.repo_root;
-    let (reference, image) = build_root(variant).context("making the root the desktop apps are compiled in")?;
+    let work = repo.join(".artifacts/work/desktop-apps").join(&variant.id);
+    fs::create_dir_all(&work).with_context(|| format!("creating '{}'", work.display()))?;
+    let source = source_snapshot(repo, &work)?;
+    compile_in_build_root(
+        variant,
+        &repo.join("distro/builder/os-recipes/desktop-apps.rhai"),
+        &work,
+        &[("source", source.path())],
+    )
+    .context("compiling the desktop apps through Recipe")
+}
+
+/// Runs the OS recipe `recipe` in `variant`'s apps-build root (made first, see [`build_root`]),
+/// with the static Recipe as its worker, keeping its state under `work`, and returns the tree
+/// it publishes as its output `rootfs`. The desktop apps and the display server
+/// (`crate::display_server`) are compiled this way.
+pub(crate) fn compile_in_build_root(
+    variant: &Variant,
+    recipe: &Path,
+    work: &Path,
+    inputs: &[(&str, &Path)],
+) -> Result<PathBuf> {
+    let repo = &variant.repo_root;
+    let (reference, image) = build_root(variant).context("making the apps-build root")?;
     // The static Recipe the image itself ships: it runs in any root.
     let worker = crate::recipe::tools::build_tool_tree(repo, "levitate-recipe", None, &variant.contract.profile)
         .context("building the static Recipe that runs inside the apps-build root")?
         .join("usr/bin/recipe");
-    let work = repo.join(".artifacts/work/desktop-apps").join(&variant.id);
-    fs::create_dir_all(&work).with_context(|| format!("creating '{}'", work.display()))?;
-    let source = source_snapshot(repo, &work)?;
-    let tree = Invocation::new(
-        repo,
-        "install",
-        repo.join("distro/builder/os-recipes/desktop-apps.rhai"),
-        work.join("recipe"),
-    )
-    .input("source", source.path())
-    .root(reference, image)
-    .worker(worker)
-    .run()
-    .context("compiling the desktop apps through Recipe")?
-    .directory("rootfs")?;
-    Ok(tree)
+    fs::create_dir_all(work).with_context(|| format!("creating '{}'", work.display()))?;
+    let mut invocation = Invocation::new(repo, "install", recipe, work.join("recipe"));
+    for (name, path) in inputs {
+        invocation = invocation.input(name, path);
+    }
+    invocation.root(reference, image).worker(worker).run()?.directory("rootfs")
 }
 
 /// Refuses a desktop rootfs that lacks one of the desktop apps, its menu entry

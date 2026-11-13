@@ -980,19 +980,26 @@ fn closure_digest(files: &BTreeMap<String, String>) -> String {
 /// `fixtures/` stand-ins too, though the compile's source copy leaves them out: a change
 /// there misses once, which is harmless.
 fn gui_digest(repo: &Path) -> Result<String> {
+    // gui/ is a submodule (LevitateOS/desktop-apps): git lists its files from
+    // inside it; they are named as before, under gui/, so the key is the same.
     let listing = Cmd::new("git")
         .arg("-C")
-        .arg(repo)
-        .args(["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", "gui"])
+        .arg(repo.join("gui"))
+        .args(["ls-files", "-z", "--cached", "--others", "--exclude-standard"])
         .error_msg("listing the files of gui/ with git")
         .run()?;
-    let paths: BTreeSet<&str> = listing.stdout.split('\0').filter(|path| !path.is_empty()).collect();
+    let paths: BTreeSet<String> = listing
+        .stdout
+        .split('\0')
+        .filter(|path| !path.is_empty())
+        .map(|path| format!("gui/{path}"))
+        .collect();
     if paths.is_empty() {
         bail!("git lists no files under gui/ in '{}'", repo.display());
     }
     let mut hash = Sha256::new();
     for path in paths {
-        let full = repo.join(path);
+        let full = repo.join(&path);
         let metadata = match fs::symlink_metadata(&full) {
             Ok(metadata) => metadata,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,

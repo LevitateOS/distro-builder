@@ -216,7 +216,8 @@ fn source_snapshot(repo: &Path, work: &Path) -> Result<tempfile::TempDir> {
         .follow_links(false)
         .sort_by_file_name()
         .into_iter()
-        .filter_entry(|entry| entry.file_name() != "fixtures")
+        // gui/ is a submodule: its `.git` link is the checkout's, not source.
+        .filter_entry(|entry| entry.file_name() != "fixtures" && entry.file_name() != ".git")
     {
         let entry = entry?;
         let target = snapshot.path().join(entry.path().strip_prefix(&root)?);

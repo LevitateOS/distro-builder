@@ -374,10 +374,24 @@ impl<'a> Invocation<'a> {
                 None => std::env::var("GINUX_ROOT").unwrap_or_else(|_| "Recipe's default root".into()),
             },
         };
+        // The stamp reads the recipe file as Recipe will find it: a path
+        // relative to the run's folder, else a bare name from os-recipes
+        // (`tui-binary`), which Recipe resolves through --recipes-path.
+        let run_dir = self.cwd.as_deref().unwrap_or(self.repo);
+        let recipe_file = if recipe.is_absolute() || run_dir.join(recipe).is_file() {
+            run_dir.join(recipe)
+        } else {
+            let named = self
+                .repo
+                .join("distro/builder/os-recipes")
+                .join(recipe)
+                .with_extension("rhai");
+            if named.is_file() { named } else { run_dir.join(recipe) }
+        };
         let stamp = stamp::Stamp::for_run(
             self.repo,
             self.phase,
-            recipe,
+            &recipe_file,
             work,
             &self.args,
             &root_reference,

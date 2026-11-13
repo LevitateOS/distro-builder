@@ -15,7 +15,6 @@
 
 use anyhow::{bail, Context, Result};
 use distro_contract::install_ux::{APPS, BIN_DIR, CONSOLES, DOCS, DOCS_PAGE, DOCS_PANE, HUB, SHELL};
-use distro_contract::profile::Appearance;
 use distro_contract::{LookContract, Profile};
 use std::path::Path;
 
@@ -94,14 +93,12 @@ pub(crate) fn consoles() -> Vec<String> {
 }
 
 /// The split pane's colours: `--look ROLE=#RRGGBB` for each role it draws with, from
-/// the palette of the mode the variant starts in. Roles, not names: the key bar is
+/// the DARK palette always: the pane hosts terminal apps, which are dark on both distros
+/// (the mode a variant starts in is for its desktop and website). Roles, not names: the key bar is
 /// `surface` (as the apps' own key bars) with `text_muted` labels, keycaps `text` on `rule`, a pane's
 /// notice `warn`, and a dimmed pane fades toward `surface`.
-fn split_look_args(appearance: Appearance, look: &LookContract) -> Vec<String> {
-    let palette = match appearance {
-        Appearance::Light => &look.light,
-        Appearance::Dark => &look.dark,
-    };
+fn split_look_args(look: &LookContract) -> Vec<String> {
+    let palette = &look.dark;
     [
         ("surface", &palette.surface),
         ("text", &palette.text),
@@ -160,7 +157,7 @@ pub(crate) fn write_payload(
         .context("building the install screen's TUI apps")?;
 
     let [hub, docs] = screen.panes(os_name)?;
-    let look_args = split_look_args(profile.appearance, look);
+    let look_args = split_look_args(look);
     let serial: Vec<String> = CONSOLES
         .iter()
         .filter(|console| console.starts_with("ttyS"))

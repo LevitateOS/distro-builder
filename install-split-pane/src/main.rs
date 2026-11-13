@@ -59,9 +59,9 @@ const HOST_KEYS: &[(HostKey, char, &str, &str)] = &[
 ];
 
 /// The palette roles the host draws with, given on the command line as
-/// `--look ROLE=#RRGGBB`, one per role, from the distro's palette of its starting
-/// mode (the builder writes them into the launcher from the contract's `[look]`;
-/// the terminal apps in the panes draw from the same palette). There is no built-in
+/// `--look ROLE=#RRGGBB`, one per role, from the distro's dark palette (terminal
+/// apps are dark on both distros; the builder writes them into the launcher from the
+/// contract's `[look.dark]`, and the terminal apps in the panes draw from the same palette). There is no built-in
 /// palette: without all of them the host stops with a message.
 const LOOK_ROLES: [&str; 5] = [
     "surface",

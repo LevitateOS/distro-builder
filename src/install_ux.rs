@@ -95,7 +95,7 @@ pub(crate) fn consoles() -> Vec<String> {
 
 /// The split pane's colours: `--look ROLE=#RRGGBB` for each role it draws with, from
 /// the palette of the mode the variant starts in. Roles, not names: the key bar is
-/// `surface_sunken` with `text_muted` labels, keycaps `text` on `rule`, a pane's
+/// `surface` (as the apps' own key bars) with `text_muted` labels, keycaps `text` on `rule`, a pane's
 /// notice `warn`, and a dimmed pane fades toward `surface`.
 fn split_look_args(appearance: Appearance, look: &LookContract) -> Vec<String> {
     let palette = match appearance {
@@ -104,7 +104,6 @@ fn split_look_args(appearance: Appearance, look: &LookContract) -> Vec<String> {
     };
     [
         ("surface", &palette.surface),
-        ("surface_sunken", &palette.surface_sunken),
         ("text", &palette.text),
         ("text_muted", &palette.text_muted),
         ("rule", &palette.rule),

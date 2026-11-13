@@ -63,9 +63,8 @@ const HOST_KEYS: &[(HostKey, char, &str, &str)] = &[
 /// mode (the builder writes them into the launcher from the contract's `[look]`;
 /// the terminal apps in the panes draw from the same palette). There is no built-in
 /// palette: without all of them the host stops with a message.
-const LOOK_ROLES: [&str; 6] = [
+const LOOK_ROLES: [&str; 5] = [
     "surface",
-    "surface_sunken",
     "text",
     "text_muted",
     "rule",
@@ -80,7 +79,7 @@ const DIM_PERCENT: u16 = 45;
 struct Look {
     /// The screen surface a dimmed pane fades toward (a light surface in light mode).
     surface: Color,
-    /// The key bar's background.
+    /// The key bar's background: the same surface the apps draw their own key bars on.
     bar: Color,
     /// A keycap's text, and a default foreground when dimming.
     text: Color,
@@ -135,7 +134,7 @@ impl Look {
         };
         Ok(Self {
             surface: get("surface")?,
-            bar: get("surface_sunken")?,
+            bar: get("surface")?,
             text: get("text")?,
             label: get("text_muted")?,
             rule: get("rule")?,

@@ -482,6 +482,7 @@ fn desktop_system(root, inputs, init, display_manager) {
     login_screen(root, inputs, display_manager, wallpaper(root, inputs));
     browser(root, inputs);
     default_apps(root, inputs);
+    software_app(root, inputs);
     input_defaults(root, inputs);
     look_defaults(root, inputs);
     menu_entries(root, inputs);
@@ -555,7 +556,12 @@ fn firewall_zone(root) {
 // distribution's start page, and a policy file turns off telemetry, studies,
 // the first-run and what's-new pages, and the browser's own updater (the
 // system updates it), and opens the OS's website (HOME_URL) at start where
-// it has one. The packaged preferences file is renamed for the OS.
+// it has one. The packaged preferences file is renamed for the OS. The
+// bookmarks are one: NoDefaultBookmarks drops the set Firefox seeds a new
+// profile with (Fedora's default-bookmarks.html in browser/omni.ja, Mozilla's
+// on Alpine), the preferences above drop Fedora's pinned start page from the
+// new-tab page, and the Bookmarks policy adds the OS's website, on the
+// toolbar, for both distros (a policy leaves omni.ja alone).
 fn browser(root, inputs) {
     let libc = os_release_field(inputs, "REC_LIBC");
     let dir = if libc == "glibc" { "usr/lib64/firefox/" } else { "usr/lib/firefox/" };
@@ -585,6 +591,8 @@ fn browser(root, inputs) {
     if home != "" {
         policies += "    \"Homepage\": {\"URL\": \"" + home + "\", \"StartPage\": \"homepage\"},\n";
     }
+    policies += "    \"NoDefaultBookmarks\": true,\n";
+    policies += "    \"Bookmarks\": [{\"Title\": \"LevitateOS\", \"URL\": \"https://levitateos.org\", \"Placement\": \"toolbar\"}],\n";
     policies += "    \"UserMessaging\": {\"ExtensionRecommendations\": false, \"FeatureRecommendations\": false, \"MoreFromMozilla\": false, \"SkipOnboarding\": true}\n";
     policies += "  }\n}\n";
     put(root, dir + "distribution/policies.json", policies, 0o644);
@@ -622,6 +630,35 @@ fn default_apps(root, inputs) {
         for mime in kinds[kind] { text += mime + "=" + app + ";\n"; }
     }
     put(root, "etc/xdg/mimeapps.list", text, 0o644);
+}
+
+// Recipe is the desktop's software app. On Plasma, Fedora's panel starts with
+// a task manager whose launchers include Discover as the second icon (the
+// default panel template leaves them to the plasmoid's built-in list, whose
+// second entry is Discover): the template sets the list itself, with the Recipe
+// launcher in that place, and Fedora's kde-settings packages' other mentions
+// of Discover (the menu's favourites, the handler of .rpm files) lose it or
+// name Recipe. Discover itself is not in the desktop lock. LXQt's panel and menu
+// have no software store.
+fn software_app(root, inputs) {
+    if os_release_field(inputs, "REC_DESKTOP") != "plasma" { return; }
+    let recipe = "org.levitateos.recipe.desktop";
+    let panel = "usr/share/plasma/layout-templates/org.kde.plasma.desktop.defaultPanel/contents/layout.js";
+    let tasks = "panel.addWidget(\"org.kde.plasma.icontasks\")";
+    let text = read_file_or_empty(join_path(root, panel));
+    if !text.contains(tasks) { throw "the Plasma default panel no longer adds the icon task manager"; }
+    let launchers = "applications:systemsettings.desktop,applications:" + recipe + ",preferred://filemanager,preferred://browser";
+    text = text.replace(tasks, "var tasks = " + tasks + "\ntasks.currentConfigGroup = [\"General\"]\ntasks.writeConfig(\"launchers\", \"" + launchers + "\")");
+    write_file(join_path(root, panel), text);
+    let profile = "usr/share/kde-settings/kde-profile/default/xdg/";
+    let favourites = profile + "kicker-extra-favoritesrc";
+    text = read_file_or_empty(join_path(root, favourites));
+    if !text.contains(";org.kde.discover.desktop") { throw "Fedora's menu favourites no longer list Discover"; }
+    write_file(join_path(root, favourites), text.replace(";org.kde.discover.desktop", ";" + recipe));
+    let mime = profile + "kde-mimeapps.list";
+    text = read_file_or_empty(join_path(root, mime));
+    if !text.contains("=org.kde.discover.desktop\n") { throw "Fedora's default applications no longer name Discover"; }
+    write_file(join_path(root, mime), text.replace("application/x-rpm=org.kde.discover.desktop\n", ""));
 }
 
 // Touchpads tap to click and scroll naturally. Plasma's KWin sets its own

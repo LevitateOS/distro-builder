@@ -64,6 +64,112 @@ fn package_effects(ctx, root) {
         "#%PAM-1.0\nauth        include      system-auth\naccount     include      system-auth\n" +
         "password    include      system-auth\nsession     include      system-auth\n", 0o644);
     system::put(root, "etc/pam.d/postlogin", "#%PAM-1.0\nsession     optional     pam_keyinit.so force revoke\n", 0o644);
+    progress(0, 0, "package effects: CA trust (update-ca-trust)");
+    ca_trust(root);
+}
+
+// What ca-certificates' scriptlet and file trigger do: `update-ca-trust
+// extract`, which turns the package's p11-kit trust source
+// (usr/share/pki/ca-trust-source) into everything under
+// etc/pki/ca-trust/extracted (the PEM bundles /etc/ssl/certs/* point at, the
+// OpenSSL trust bundle, the EDK2 and Java stores, the directory-hash set) and
+// the hash links in etc/pki/tls/certs. The RPM payload holds only the source
+// and the tool, so without this every native-TLS client (Recipe's rustls
+// included) finds a dangling /etc/ssl/certs/ca-certificates.crt.
+//
+// The tree's own `trust` runs through the tree's own loader and libraries
+// (as `tree_run` in installed-system.rhai does), and issues the calls of the
+// tree's update-ca-trust script. p11-kit reads its module configuration and
+// trust source from absolute paths, which in the build domain are the
+// image's, not the tree's; the one documented redirect is a user module
+// config (XDG_CONFIG_HOME/pkcs11/modules/p11-kit-trust.module replaces the
+// system module of that name, with `paths=` for the source), and p11-kit
+// ignores user configuration for uid 0, which is what the domain's workload
+// is. The domain has no unshare, chroot or setpriv, but setuid works, so a
+// two-line python (the image's) drops to an ordinary uid and execs the
+// loader. SOURCE_DATE_EPOCH pins the one non-deterministic part of the
+// output (the creation dates in the Java keystore).
+fn ca_trust_shim() { "import os,sys; os.setgid(65534); os.setuid(65534); os.execv(sys.argv[1], sys.argv[1:])" }
+
+fn ca_trust(root) {
+    let source = "usr/share/pki/ca-trust-source";
+    let sources = join_path(root, "etc/pki/ca-trust/source") + ":" + join_path(root, source);
+    for file in [source + "/ca-bundle.trust.p11-kit", "usr/bin/trust", "usr/bin/update-ca-trust",
+                 "usr/lib64/pkcs11/p11-kit-trust.so", "usr/lib64/ld-linux-x86-64.so.2"] {
+        if !is_file(join_path(root, file)) { throw "the locked ca-certificates and p11-kit-trust lack /" + file; }
+    }
+    // The calls update-ca-trust makes (destination names are under
+    // extracted/); the script must still make exactly these.
+    let calls = [
+        ["--format=openssl-bundle", "--filter=certificates", "--overwrite", "--comment", "openssl/ca-bundle.trust.crt"],
+        ["--format=pem-bundle", "--filter=ca-anchors", "--overwrite", "--comment", "--purpose", "server-auth", "pem/tls-ca-bundle.pem"],
+        ["--format=pem-bundle", "--filter=ca-anchors", "--overwrite", "--comment", "--purpose", "email", "pem/email-ca-bundle.pem"],
+        ["--format=pem-bundle", "--filter=ca-anchors", "--overwrite", "--comment", "--purpose", "code-signing", "pem/objsign-ca-bundle.pem"],
+        ["--format=java-cacerts", "--filter=ca-anchors", "--overwrite", "--purpose", "server-auth", "java/cacerts"],
+        ["--format=edk2-cacerts", "--filter=ca-anchors", "--overwrite", "--purpose=server-auth", "edk2/cacerts.bin"],
+        ["--format=pem-directory-hash", "--filter=ca-anchors", "--overwrite", "--purpose", "server-auth", "pem/directory-hash"],
+    ];
+    let script = read_file(join_path(root, "usr/bin/update-ca-trust"));
+    for entry in calls {
+        let line = "/usr/bin/trust extract";
+        for i in 0..entry.len() - 1 { line += " " + entry[i]; }
+        line += " \"$DEST/" + entry[entry.len() - 1] + "\"";
+        if !script.contains(line) { throw "the locked update-ca-trust no longer runs `" + line + "`"; }
+    }
+    // A scratch directory the unprivileged uid can write, and the user
+    // module config that points p11-kit at the tree.
+    let work = join_path(dirname(root), "ca-trust.work");
+    if exists(work) { rm(work); }
+    mkdir(work);
+    chmod(work, 0o777);
+    let cfg = join_path(work, "config/pkcs11/modules");
+    mkdir(join_path(work, "config"));
+    mkdir(join_path(work, "config/pkcs11"));
+    mkdir(cfg);
+    write_file(join_path(cfg, "p11-kit-trust.module"),
+        "module: " + join_path(root, "usr/lib64/pkcs11/p11-kit-trust.so") + "\npriority: 1\ntrust-policy: yes\n" +
+        "x-trust-lookup: pkcs11:library-description=PKCS%2311%20Kit%20Trust%20Module\ndisable-in: p11-kit-proxy\n" +
+        "x-init-reserved: paths=" + sources + "\n");
+    chmod(join_path(work, "config"), 0o755);
+    let out = join_path(work, "out");
+    for dir in ["", "/openssl", "/pem", "/java", "/edk2"] { mkdir(out + dir); chmod(out + dir, 0o777); }
+    let loader = join_path(root, "usr/lib64/ld-linux-x86-64.so.2");
+    chmod(loader, 0o755);
+    for entry in calls {
+        let args = [ca_trust_shim(), loader, "--library-path", join_path(root, "usr/lib64"),
+                    join_path(root, "usr/bin/trust"), "extract"];
+        for i in 0..entry.len() - 1 { args.push(entry[i]); }
+        args.push(join_path(out, entry[entry.len() - 1]));
+        exec_checked("python3", ["-c"] + args,
+            #{ env: #{ XDG_CONFIG_HOME: join_path(work, "config"), HOME: work, SOURCE_DATE_EPOCH: "1" } });
+    }
+    // What the script does with the results: the files into extracted/, the
+    // hash links (made absolute, as `readlink -f` makes them) into
+    // etc/pki/tls/certs.
+    let extracted = join_path(root, "etc/pki/ca-trust/extracted");
+    for entry in calls {
+        let name = entry[entry.len() - 1];
+        let dest = join_path(extracted, name);
+        if !exists(join_path(out, name)) { throw "trust extract made no " + name; }
+        if is_dir(join_path(out, name)) {
+            if is_dir(dest) { rm(dest); }
+            shell("cp -R '" + join_path(out, name) + "' '" + dest + "'");
+        } else {
+            if exists(dest) { rm(dest); }
+            copy_file(join_path(out, name), dest);
+        }
+    }
+    let hashes = join_path(extracted, "pem/directory-hash");
+    let certs = join_path(root, "etc/pki/tls/certs");
+    shell("find '" + certs + "' -maxdepth 1 -type l -regextype posix-extended -regex '.*/[0-9a-f]{8}\\.[0-9]+' -delete");
+    shell("cd '" + hashes + "' && for l in $(find . -maxdepth 1 -type l -regextype posix-extended -regex '.*/[0-9a-f]{8}\\.[0-9]+' | sort); do " +
+          "ln -s \"/etc/pki/ca-trust/extracted/pem/directory-hash/$(readlink \"$l\")\" '" + certs + "'/$(basename \"$l\"); done");
+    rm(work);
+    let bundle = join_path(extracted, "pem/tls-ca-bundle.pem");
+    if shell_status("grep -q 'BEGIN CERTIFICATE' '" + bundle + "'") != 0 {
+        throw "trust extract made an empty TLS bundle: the trust source holds no server-auth roots";
+    }
+    if trim(shell_output("ls '" + certs + "'")) == "" { throw "trust extract made no hash links in /etc/pki/tls/certs"; }
 }
 
 // The words of a sysusers.d line; '…' and "…" quote one word.
@@ -108,10 +214,10 @@ fn sysusers(root) {
         if t != "" && !t.ends_with("\n") { t += "\n"; }
         t
     };
-    let passwd = text.call("etc/passwd");
-    let group = text.call("etc/group");
-    let shadow = text.call("etc/shadow");
-    let gshadow = text.call("etc/gshadow");
+    let passwd = text.entry("etc/passwd");
+    let group = text.entry("etc/group");
+    let shadow = text.entry("etc/shadow");
+    let gshadow = text.entry("etc/gshadow");
     let users = ids(passwd);
     let groups = ids(group);
     let free = |used| { let id = 999; while used.values().contains(id) { id -= 1; } id };
@@ -128,7 +234,7 @@ fn sysusers(root) {
             let id = if w.len() > 2 { w[2] } else { "-" };
             if kind == "g" {
                 if name in groups { continue; }
-                let gid = if id == "-" { free.call(groups) } else { parse_int(id) };
+                let gid = if id == "-" { free.entry(groups) } else { parse_int(id) };
                 groups[name] = gid;
                 group += name + ":x:" + gid + ":\n";
                 gshadow += name + ":!::\n";
@@ -142,10 +248,10 @@ fn sysusers(root) {
                 uid = parse_int(parts[0]);
                 gid = if parts[1] in groups { groups[parts[1]] } else { parse_int(parts[1]) };
             } else {
-                uid = if id == "-" { free.call(users + groups) } else { parse_int(id) };
+                uid = if id == "-" { free.entry(users + groups) } else { parse_int(id) };
                 if name in groups { gid = groups[name]; }
                 else {
-                    gid = if groups.values().contains(uid) { free.call(groups) } else { uid };
+                    gid = if groups.values().contains(uid) { free.entry(groups) } else { uid };
                     groups[name] = gid;
                     group += name + ":x:" + gid + ":\n";
                     gshadow += name + ":!::\n";

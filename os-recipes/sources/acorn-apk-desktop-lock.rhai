@@ -577,8 +577,6 @@ fn packages() {
         ["python3-pyc", "python3-pyc-3.14.10-r1", "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/python3-pyc-3.14.10-r1.apk", "bc63349707d5658ee2d852e415846246b8d71ece5007120b1d2aee85b4a2ad0a"],
         ["python3-pycache-pyc0", "python3-pycache-pyc0-3.14.10-r1", "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/python3-pycache-pyc0-3.14.10-r1.apk", "19a814d76898adbf90ec0f33ff1fd85fb8454be8615f4993fba0b69b7b978926"],
         ["qalculate-qt", "qalculate-qt-5.11.0-r0", "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/qalculate-qt-5.11.0-r0.apk", "4f3e9695fafecf99e97fd441189592631a0e11599272a63668e6423ad38cf39b"],
-        ["qemu-guest-agent", "qemu-guest-agent-11.0.3-r0", "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/qemu-guest-agent-11.0.3-r0.apk", "9180d8c2ea8352dc60a09fc7df5aec25414ca0a2cf13d3833ccf940fb3959b7f"],
-        ["qemu-guest-agent-openrc", "qemu-guest-agent-openrc-11.0.3-r0", "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/qemu-guest-agent-openrc-11.0.3-r0.apk", "84b458778a22a9d9e4086005e541afaa8cd91bd4c7fdfd0bdafc12d95d99b561"],
         ["qpdf-libs", "qpdf-libs-12.3.2-r0", "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/qpdf-libs-12.3.2-r0.apk", "fedd8952f394b8138b50f64dc8e50b656a249391adaeca49a447c710ec36d970"],
         ["qps", "qps-2.13.0-r0", "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/qps-2.13.0-r0.apk", "4d3e4742186007c343b1720b549744c0ee78e68924cf9758975484e10c324c07"],
         ["qt6-qtbase", "qt6-qtbase-6.11.1-r0", "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/qt6-qtbase-6.11.1-r0.apk", "58c938ec4f6599ae9377784d418a79b5e6e3318a237bb0284d5486465b5763a0"],

@@ -108,7 +108,7 @@ pub fn assemble(
     dir: &Path,
     kernel: &Path,
 ) -> Result<PathBuf> {
-    if !product.is_release() {
+    if !product.is_iso() {
         bail!("{product} is prepared, not built into a release ISO");
     }
     let contract = &variant.contract;

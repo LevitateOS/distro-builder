@@ -20,7 +20,7 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
-/// The install screen's binary (live-tools overlay).
+/// The install screen's binary (test-install-base overlay).
 pub(crate) const INSTALL_BINARY: &str = "usr/local/libexec/install-tui";
 /// The installed system's binary (system rootfs).
 pub(crate) const SYSTEM_BINARY: &str = "usr/local/libexec/system-tui";

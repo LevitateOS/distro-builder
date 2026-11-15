@@ -162,7 +162,7 @@ pub fn usage() -> String {
          prebuilt build <tools|tui|desktop-apps|display-server> <name> [--distro <id>]  compile that part into the local cache (no download, no ISO; needs root) and print its key and cache directory\n  \
          prebuilt publish <tools|tui|desktop-apps|display-server> <name> [--distro <id>]  upload the local cache entry of that key to the prebuilt repository's release with gh\n  \
          prebuilt publish-runtime                           compress the Recipe runtime image and upload it to the release recipe-runtime-<digest16> with gh",
-        releases = ProductId::list(ProductId::releases()),
+        releases = ProductId::list(ProductId::iso_products()),
         products = ProductId::list(ProductId::ALL),
     )
 }
@@ -491,10 +491,10 @@ pub fn parse(args: &[String]) -> Result<(PathBuf, Command), Usage> {
             if flags.iter().all(|flag| ["--exact", "--no-prebuilt"].contains(flag)) =>
         {
             let product = product(name)?;
-            if !product.is_release() {
+            if !product.is_iso() {
                 return usage(format!(
                     "'{product}' is prepared, not built into a release ISO; release products: {}",
-                    ProductId::list(ProductId::releases())
+                    ProductId::list(ProductId::iso_products())
                 ));
             }
             Command::ReleaseBuild {

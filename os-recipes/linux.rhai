@@ -3,7 +3,7 @@
 // shared kconfig followed by the variant's). Kernel products use the owned
 // target tree.
 const RECIPE_API = 2;
-const NEEDS = #{ inputs: #{ kconfig: "file", target: "directory?", kconfig_fragments: "directory?", kernel_archive: "file?" }, outputs: #{ bundle: "directory", kernel: "file", modules: "directory" }, network: ["cdn.kernel.org:443"] };
+const NEEDS = #{ inputs: #{ kconfig: "file", target: "directory?", kconfig_fragments: "directory?", kernel_archive: "file?" }, outputs: #{ bundle: "directory", kernel: "file", modules: "directory" }, network: ["cdn.kernel.org:443"], memory_mib: 16384, storage_max_objects: 262144, timeout_secs: 14400 };
 import "kernel/metadata.rhai" as kernel;
 
 let build_deps = ["linux-deps"];

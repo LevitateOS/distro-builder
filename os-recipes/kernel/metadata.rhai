@@ -12,13 +12,13 @@ fn pins() {
     #{
         levitate: #{
             line: "latest",
-            version: "7.3.3",
-            sha256: "79c66dde66cd96877fcde8f7d36aec946b1f423d2b97b5a7b1751b75c764f3d1",
+            version: "7.3.4",
+            sha256: "b11b6df8295e8e991ff040b71aaa4994a8b55caa23b6b092907f195b5840fd1f",
         },
         acorn: #{
             line: "lts",
-            version: "6.18.62",
-            sha256: "490a7aedf1b355c565d3a6c05333ccccb5da82064eca46b590448a7099d7d651",
+            version: "6.18.63",
+            sha256: "81764a545072d160748beff4d9de2e7d95aa9f16e8261110288f067a2cc61d71",
         },
     }
 }

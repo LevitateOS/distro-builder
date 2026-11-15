@@ -4,9 +4,9 @@
 //! part `system-<flavour>` is built here by `prepare_system` (the rootfs
 //! recipe's tree, its payload role, the rootfs tools and apps), and the
 //! overlay part `overlay-<product>` by `build_overlay` on that system's tree.
-//! base-rootfs, live-boot, live-tools and installed-boot share the base
-//! system part, live-desktop has the desktop one; so installed-boot boots
-//! exactly the rootfs the live-tools ISO installs. A prepared directory
+//! test-base-rootfs, test-live-ssh, test-install-base and test-installed-boot share the base
+//! system part, release has the desktop one; so test-installed-boot boots
+//! exactly the rootfs the test-install-base ISO installs. A prepared directory
 //! (`.prepared-product.json`, read by `PreparedProduct::read`) lays out one
 //! product's rootfs and overlay trees from its parts.
 use anyhow::{bail, Context, Result};
@@ -104,7 +104,7 @@ pub fn prepare_product(
     levitate_recipe::target::merge_tree(&system.tree(), &rootfs)
         .with_context(|| format!("copying the system part's tree into {}", rootfs.display()))?;
     let overlay_tree = create_empty_overlay_dir(dir, build.overlay_dir)?;
-    // An empty overlay (base-rootfs, installed-boot) stays empty, metadata too.
+    // An empty overlay (test-base-rootfs, test-installed-boot) stays empty, metadata too.
     if fs::read_dir(overlay.tree())?.next().is_some() {
         levitate_recipe::target::merge_tree(&overlay.tree(), &overlay_tree)
             .with_context(|| format!("copying the overlay part's tree into {}", overlay_tree.display()))?;

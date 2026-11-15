@@ -25,20 +25,20 @@ pub fn build(product: ProductId) -> ProductBuild {
         install_screen: false,
     };
     match product {
-        ProductId::BaseRootfs => ProductBuild {
+        ProductId::TestBaseRootfs => ProductBuild {
             live_session: false,
             ..LIVE
         },
-        ProductId::LiveBoot => LIVE,
-        ProductId::LiveTools => ProductBuild {
+        ProductId::TestLiveSsh => LIVE,
+        ProductId::TestInstallBase => ProductBuild {
             install_screen: true,
             ..LIVE
         },
-        ProductId::LiveDesktop => ProductBuild {
+        ProductId::Release => ProductBuild {
             install_screen: true,
             ..LIVE
         },
-        ProductId::InstalledBoot => ProductBuild {
+        ProductId::TestInstalledBoot => ProductBuild {
             overlay_dir: "boot-overlay",
             live_session: false,
             install_screen: false,

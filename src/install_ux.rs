@@ -9,7 +9,7 @@
 //! the boot-injection payload sets `SERIAL_KEY=1`; otherwise it gets the shell
 //! straight away.
 //!
-//! Everything goes into the live-tools overlay (the layer `pipeline/products.rs` adds
+//! Everything goes into the test-install-base overlay (the layer `pipeline/products.rs` adds
 //! for a product with `install_screen`), never into the system rootfs below it, which
 //! has no use for the install screen. Paths are relative to a layer's root.
 

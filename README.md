@@ -113,8 +113,8 @@ from and kept under `.artifacts/parts/<distro>/<kind>/<key>/`
   and the kernel binding `usr/lib/recab/kernel.json`, metadata finalized), the
   rootfs EROFS, the installed initramfs and the release set (`release.json`,
   `system-inventory.json`, signature, `live/` and `boot/` members,
-  `system-sources.sha256`). base-rootfs, live-boot, live-tools and
-  installed-boot share `system-base`; live-desktop has `system-desktop`.
+  `system-sources.sha256`). test-base-rootfs, test-live-ssh, test-install-base and
+  test-installed-boot share `system-base`; release has `system-desktop`.
 - `overlay-<product>`: the product's overlay tree (live session, overlay
   tools, install screen) built on its system part's tree, and its EROFS.
 
@@ -161,7 +161,7 @@ a part), links `rootfs-source` and the overlay tree to the parts' trees for
 readers such as the preflight, builds the live initramfs (never cached),
 verifies the release set and writes the ISO with reciso. The run directory has
 the same files as before parts existed. No product is built on another:
-building live-tools builds no base-rootfs or live-boot ISO. `product prepare`
+building test-install-base builds no test-base-rootfs or test-live-ssh ISO. `product prepare`
 ensures the same parts and copies their trees into its directory, so
 `transform build product-erofs` may change them there. Parts are never
 removed automatically; delete `.artifacts/parts` to reclaim the space (old
@@ -249,7 +249,7 @@ After explicit builds, run `cargo xtask test all levitate` and
 `cargo xtask test ab-update levitate` and `cargo xtask test ab-update acorn`.
 The current test CLI defaults to A/B installation. Selecting `--mode mutable`
 skips A/B in `all`; a standalone `ab-update` still needs an A/B install. The
-`live-tools` scenario retains actual guest installer PTY interaction in
+`test-install-base` scenario retains actual guest installer PTY interaction in
 `install-pty.log`, in addition to its tool/split-pane smoke controls. Version/help
 or smoke alone does not establish interaction. These commands are acceptance
 procedures, not claims that a particular source/product combination passed.

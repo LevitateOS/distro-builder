@@ -120,6 +120,10 @@ case "${1:-}" in
                 ;;
             *) echo "unsupported package backend: $packages" >&2; exit 2 ;;
         esac
+        # A home is its owner's alone on both systems. busybox's adduser makes
+        # it readable by everyone; useradd follows login.defs, which may change.
+        home=$(awk -F: -v user="$name" '$1 == user { print $6 }' /etc/passwd)
+        if [ -n "$home" ] && [ -d "$home" ]; then chmod 0700 "$home"; fi
         ;;
     machine-id)
         id=

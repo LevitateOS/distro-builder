@@ -17,6 +17,7 @@ const TOOLS: &[(&str, &str, &[&str])] = &[
     ),
     ("recab", "tools/recab", &["recab"]),
     ("recguest", "tools/recguest", &["recguest"]),
+    ("recupdate", "tools/recupdate", &["recupdate"]),
     ("levitate-recipe", "tools/recipe", &["recipe"]),
     (
         "install-split-pane",
@@ -443,10 +444,27 @@ pub fn tool_binaries(package: &str) -> Result<Vec<String>> {
     Ok(tool(package)?.2.iter().map(|name| name.to_string()).collect())
 }
 
+/// Where the repository keeps the release public keys (`*.pub`) every image
+/// carries at `/usr/share/levitate/release-keys/` (with recupdate's tree).
+pub(crate) const RELEASE_KEYS_DIR: &str = "distro/keys/release";
+
 /// Compile `package`'s `binary` (its default when `None`) through its recipe,
 /// as a static musl program on every distro, and return the published package tree,
-/// which holds it at `usr/bin/<binary>`.
+/// which holds it at `usr/bin/<binary>`. recupdate's tree also depends on the
+/// init system (its service files): use [`build_system_tool_tree`] for it.
 pub(crate) fn build_tool_tree(repo: &Path, package: &str, binary: Option<&str>) -> Result<PathBuf> {
+    build_system_tool_tree(repo, package, binary, None)
+}
+
+/// [`build_tool_tree`] for a system whose init is `init`: recupdate's tree
+/// takes the init's service files from `tools/recupdate/dist` and the release
+/// public keys from [`RELEASE_KEYS_DIR`] (a build without one says so).
+pub(crate) fn build_system_tool_tree(
+    repo: &Path,
+    package: &str,
+    binary: Option<&str>,
+    init: Option<distro_profile::InitSystem>,
+) -> Result<PathBuf> {
     let (_, _, binaries) = tool(package)?;
     let binary = binary.unwrap_or(binaries[0]);
     if !binaries.contains(&binary) {
@@ -456,13 +474,38 @@ pub(crate) fn build_tool_tree(repo: &Path, package: &str, binary: Option<&str>) 
     let recipe = repo
         .join("distro/builder/os-recipes")
         .join("install-tools.rhai");
-    let work = repo.join(".artifacts/work/recipe-tools").join(binary);
+    let init_name = if package == "recupdate" {
+        Some(
+            init.with_context(|| "recupdate's tree is made for one init system; name it")?
+                .as_str(),
+        )
+    } else {
+        None
+    };
+    let work = repo.join(".artifacts/work/recipe-tools").join(match init_name {
+        Some(init) => format!("{binary}-{init}"),
+        None => binary.to_string(),
+    });
     let install_path = format!("usr/bin/{binary}");
     let mut invocation = super::Invocation::new(repo, "install", &recipe, &work)
         .define("BIN", binary)
         .define("INSTALL_PATH", &install_path)
         .input("source", source.path())
         .input("program", &compile_crate(repo, package)?.join(binary));
+    let keys = tempfile::Builder::new().prefix("release-keys-").tempdir()?;
+    if let Some(init) = init_name {
+        let found = copy_release_keys(repo, keys.path())?;
+        if found == 0 {
+            crate::tprintln!(
+                "[release-keys] no key in {RELEASE_KEYS_DIR}/*.pub: this image will refuse every release \
+                 (make one with `cargo xtask release keygen`)"
+            );
+        }
+        invocation = invocation
+            .define("INIT", init)
+            .input("dist", &repo.join("tools/recupdate/dist"))
+            .input("keys", keys.path());
+    }
     // The package manager ships the same pinned runtime the builder uses.
     // Explicit inputs give the recipe no ambient access to the host image.
     let reference_file = tempfile::NamedTempFile::new()?;
@@ -475,5 +518,38 @@ pub(crate) fn build_tool_tree(repo: &Path, package: &str, binary: Option<&str>) 
             .input("runtime_image", &image)
             .input("runtime_reference", reference_file.path());
     }
-    invocation.run()?.directory("rootfs")
+    let tree = invocation.run()?.directory("rootfs")?;
+    drop(keys);
+    Ok(tree)
+}
+
+/// Copies every `*.pub` of [`RELEASE_KEYS_DIR`] into `into` (nothing else of
+/// that folder: its README stays out of the image) and returns how many.
+fn copy_release_keys(repo: &Path, into: &Path) -> Result<usize> {
+    let dir = repo.join(RELEASE_KEYS_DIR);
+    let mut found = 0;
+    let entries = match fs::read_dir(&dir) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+        Err(error) => return Err(error).with_context(|| format!("reading {}", dir.display())),
+    };
+    let mut names = Vec::new();
+    for entry in entries {
+        let entry = entry?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name.ends_with(".pub") && entry.file_type()?.is_file() {
+            names.push(name);
+        }
+    }
+    names.sort();
+    for name in names {
+        let text = fs::read_to_string(dir.join(&name)).with_context(|| format!("reading {RELEASE_KEYS_DIR}/{name}"))?;
+        let key = text.trim();
+        if key.len() != 44 || !key.ends_with('=') || text.trim_end_matches('\n').contains('\n') {
+            bail!("{RELEASE_KEYS_DIR}/{name} is not one base64 Ed25519 public key line (cargo xtask release keygen prints it)");
+        }
+        fs::write(into.join(&name), format!("{key}\n"))?;
+        found += 1;
+    }
+    Ok(found)
 }

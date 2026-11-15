@@ -8,10 +8,18 @@
 // pinned runtime image/launcher the builder selected, supplied as typed inputs.
 // Input `program`, when given, is the already compiled binary: it is
 // installed as it is and nothing compiles.
+// recupdate (the release checker every installed system has) also installs its
+// `dist` input (tools/recupdate/dist) for the init system the INIT define names:
+// on systemd the daily notice's service and timer, the timer enabled; on OpenRC
+// the notice as the periodic job /etc/periodic/daily/recupdate-notice (BusyBox's
+// crond runs it); on both the per-user autostart entry. Its `keys` input holds
+// the release public keys (`*.pub`, possibly none), installed at
+// /usr/share/levitate/release-keys/; without one the system refuses every
+// release (docs/release-engineering.md, sections 2 and 10).
 // The named program output is published by Recipe for the consumer to install.
 const RECIPE_API = 2;
 const NEEDS = #{
-    inputs: #{ source: "directory", catalog: "directory?", launcher: "file?", runtime_image: "file?", runtime_reference: "file?", program: "file?" },
+    inputs: #{ source: "directory", catalog: "directory?", launcher: "file?", runtime_image: "file?", runtime_reference: "file?", program: "file?", dist: "directory?", keys: "directory?" },
     outputs: #{ program: "file", rootfs: "directory" },
     // Packaging Recipe retains compiler outputs while copying its selected
     // runtime tar (the current compiler image is about 1.3 GiB).
@@ -29,6 +37,7 @@ let ctx = #{
     prebuilt: join_path(RUNTIME.paths.inputs, "program"),
     built_program: join_path(RUNTIME.paths.build, "target/" + rust_target + "/release/" + bin),
     program: join_path(RUNTIME.paths.output, "bin/" + bin),
+    init: if is_def_var("INIT") { INIT } else { "" },
 };
 
 fn is_acquired(ctx) {
@@ -126,6 +135,52 @@ fn recipe_runtime(ctx) {
         "--catalog", join_path(inputs, "catalog")]);
 }
 
+// recupdate's service files for ctx.init and the release keys, as [source, path, mode].
+fn recupdate_files(ctx) {
+    let inputs = ctx.runtime.paths.inputs;
+    let dist = join_path(inputs, "dist");
+    if !is_dir(dist) { throw "recupdate packaging requires the dist input (tools/recupdate/dist)"; }
+    let files = [[join_path(dist, "recupdate-notify.desktop"), "etc/xdg/autostart/recupdate-notify.desktop", 0o644]];
+    if ctx.init == "systemd" {
+        files.push([join_path(dist, "recupdate-notice.service"), "usr/lib/systemd/system/recupdate-notice.service", 0o644]);
+        files.push([join_path(dist, "recupdate-notice.timer"), "usr/lib/systemd/system/recupdate-notice.timer", 0o644]);
+    } else if ctx.init == "openrc" {
+        files.push([join_path(dist, "recupdate-notice.periodic"), "etc/periodic/daily/recupdate-notice", 0o755]);
+    } else {
+        throw "recupdate packaging requires INIT (systemd or openrc), not '" + ctx.init + "'";
+    }
+    let keys = join_path(inputs, "keys");
+    if is_dir(keys) {
+        for name in shell_output("ls '" + keys + "'").split("\n") {
+            let name = trim(name);
+            if name == "" { continue; }
+            if !name.ends_with(".pub") { throw "the keys input holds " + name + ", not a .pub key"; }
+            files.push([join_path(keys, name), "usr/share/levitate/release-keys/" + name, 0o644]);
+        }
+    }
+    files
+}
+
+fn install_recupdate(ctx) {
+    // A key removed from the repository leaves the image too.
+    let keys = join_path(ctx.rootfs, "usr/share/levitate/release-keys");
+    if is_dir(keys) { rm(keys); }
+    for file in recupdate_files(ctx) {
+        let dest = join_path(ctx.rootfs, file[1]);
+        mkdir(dirname(dest));
+        copy_file(file[0], dest);
+        chmod(dest, file[2]);
+        target_mode(ctx.rootfs, file[1], file[2]);
+    }
+    // The folder exists even without a key: recupdate then refuses every release.
+    mkdir(join_path(ctx.rootfs, "usr/share/levitate/release-keys"));
+    target_mode(ctx.rootfs, "usr/share/levitate/release-keys", 0o755);
+    if ctx.init == "systemd" {
+        ln_force("/usr/lib/systemd/system/recupdate-notice.timer",
+            join_path(ctx.rootfs, "etc/systemd/system/timers.target.wants/recupdate-notice.timer"));
+    }
+}
+
 fn is_installed(ctx) {
     if !is_file(ctx.program) { return needs_work(ctx, ctx.name + " output is missing"); }
     if !is_file(join_path(ctx.rootfs, ctx.install_path)) {
@@ -138,6 +193,11 @@ fn is_installed(ctx) {
         }
         for path in ["usr/share/recipe/sources/levitate.toml", "usr/share/recipe/sources/levitate/index.json"] {
             if !is_file(join_path(ctx.rootfs, path)) { return needs_work(ctx, "Recipe's official source is missing " + path); }
+        }
+    }
+    if ctx.name == "recupdate" {
+        for file in recupdate_files(ctx) {
+            if !is_file(join_path(ctx.rootfs, file[1])) { return needs_work(ctx, "recupdate is missing /" + file[1]); }
         }
     }
     ctx.outputs = #{program: ctx.program, rootfs: ctx.rootfs};
@@ -154,6 +214,7 @@ fn install(ctx) {
         recipe_state(ctx.rootfs);
         recipe_runtime(ctx);
     }
+    if ctx.name == "recupdate" { install_recupdate(ctx); }
     ctx.outputs = #{program: ctx.program, rootfs: ctx.rootfs};
     ctx
 }

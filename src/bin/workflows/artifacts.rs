@@ -80,8 +80,9 @@ pub(crate) fn preseed_rootfs_source_cmd(
     for (name, path) in paths {
         println!("  {name}: {}", path.display());
     }
-    // The desktop system carries the desktop apps, which are compiled in a
-    // root of the variant's own packages: its downloads go with the desktop's.
+    // The desktop apps (the prebuilt the rec-apps recipe pins) are compiled in
+    // a root of the variant's own packages: its downloads go with the desktop
+    // lock's.
     if flavour == Flavour::Desktop {
         let recipe_script = distro_builder::apps_build_preseed_recipe(&bundle);
         let paths = preseed_apps_build(&bundle.repo_root, distro_id, &recipe_script, refresh)

@@ -1,30 +1,20 @@
 //! extends: package-effects.rhai
 // The RPM backend of the package-effects step: the composed tree of the
-// locked Fedora RPM set (base, and on the desktop system the desktop lock
-// over it, as the `flavour` input says), whose install scripts never ran, so
+// base lock's Fedora RPMs, whose install scripts never ran, so
 // `package_effects` does what they would have done, from the packages' own
 // data where they ship it. The system recipe (`fedora-rpm-source-rootfs.rhai`)
 // configures the tree this publishes.
 const RECIPE_API = 2;
-const NEEDS = #{ inputs: #{ composed: "directory", flavour: "file" }, outputs: #{ tree: "file" }, memory_mib: 8192, storage_max_objects: 262144, timeout_secs: 14400 };
+const NEEDS = #{ inputs: #{ composed: "directory" }, outputs: #{ tree: "file" }, memory_mib: 8192, storage_max_objects: 262144, timeout_secs: 14400 };
 import "sources/levitate-rpm-lock.rhai" as lock;
-import "sources/levitate-rpm-desktop-lock.rhai" as desktop_lock;
 import "system-files.rhai" as system;
 let ctx = #{
     name: "fedora-rpm-package-effects",
     description: "The locked Fedora " + lock::release() + " RPM set with its packages' effects",
 };
 
-// The lock rows the tree is made of: the base lock, and the desktop lock on
-// the desktop system.
-fn lock_rows(ctx) {
-    let rows = lock::packages();
-    if flavour(ctx) == "desktop" { rows += desktop_lock::packages(); }
-    rows
-}
-
 fn verify_inputs(ctx) {
-    verify_composed(ctx, lock_rows(ctx));
+    verify_composed(ctx, lock::packages());
 }
 
 fn unpack(ctx, root) {

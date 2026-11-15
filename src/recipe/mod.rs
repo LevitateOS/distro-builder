@@ -260,6 +260,11 @@ pub struct Invocation<'a> {
     concurrent: Option<PathBuf>,
     /// Where the run's output goes instead of the terminal.
     log: Option<PathBuf>,
+    /// The recipe collection names and deps resolve from, when not os-recipes.
+    recipes_path: Option<PathBuf>,
+    /// Environment the builder sets for this run (after removing ambient
+    /// `RECIPE_*`/`GINUX_*` variables).
+    env: Vec<(OsString, OsString)>,
 }
 
 impl<'a> Invocation<'a> {
@@ -280,7 +285,23 @@ impl<'a> Invocation<'a> {
             cwd: None,
             concurrent: None,
             log: None,
+            recipes_path: None,
+            env: Vec::new(),
         }
+    }
+
+    /// Resolves recipe names and `deps` from `path` instead of os-recipes: a
+    /// group recipe of the public catalogue (`recipes/`) run by the builder.
+    pub fn recipes_path(mut self, path: impl Into<PathBuf>) -> Self {
+        self.recipes_path = Some(path.into());
+        self
+    }
+
+    /// Sets `name` to `value` in Recipe's environment for this run, such as
+    /// `RECIPE_HOST_LIBC_ROOT` (the system a group recipe is built for).
+    pub fn env(mut self, name: impl Into<OsString>, value: impl Into<OsString>) -> Self {
+        self.env.push((name.into(), value.into()));
+        self
     }
 
     /// Runs beside other invocations of the same build (the unpack shards):
@@ -448,7 +469,10 @@ impl<'a> Invocation<'a> {
             .context("creating a fresh recipe result file")?;
         // OS producers and their imports use the builder's collection;
         // the workspace's user-managed recipe catalog is a separate consumer.
-        let os_recipes_path = self.repo.join("distro/builder/os-recipes");
+        let os_recipes_path = self
+            .recipes_path
+            .clone()
+            .unwrap_or_else(|| self.repo.join("distro/builder/os-recipes"));
 
         let mut cmd = Cmd::new(bin)
             // OS composition consumes products without activating host packages.
@@ -496,6 +520,10 @@ impl<'a> Invocation<'a> {
             if control && !LAUNCHER_ENV.contains(&name.as_ref()) {
                 cmd = cmd.env_remove(&key);
             }
+        }
+        for (name, value) in &self.env {
+            note(format!("    {}={}", name.to_string_lossy(), value.to_string_lossy()));
+            cmd = cmd.env(name, value);
         }
         let ginux = ginux_binary(self.repo)?;
         let worker = self.worker.as_deref().unwrap_or(bin);

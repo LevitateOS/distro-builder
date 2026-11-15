@@ -11,8 +11,8 @@
 // Inputs every backend takes: `composed`, the tree the builder composed from
 // the locked packages (`tree.tar`, the tree with its target metadata manifest,
 // as `target_pack_tree` writes it; `packages.txt`, one `<sha256> <id>` line
-// per package in the order they were composed), and `flavour`, `base` or
-// `desktop`: which locks the tree is made of.
+// per package in the order they were composed). The tree is the base lock's
+// alone: no image carries anything above the base.
 //
 // Then the tree's target metadata is finalized, the build's caches and logs
 // are dropped, and the step publishes the tree as one archive (the `tree`
@@ -30,13 +30,6 @@ fn stamp_of(ctx) { join_path(ctx.runtime.paths.output, "tree.built") }
 
 fn composed_file(ctx, name) {
     join_path(join_path(ctx.runtime.paths.inputs, "composed"), name)
-}
-
-// The `flavour` input: "base" or "desktop".
-fn flavour(ctx) {
-    let value = trim(read_file(join_path(ctx.runtime.paths.inputs, "flavour")));
-    if value != "base" && value != "desktop" { throw "the flavour input is " + value + ", not base or desktop"; }
-    value
 }
 
 // Refuses a composed tree that is not made of exactly the lock rows `rows`

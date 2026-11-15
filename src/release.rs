@@ -1,10 +1,11 @@
 //! The combiner: a release product's ISO, written in its run directory from
-//! its two parts (`crate::parts`): its flavour's system part (system tree,
+//! its two parts (`crate::parts`): the system part (system tree,
 //! rootfs image, installed initramfs, release set) and its overlay part. The
 //! combiner links the parts' files into the run directory, builds the live
 //! initramfs (small, never cached), verifies the release set and writes the
 //! ISO with reciso. The live medium boots the target rootfs's own
-//! systemd-boot.
+//! systemd-boot. For the `release` product it then writes the update release
+//! next to the ISO (`crate::update_release::write`).
 
 use anyhow::{bail, ensure, Context, Result};
 use distro_contract::{ProductId, Variant};
@@ -138,7 +139,7 @@ pub fn assemble(
     }
 
     let what = step("ensuring the system part");
-    let system = crate::parts::system(variant, product.flavour(), kernel).context(what)?;
+    let system = crate::parts::system(variant, kernel).context(what)?;
     let what = step("ensuring the overlay part");
     let overlay = crate::parts::overlay(variant, product, &system).context(what)?;
     ensure!(
@@ -198,12 +199,6 @@ pub fn assemble(
     {
         let manifest = release_set.manifest();
         ensure!(
-            manifest.identity.flavour == product.flavour(),
-            "{what}: the release set is the {} system, not {}",
-            manifest.identity.flavour,
-            product.flavour()
-        );
-        ensure!(
             manifest.kernel.release == release,
             "{what}: the release set binds kernel {}, not {release}",
             manifest.kernel.release
@@ -255,6 +250,15 @@ pub fn assemble(
     ];
     config.systemd_boot = rootfs.join(SYSTEMD_BOOT_EFI);
     let iso = reciso::create_iso(&config, &|message| crate::tprintln!("  {message}")).context(what)?;
+
+    // The release medium's run directory is also the update release
+    // (docs/release-engineering.md, section 3): the archives and the
+    // unsigned release.json beside the ISO, for `cargo xtask release publish`.
+    if product == ProductId::Release {
+        let what = step("writing the update release beside the ISO");
+        crate::update_release::write(variant, &rootfs, &release_set.kernel(), &release_set.initramfs(), dir)
+            .context(what)?;
+    }
     seq.finish();
 
     print_summary(dir)?;

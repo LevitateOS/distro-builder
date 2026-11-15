@@ -5,7 +5,7 @@
 // command.
 
 fn release() { 45 }
-fn locked_on() { "2026-11-10" }
+fn locked_on() { "2026-11-15" }
 
 // [name, NEVRA, URL, SHA256]
 fn packages() {
@@ -14,9 +14,9 @@ fn packages() {
         ["abattis-cantarell-vf-fonts", "abattis-cantarell-vf-fonts-0.301-18.fc45.noarch", "https://dl.fedoraproject.org/pub/fedora/linux/releases/45/Everything/x86_64/os/Packages/a/abattis-cantarell-vf-fonts-0.301-18.fc45.noarch.rpm", "5a194ee8e324e5969c15241dd70a9a97a01158bf5160c0be4294ab9ad239c802"],
         ["avahi-libs", "avahi-libs-0.9~rc2-9.fc45.x86_64", "https://dl.fedoraproject.org/pub/fedora/linux/releases/45/Everything/x86_64/os/Packages/a/avahi-libs-0.9~rc2-9.fc45.x86_64.rpm", "5c7c20754931df98db1f512567a46a2ba6de70b59d181e216e78bb4ce9ad76c8"],
         ["binutils", "binutils-2.47-1.fc45.x86_64", "https://dl.fedoraproject.org/pub/fedora/linux/releases/45/Everything/x86_64/os/Packages/b/binutils-2.47-1.fc45.x86_64.rpm", "9a3060e6686dd00a239a86e95140816968fa68a782cb385613dea620676c1dfb"],
-        ["cmake", "cmake-4.3.0-5.fc45.x86_64", "https://dl.fedoraproject.org/pub/fedora/linux/releases/45/Everything/x86_64/os/Packages/c/cmake-4.3.0-5.fc45.x86_64.rpm", "b378468b91e9e48eea437359ff763049966df50616f7f3e2ff805d99e053e2db"],
-        ["cmake-data", "cmake-data-4.3.0-5.fc45.noarch", "https://dl.fedoraproject.org/pub/fedora/linux/releases/45/Everything/x86_64/os/Packages/c/cmake-data-4.3.0-5.fc45.noarch.rpm", "493c206af54e18a820dfe1b1773e8a3bace94907a1c404aec1e6d25792c5c7f0"],
-        ["cmake-filesystem", "cmake-filesystem-4.3.0-5.fc45.x86_64", "https://dl.fedoraproject.org/pub/fedora/linux/releases/45/Everything/x86_64/os/Packages/c/cmake-filesystem-4.3.0-5.fc45.x86_64.rpm", "4d4f5a8fac4af836b9c5b57a26f9a496ddb1adb70f7bbdf05bf3ba51cd086ceb"],
+        ["cmake", "cmake-4.3.0-7.fc45.x86_64", "https://dl.fedoraproject.org/pub/fedora/linux/updates/45/Everything/x86_64/Packages/c/cmake-4.3.0-7.fc45.x86_64.rpm", "062773590bba065fb4443cb4377b9339b3c60b3d06d6e24528416cf43cf7cfdf"],
+        ["cmake-data", "cmake-data-4.3.0-7.fc45.noarch", "https://dl.fedoraproject.org/pub/fedora/linux/updates/45/Everything/x86_64/Packages/c/cmake-data-4.3.0-7.fc45.noarch.rpm", "7cfd8f3cd9496fcd7f1475eb92e39fdb432d50205a11af51aa3c2e960c486020"],
+        ["cmake-filesystem", "cmake-filesystem-4.3.0-7.fc45.x86_64", "https://dl.fedoraproject.org/pub/fedora/linux/updates/45/Everything/x86_64/Packages/c/cmake-filesystem-4.3.0-7.fc45.x86_64.rpm", "f9baaf6f16e202b2a2afbbe62beb67c86c519044e28d99e904f625193cf97179"],
         ["cpp", "cpp-16.2.1-3.fc45.x86_64", "https://dl.fedoraproject.org/pub/fedora/linux/updates/45/Everything/x86_64/Packages/c/cpp-16.2.1-3.fc45.x86_64.rpm", "66fe200396e674df921ed78d496a6179d3ff2f586dcfb2b013cf4749155cd84b"],
         ["cups-filesystem", "cups-filesystem-2.4.19-4.fc45.noarch", "https://dl.fedoraproject.org/pub/fedora/linux/releases/45/Everything/x86_64/os/Packages/c/cups-filesystem-2.4.19-4.fc45.noarch.rpm", "d3e4d7e32cb46aaf265d8fd9bb2c95df938a5643ba1f19801ef9b3ceeefb700e"],
         ["cups-libs", "cups-libs-2.4.19-4.fc45.x86_64", "https://dl.fedoraproject.org/pub/fedora/linux/releases/45/Everything/x86_64/os/Packages/c/cups-libs-2.4.19-4.fc45.x86_64.rpm", "b5d6664200c9d3eea3082d357ed7295bbe17613d6d0479c5a29f76f2342bf6cc"],
@@ -31,6 +31,7 @@ fn packages() {
         ["freetype", "freetype-2.14.3-3.fc45.x86_64", "https://dl.fedoraproject.org/pub/fedora/linux/updates/45/Everything/x86_64/Packages/f/freetype-2.14.3-3.fc45.x86_64.rpm", "9ee315c852f962e074293d8c4c44566cee1c7ed0b37aa9bafca75439104fc8f3"],
         ["gcc", "gcc-16.2.1-3.fc45.x86_64", "https://dl.fedoraproject.org/pub/fedora/linux/updates/45/Everything/x86_64/Packages/g/gcc-16.2.1-3.fc45.x86_64.rpm", "333f2654a9c0ea00187df206f52640c9e8d2ae0b3b678438ec5f1dfc9bfdcb0a"],
         ["gcc-c++", "gcc-c++-16.2.1-3.fc45.x86_64", "https://dl.fedoraproject.org/pub/fedora/linux/updates/45/Everything/x86_64/Packages/g/gcc-c++-16.2.1-3.fc45.x86_64.rpm", "0292692244413b8242fc62ccd21bcc8b9857a7ff0b5fe2873f8f9ef3187dfa9b"],
+        ["glib2", "glib2-2.90.1-1.fc45.x86_64", "https://dl.fedoraproject.org/pub/fedora/linux/updates/45/Everything/x86_64/Packages/g/glib2-2.90.1-1.fc45.x86_64.rpm", "b60cf429338776312f0937ac512ecdb595b00c0642d22075c31f6c86410f46d0"],
         ["glibc-devel", "glibc-devel-2.44-2.fc45.x86_64", "https://dl.fedoraproject.org/pub/fedora/linux/updates/45/Everything/x86_64/Packages/g/glibc-devel-2.44-2.fc45.x86_64.rpm", "6be4a896d3b9ff68884de273758d0ee66a0c5bf46677fbac2d7f5945bc8db203"],
         ["glx-utils", "glx-utils-9.0.0-12.fc45.x86_64", "https://dl.fedoraproject.org/pub/fedora/linux/releases/45/Everything/x86_64/os/Packages/g/glx-utils-9.0.0-12.fc45.x86_64.rpm", "a8452f1c52f8c382ad51579703085f0366b9e3a1768fda4b1d384a32a5bd6617"],
         ["google-noto-fonts-common", "google-noto-fonts-common-20260601-3.fc45.noarch", "https://dl.fedoraproject.org/pub/fedora/linux/releases/45/Everything/x86_64/os/Packages/g/google-noto-fonts-common-20260601-3.fc45.noarch.rpm", "be2e30de84fe831d6f385e6b67e0634e27b1e0596ac33643e09006cc2a3c1210"],

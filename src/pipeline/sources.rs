@@ -1,6 +1,6 @@
 //! The sources a system rootfs is built from, as one digest: the checkout's
 //! builder (its recipes and locks), contract, profile, variant, TUI and GUI
-//! apps, the recipes repository and the rootfs tools' crates, the Ginux
+//! apps, the recipes repository, the release public keys and the rootfs tools' crates, the Ginux
 //! launcher the system ships, and the declared behaviour versions of the
 //! Recipe and Ginux that run every recipe step. The digest
 //! is one input of the system part's key (`crate::parts`), and the system part
@@ -46,6 +46,10 @@ pub fn system_sources_digest(repo: &Path, distro_id: &str) -> Result<String> {
     .map(PathBuf::from)
     .collect();
     roots.insert(PathBuf::from("distro/variants").join(distro_id));
+    // The release public keys every system carries (with recupdate's tree).
+    if repo.join(crate::recipe::tools::RELEASE_KEYS_DIR).is_dir() {
+        roots.insert(PathBuf::from(crate::recipe::tools::RELEASE_KEYS_DIR));
+    }
     for tool in LIVE_TOOLS.iter().filter(|tool| tool.layer == ToolLayer::Rootfs) {
         roots.extend(crate::recipe::tools::tool_crate_dirs(&repo, tool.package)?);
     }

@@ -3,8 +3,7 @@
 // tree's target metadata captured from them, exactly as the system recipe
 // did it before it was split. Published as one archive (the `tree` output,
 // `target_pack_tree`'s format), which the package-effects step
-// (`alpine-apk-package-effects.rhai`) copies for the base system, and lays
-// the desktop lock over for the desktop system.
+// (`alpine-apk-package-effects.rhai`) copies.
 //
 // apk keeps its own database in the tree, so APKs are not unpacked one by
 // one and composed like RPMs: a tree from separate apk runs would not have

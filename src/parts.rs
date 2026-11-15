@@ -6,16 +6,18 @@
 //! its named inputs; `part.json` records the kind, the key, the inputs, its
 //! trees, its output files (path, bytes, sha256) and when it was finished.
 //!
-//! - `system-<flavour>` (base or desktop): the system tree (the rootfs
-//!   recipe's tree with the rootfs tools and apps, the kernel's modules,
-//!   finalized metadata) in `rootfs-source/`, its rootfs EROFS, the
-//!   installed initramfs and the release set (`release.json`, `live/` and
+//! - `system`: the base system tree (the rootfs
+//!   recipe's tree with the rootfs tools, the release's group recipes, the
+//!   kernel's modules, finalized metadata, then Recipe's `base` entry from
+//!   `record-base`) in `rootfs-source/`, its rootfs EROFS, the
+//!   installed initramfs and the release set (`release-set.json`, `live/` and
 //!   `boot/` members, `system-sources.sha256`). Built from the checkout's
 //!   system sources, the builder's own crates, Recipe's and Ginux's declared
 //!   behaviour versions (and their bytes in exact mode) and the Ginux root,
 //!   the kernel and busybox (`system_inputs`).
 //! - `overlay-<product>`: the product's overlay tree (live session, overlay
-//!   tools, install screen) built on its flavour's system tree, and its
+//!   tools, install screen; on the release medium the default software set
+//!   and its package cache) built on the system tree, and its
 //!   EROFS. Built from the system part (its key and its exact build), the
 //!   product, the overlay tools' crates and the running builder itself
 //!   (`overlay_inputs`).
@@ -35,7 +37,6 @@
 //! long as it holds the `Part`.
 
 use anyhow::{bail, ensure, Context, Result};
-use distro_contract::profile::Flavour;
 use distro_contract::{runs, ProductId, Variant};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -159,17 +160,17 @@ impl Part {
     }
 }
 
-/// The `flavour` system part of `variant`, with the kernel in `kernel`
+/// The system part of `variant`, with the kernel in `kernel`
 /// (`runs::kernel_dir`): built if no usable part has its key.
-pub(crate) fn system(variant: &Variant, flavour: Flavour, kernel: &Path) -> Result<Part> {
-    let kind = format!("system-{flavour}");
+pub(crate) fn system(variant: &Variant, kernel: &Path) -> Result<Part> {
+    let kind = "system".to_string();
     let names = &variant.contract.artifacts;
     let label = label(&kind, &variant.id);
     ensure_part(
         variant,
         &kind,
         &[ROOTFS_SOURCE_DIR],
-        &|| system_inputs(variant, flavour, kernel),
+        &|| system_inputs(variant, kernel),
         &mut |dir, inputs| {
             let seq = crate::timeline::Seq::new();
             let step = |what: &str| {
@@ -182,8 +183,8 @@ pub(crate) fn system(variant: &Variant, flavour: Flavour, kernel: &Path) -> Resu
             let rootfs = create_empty_overlay_dir(dir, ROOTFS_SOURCE_DIR)?;
 
             let what = step("preparing the system tree");
-            products::prepare_system(variant, flavour, &rootfs)
-                .with_context(|| format!("preparing the {} {flavour} system rootfs", variant.id))
+            products::prepare_system(variant, &rootfs)
+                .with_context(|| format!("preparing the {} system rootfs", variant.id))
                 .context(what)?;
 
             let what = step("adding the kernel modules to the rootfs");
@@ -193,6 +194,9 @@ pub(crate) fn system(variant: &Variant, flavour: Flavour, kernel: &Path) -> Resu
             levitate_recipe::target::finalize(&rootfs)
                 .context("finalizing intended release metadata")
                 .context(what.clone())?;
+            // Recipe's `record-base` is the tree's very last change: the
+            // receipt entry `base` and usr/lib/levitate/release.json.
+            crate::update_release::record_base(variant, &rootfs).context(what.clone())?;
             crate::build_erofs_default(&rootfs, &dir.join(&names.rootfs)).context(what)?;
 
             let what = step("acquiring busybox");
@@ -220,7 +224,6 @@ pub(crate) fn system(variant: &Variant, flavour: Flavour, kernel: &Path) -> Resu
             sources::record(dir, &inputs["system-sources"])?;
             crate::release_manifest::write(
                 variant,
-                flavour,
                 &rootfs,
                 dir,
                 release,
@@ -234,7 +237,7 @@ pub(crate) fn system(variant: &Variant, flavour: Flavour, kernel: &Path) -> Resu
     )
 }
 
-/// `product`'s overlay part, built on `system` (its flavour's system part).
+/// `product`'s overlay part, built on `system` (the system part).
 pub(crate) fn overlay(variant: &Variant, product: ProductId, system: &Part) -> Result<Part> {
     let kind = format!("overlay-{product}");
     let build = crate::product::build(product);
@@ -283,12 +286,11 @@ pub(crate) fn check_kernel(system: &Part, kernel: &Path) -> Result<()> {
     Ok(())
 }
 
-/// What the `flavour` system part is built from. Each input is named in
-/// `part.json`; none carries secret bytes.
-fn system_inputs(variant: &Variant, flavour: Flavour, kernel: &Path) -> Result<Inputs> {
+/// What the system part is built from. Each input is named in `part.json`;
+/// none carries secret bytes.
+fn system_inputs(variant: &Variant, kernel: &Path) -> Result<Inputs> {
     let repo = &variant.repo_root;
     let mut inputs = Inputs::new();
-    inputs.insert("flavour".into(), flavour.to_string());
     // The checkout's builder, contract, profile, variant, apps, recipes, rootfs
     // tools and the Ginux launcher.
     inputs.insert(

@@ -5,7 +5,6 @@
 //! checks a set before the combiner puts it on the ISO.
 use anyhow::{ensure, Context, Result};
 use distro_contract::{release::*, Variant};
-use distro_profile::Flavour;
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -65,8 +64,8 @@ fn link(source: &Path, destination: &Path) -> Result<()> {
         .with_context(|| format!("linking release artifact {}", destination.display()))
 }
 
-/// The system identity `variant`'s contract gives the `flavour` system.
-fn identity(variant: &Variant, flavour: Flavour) -> Result<Identity> {
+/// The system identity `variant`'s contract gives its system.
+fn identity(variant: &Variant) -> Result<Identity> {
     let contract = &variant.contract;
     Ok(Identity {
         distro: contract.identity.os_id.clone(),
@@ -77,7 +76,6 @@ fn identity(variant: &Variant, flavour: Flavour) -> Result<Identity> {
         },
         init: contract.profile.init,
         libc: contract.profile.libc,
-        flavour,
         version: contract.identity.os_version.clone(),
     })
 }
@@ -88,13 +86,12 @@ fn modules_digest(root: &Path, release: &str) -> Result<String> {
         .with_context(|| format!("hashing the {release} module tree of {}", root.display()))
 }
 
-/// Publishes the release set of the `flavour` system built from the tree
+/// Publishes the release set of the system built from the tree
 /// `root` in `dir`: links the rootfs image and the installed initramfs and
 /// copies the kernel to their ISO paths, then writes `release.json`. Builds
 /// nothing.
 pub fn write(
     variant: &Variant,
-    flavour: Flavour,
     root: &Path,
     dir: &Path,
     kernel_release: &str,
@@ -119,7 +116,7 @@ pub fn write(
         &dir.join(recinit::live::INITRAMFS_INSTALLED_ISO_PATH),
     )?;
     let manifest = ReleaseManifest::new(
-        identity(variant, flavour)?,
+        identity(variant)?,
         sources,
         Kernel {
             release: kernel_release.into(),
@@ -144,7 +141,7 @@ pub fn verify(variant: &Variant, root: &Path, dir: &Path) -> Result<VerifiedRele
     let raw = fs::read(dir.join(MANIFEST))
         .with_context(|| format!("reading {}", dir.join(MANIFEST).display()))?;
     let manifest = ReleaseManifest::parse(&raw)?;
-    let expected = identity(variant, manifest.identity.flavour)?;
+    let expected = identity(variant)?;
     ensure!(
         manifest.identity == expected,
         "the release set names another system than {} ({:?})",

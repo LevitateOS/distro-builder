@@ -52,7 +52,8 @@ pub fn materialize_rootfs_from_recipe(
 }
 
 /// Where the outputs of `flavour`'s preseed are recorded in the variant's
-/// Recipe work directory: the base lock's, and the desktop lock's.
+/// Recipe work directory: the base lock's, and the desktop lock's (what the
+/// group recipes pin, which fills the release medium's package cache).
 fn preseed_record(flavour: Flavour) -> &'static str {
     match flavour {
         Flavour::Base => "rootfs-source-inputs.json",
@@ -79,7 +80,7 @@ pub fn preseed_rootfs_source(
 }
 
 /// The same for the apps-build lock: what compiling the desktop apps needs
-/// beyond the base. It goes with the desktop flavour's acquisition.
+/// beyond the base.
 pub fn preseed_apps_build(
     repo_root: &Path,
     distro_id: &str,
@@ -121,11 +122,7 @@ fn preseed(
     }
     let digests = lock_digests(&recipe_path)?;
     let store = store_dir(repo_root);
-    let view = tempfile::Builder::new()
-        .prefix("view-")
-        .tempdir_in(ensure_dir(&store.parent().context("store has no parent")?.join("views"))?)
-        .context("creating the download store view")?;
-    fill_view(&store, view.path(), &digests)?;
+    let view = store_view(repo_root, &digests)?;
     let ctx = Invocation::new(repo_root, "install", &recipe_path, &build_dir)
         .input("store", view.path())
         .force_acquire(refresh)
@@ -343,6 +340,22 @@ pub(crate) fn lock_rows(recipe: &Path) -> Result<Vec<LockRow>> {
         bail!("lock '{}' has no packages() rows", path.display());
     }
     Ok(rows)
+}
+
+/// A temporary view of the download store holding the stored files of
+/// `digests` (hard links where they can be): an optional `store` input of a
+/// recipe that downloads only what the view lacks.
+pub(crate) fn store_view(
+    repo_root: &Path,
+    digests: &std::collections::BTreeSet<String>,
+) -> Result<tempfile::TempDir> {
+    let store = store_dir(repo_root);
+    let view = tempfile::Builder::new()
+        .prefix("view-")
+        .tempdir_in(ensure_dir(&store.parent().context("store has no parent")?.join("views"))?)
+        .context("creating the download store view")?;
+    fill_view(&store, view.path(), digests)?;
+    Ok(view)
 }
 
 /// Hardlink (or copy, across filesystems) the stored files `digests` name into `view`.

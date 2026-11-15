@@ -1,12 +1,12 @@
 //! Products and their prepared directories. Every product is the installable
-//! system of its flavour (`ProductId::flavour`) plus an overlay, as
-//! `crate::product::build` says. Both are parts (`crate::parts`): the system
-//! part `system-<flavour>` is built here by `prepare_system` (the rootfs
-//! recipe's tree, its payload role, the rootfs tools and apps), and the
-//! overlay part `overlay-<product>` by `build_overlay` on that system's tree.
-//! test-base-rootfs, test-live-ssh, test-install-base and test-installed-boot share the base
-//! system part, release has the desktop one; so test-installed-boot boots
-//! exactly the rootfs the test-install-base ISO installs. A prepared directory
+//! base system plus an overlay, as `crate::product::build` says. Both are
+//! parts (`crate::parts`): the one system part `system` is built here by
+//! `prepare_system` (the rootfs recipe's tree, its payload role and the rootfs
+//! tools), and the overlay part `overlay-<product>` by `build_overlay` on that
+//! system's tree. Every product shares the system part, so test-installed-boot
+//! boots exactly the rootfs every ISO installs; the release medium's overlay
+//! adds the default software set, which recsetup installs through Recipe
+//! (`crate::default_set`). A prepared directory
 //! (`.prepared-product.json`, read by `PreparedProduct::read`) lays out one
 //! product's rootfs and overlay trees from its parts.
 use anyhow::{bail, Context, Result};
@@ -29,6 +29,9 @@ pub(crate) const ROOTFS_SOURCE_DIR: &str = "rootfs-source";
 const MANIFEST: &str = ".prepared-product.json";
 /// The installed system's setup program (the system recipe installs it).
 const SETUP_PROGRAM: &str = "usr/libexec/recipe-system-setup";
+/// The root effects recipe Recipe runs after a system change (the system
+/// recipe installs it from `os-recipes/root-effects.rhai`).
+const ROOT_EFFECTS: &str = "usr/lib/recipe/effects.rhai";
 
 /// A prepared product: its rootfs and overlay trees in its directory (in a
 /// release run's directory, links to its parts' trees, only ever read), and
@@ -97,7 +100,7 @@ pub fn prepare_product(
         crate::install_ux::check(&variant.repo_root)
             .with_context(|| format!("resolving the install screen's apps for {}", variant.id))?;
     }
-    let system = crate::parts::system(variant, product.flavour(), kernel)?;
+    let system = crate::parts::system(variant, kernel)?;
     let overlay = crate::parts::overlay(variant, product, &system)?;
     fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
     let rootfs = create_empty_overlay_dir(dir, ROOTFS_SOURCE_DIR)?;
@@ -135,16 +138,21 @@ pub(crate) fn write_manifest(variant: &Variant, product: ProductId, dir: &Path) 
 }
 
 /// Writes `product`'s overlay into `overlay` (an empty directory) for the
-/// system tree `rootfs`, which it only reads: the live session, and for a
-/// product with the install screen the overlay tools and the screen.
+/// system tree `rootfs`, which it only reads: the live session with the
+/// `network` group, for a product with the install screen the overlay tools
+/// and the screen, and on the release medium (the desktop flavour) the recab
+/// app for A/B installs, the Updater for mutable installs and the default
+/// software set with its package cache.
 pub(crate) fn build_overlay(variant: &Variant, product: ProductId, rootfs: &Path, overlay: &Path) -> Result<()> {
     let contract = &variant.contract;
     let build = crate::product::build(product);
     if build.live_session {
         create_live_overlay(variant, &LiveSession::new(variant, product), rootfs, overlay)?;
+        crate::default_set::add_live_network(variant, rootfs, overlay)
+            .with_context(|| format!("adding the live session's network to {}", variant.id))?;
     }
     if build.install_screen {
-        add_tools(&variant.repo_root, overlay, ToolLayer::Overlay, &variant.id)
+        add_tools(variant, overlay, ToolLayer::Overlay)
             .with_context(|| format!("adding the live tools for {}", variant.id))?;
         crate::install_ux::write_payload(
             &variant.repo_root,
@@ -156,30 +164,29 @@ pub(crate) fn build_overlay(variant: &Variant, product: ProductId, rootfs: &Path
         )
         .with_context(|| format!("writing the install screen for {}", variant.id))?;
         if product.flavour() == Flavour::Desktop {
-            crate::desktop_apps::install_ab_only(variant, overlay)
-                .with_context(|| format!("adding the recab app to the live medium of {}", variant.id))?;
+            crate::desktop_apps::install_mode_only(variant, overlay)
+                .with_context(|| format!("adding the recab app and the Updater to the live medium of {}", variant.id))?;
+            crate::default_set::write_medium(variant, overlay)
+                .with_context(|| format!("adding the default software set to the live medium of {}", variant.id))?;
         }
     }
     check_live_only(overlay, rootfs)
 }
 
-/// The installable `flavour` system in `rootfs`: the rootfs recipe's tree,
-/// marked as the live init's rootfs layer (recinit's payload-role protocol),
-/// with the rootfs tools.
-pub(crate) fn prepare_system(variant: &Variant, flavour: Flavour, rootfs: &Path) -> Result<()> {
-    let source = materialize_rootfs_source(variant, flavour)?;
+/// The installable base system in `rootfs`: the rootfs recipe's tree, marked
+/// as the live init's rootfs layer (recinit's payload-role protocol), with
+/// the rootfs tools and the release's group recipes
+/// (`crate::update_release::add_release_recipes`).
+pub(crate) fn prepare_system(variant: &Variant, rootfs: &Path) -> Result<()> {
+    let source = materialize_rootfs_source(variant)?;
     levitate_recipe::target::merge_tree(&source, rootfs)?;
     let role = rootfs.join(recinit::live::PAYLOAD_ROLE_FILE);
     fs::write(&role, format!("{}\n", recinit::live::ROLE_ROOTFS))
         .with_context(|| format!("writing {}", role.display()))?;
-    add_tools(&variant.repo_root, rootfs, ToolLayer::Rootfs, &variant.id)?;
-    if flavour == Flavour::Desktop {
-        crate::display_server::install_system(variant, rootfs)
-            .with_context(|| format!("adding the display server for {}", variant.id))?;
-        crate::desktop_apps::install_system(variant, rootfs)
-            .with_context(|| format!("adding the desktop apps for {}", variant.id))?;
-    }
-    check_installable(rootfs, variant, flavour).with_context(|| {
+    add_tools(variant, rootfs, ToolLayer::Rootfs)?;
+    crate::update_release::add_release_recipes(variant, rootfs)
+        .with_context(|| format!("adding the release's group recipes to the {} system", variant.id))?;
+    check_installable(rootfs, variant).with_context(|| {
         format!(
             "the rootfs recipe's tree {} predates the current system recipe; remove it to rebuild it",
             source.display()
@@ -187,24 +194,20 @@ pub(crate) fn prepare_system(variant: &Variant, flavour: Flavour, rootfs: &Path)
     })
 }
 
-/// Refuses a rootfs that is not the current installable `flavour` system:
-/// one without the setup program, or whose `/etc/os-release` is not the
-/// contract's for that flavour.
-fn check_installable(root: &Path, variant: &Variant, flavour: Flavour) -> Result<()> {
+/// Refuses a rootfs that is not the current installable system: one without
+/// the setup program or the root effects recipe, or whose `/etc/os-release`
+/// is not the contract's.
+fn check_installable(root: &Path, variant: &Variant) -> Result<()> {
     let contract = &variant.contract;
-    if !root.join(SETUP_PROGRAM).is_file() {
-        bail!("{} has no setup program /{SETUP_PROGRAM}", root.display());
+    for program in [SETUP_PROGRAM, ROOT_EFFECTS] {
+        if !root.join(program).is_file() {
+            bail!("{} has no /{program}", root.display());
+        }
     }
     let path = root.join("etc/os-release");
     let found = fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
-    if found != os_release(contract, flavour) {
-        bail!("{} is not the contract's identity and profile of the {flavour} system", path.display());
-    }
-    // A desktop system from before the desktop apps (or the display server
-    // compiled from source) existed is not the current one.
-    if flavour == Flavour::Desktop {
-        crate::desktop_apps::check(root)?;
-        crate::display_server::check(variant, root)?;
+    if found != os_release(contract) {
+        bail!("{} is not the contract's identity and profile of the system", path.display());
     }
     Ok(())
 }

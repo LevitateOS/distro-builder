@@ -1,10 +1,11 @@
 // The live-system policy: what the live session adds over the installed system
 // (the rootfs below this overlay, which it never modifies). Each feature is
 // stated once; the init backend in installed-system.rhai supplies the on-disk
-// mechanism. The network is the installed system's: its own stack brings up
-// every interface. On the desktop system the live session is still the
-// installer: its display manager does not start, and the install screen has
-// tty1 as on every live ISO; the desktop starts once the system is installed.
+// mechanism. Every live medium is the base system with no display manager;
+// the builder adds the `network` group's tree (recipes/network.rhai and its
+// deps, NetworkManager enabled by its own configuration) to this overlay
+// beside what this recipe writes, so the live session brings up every
+// interface.
 const RECIPE_API = 2;
 const NEEDS = #{ inputs: #{ config: "file", shadow: "file", shell_ux: "file", live_help: "file", shutdown_cleanup: "file", serial_profile: "file" }, outputs: #{ overlay: "directory" } };
 import "installed-system.rhai" as system;
@@ -19,32 +20,6 @@ let ctx = #{name: "live-overlay", config: config,
 
 // The rendered guest file the builder passed as input `name`.
 fn input(c, name) { read_file(join_path(c.inputs, name)) }
-
-// The desktop system under the live installer (`c.desktop`): the installed
-// system starts its display manager at boot; the live session does not, so
-// the install screen on tty1 is what the user meets. systemd boots
-// multi-user.target instead of graphical.target. OpenRC boots a `live`
-// runlevel: every service of the installed system's `default` runlevel
-// (`c.desktop.default_runlevel`, which the builder read from the rootfs)
-// except the display manager, which `rc-service <display manager> start`
-// still starts by hand. Returns the runlevel the inittab ends in.
-fn installer_desktop(root, c) {
-    let dm = c.desktop.display_manager;
-    if c.init == "systemd" {
-        system::link(root, "etc/systemd/system/default.target", "/usr/lib/systemd/system/multi-user.target");
-        return "default";
-    }
-    if !c.desktop.default_runlevel.contains(dm) {
-        throw "the desktop system's default runlevel has no " + dm;
-    }
-    system::directory(root, "etc/runlevels/live", 0o755);
-    for service in c.desktop.default_runlevel {
-        if service != dm {
-            system::link(root, "etc/runlevels/live/" + service, "/etc/init.d/" + service);
-        }
-    }
-    "live"
-}
 
 fn is_built(ctx) { ready(ctx) }
 fn is_installed(ctx) {
@@ -63,15 +38,12 @@ fn install(ctx) {
     for console in c.consoles {
         if !system::all_consoles().contains(console) { throw "unsupported install console " + console; }
     }
-    // Every console has a login, tty1 included: on the desktop system too the
-    // live session does not start the display manager (`installer_desktop`).
-    let runlevel = if c.desktop != () { installer_desktop(root, c) } else { "default" };
     let gettys = [];
-    for console in system::login_consoles(false) {
+    for console in system::all_consoles() {
         let login = if c.consoles.contains(console) { c.launcher } else { "root" };
         gettys.push([console, login]);
     }
-    system::consoles_in_runlevel(root, c.init, gettys, runlevel);
+    system::consoles(root, c.init, gettys);
     // Root has no password; the issue text says so under its banner.
     system::put(root, "etc/issue",
         "\n" + c.os_name + " " + c.label + " - \\l\n\n" + c.hint + "\n\n", 0o644);

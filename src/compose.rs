@@ -18,9 +18,7 @@
 //!   `composed.json`. The key names the ordered unpack keys. Composition runs
 //!   no package code and no Ginux: `target::replay` applies each package's
 //!   recorded extraction to the tree exactly as extracting the packages one
-//!   after another into one root does, the manifest included. The desktop
-//!   tree is the base tree (its files linked, not composed again) with the
-//!   desktop lock's packages replayed over it.
+//!   after another into one root does, the manifest included.
 //!
 //! Recipes take a composed tree as a `composed` directory input holding
 //! `tree.tar` and `packages.txt` ([`input_view`]), and check `packages.txt`
@@ -28,13 +26,12 @@
 
 use anyhow::{bail, ensure, Context, Result};
 use levitate_recipe::target::{self, Manifest};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::fs;
-use std::io::{BufRead, Write};
+use std::io::Write;
 use std::os::fd::AsRawFd;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
@@ -506,7 +503,7 @@ fn store_tree(from: &Path, dir: &Path, job: &Job, identity: &str, root: &str) ->
 }
 
 /// Where the last package to put a non-directory at a path got it from.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 struct Owner {
     path: String,
     package: String,
@@ -534,7 +531,6 @@ struct Conflict {
 struct ComposedRecord<'a> {
     format: u32,
     key: &'a str,
-    base: Option<&'a str>,
     packages: Vec<(&'a str, &'a str, &'a str)>,
     unpack_keys: &'a [String],
     conflicts: usize,
@@ -547,13 +543,11 @@ fn is_composed(dir: &Path) -> bool {
     dir.join("composed.json").is_file() && dir.join("packages.txt").is_file() && dir.join("root").is_dir()
 }
 
-/// The composed tree of `layer` over `base` (nothing: an empty root), from
-/// the unpack store, in order. Made once per key; reused after.
-pub(crate) fn compose(repo: &Path, base: Option<&Composed>, layer: &[Unpacked]) -> Result<Composed> {
-    let mut packages = base.map(|base| base.packages.clone()).unwrap_or_default();
-    let mut unpack_keys = base.map(|base| base.unpack_keys.clone()).unwrap_or_default();
-    packages.extend(layer.iter().map(|package| package.row.clone()));
-    unpack_keys.extend(layer.iter().map(|package| package.key.clone()));
+/// The composed tree of `layer` in an empty root, from the unpack store, in
+/// order. Made once per key; reused after.
+pub(crate) fn compose(repo: &Path, layer: &[Unpacked]) -> Result<Composed> {
+    let packages: Vec<LockRow> = layer.iter().map(|package| package.row.clone()).collect();
+    let unpack_keys: Vec<String> = layer.iter().map(|package| package.key.clone()).collect();
     let format = COMPOSE_FORMAT.to_string();
     let mut fields = vec![("store", "composed"), ("format", format.as_str())];
     fields.extend(unpack_keys.iter().map(|key| ("unpacked", key.as_str())));
@@ -562,10 +556,7 @@ pub(crate) fn compose(repo: &Path, base: Option<&Composed>, layer: &[Unpacked]) 
     fs::create_dir_all(&parent).with_context(|| format!("creating {}", parent.display()))?;
     let dir = parent.join(&key);
     let composed = Composed { key: key.clone(), dir: dir.clone(), packages, unpack_keys };
-    let what = match base {
-        None => format!("{} packages", layer.len()),
-        Some(base) => format!("{} packages over the {} of {}", layer.len(), base.packages.len(), &base.key[..12]),
-    };
+    let what = format!("{} packages", layer.len());
     if is_composed(&dir) {
         crate::tprintln!("  composed tree {} ({what}) reused", &key[..12]);
         return Ok(composed);
@@ -582,14 +573,13 @@ pub(crate) fn compose(repo: &Path, base: Option<&Composed>, layer: &[Unpacked]) 
     let temp = parent.join(format!(".tmp-{key}-{}", std::process::id()));
     let root = temp.join("root");
     fs::create_dir_all(&root).with_context(|| format!("creating {}", root.display()))?;
-    let result = compose_into(repo, &root, base, layer).and_then(|(owners, conflicts)| {
+    let result = compose_into(repo, &root, layer).and_then(|(owners, conflicts)| {
         write_owners(&temp.join("owners.jsonl"), &owners)?;
         fs::write(temp.join("packages.txt"), packages_text(&composed.packages))?;
         let differing = conflicts.iter().filter(|c| !c.identical).count();
         let record = ComposedRecord {
             format: COMPOSE_FORMAT,
             key: &key,
-            base: base.map(|base| base.key.as_str()),
             packages: composed
                 .packages
                 .iter()
@@ -625,21 +615,13 @@ fn packages_text(rows: &[LockRow]) -> String {
     rows.iter().map(|row| format!("{} {}\n", row.sha256, row.id)).collect()
 }
 
-/// Composes into the empty `root`: the base tree's entries (its files linked)
-/// and manifest, then each of `layer`'s packages replayed in order. Returns
-/// who owns each non-directory path and the conflicts on the way.
-fn compose_into(repo: &Path, root: &Path, base: Option<&Composed>, layer: &[Unpacked]) -> Result<(Vec<Owner>, Vec<Conflict>)> {
+/// Composes into the empty `root`: each of `layer`'s packages replayed in
+/// order. Returns who owns each non-directory path and the conflicts on the
+/// way.
+fn compose_into(repo: &Path, root: &Path, layer: &[Unpacked]) -> Result<(Vec<Owner>, Vec<Conflict>)> {
     let mut manifest = Manifest::default();
     let mut owners: HashMap<String, Owner> = HashMap::new();
     let mut order: Vec<String> = Vec::new();
-    if let Some(base) = base {
-        clone_tree(&base.root(), root)?;
-        manifest = target::load(&base.root())?;
-        for owner in read_owners(&base.dir.join("owners.jsonl"))? {
-            order.push(owner.path.clone());
-            owners.insert(owner.path.clone(), owner);
-        }
-    }
     let mut conflicts = Vec::new();
     let mut progress = Progress::begin(repo, "compose", "packages");
     let total = layer.len() as u64;
@@ -726,53 +708,6 @@ fn write_owners(path: &Path, owners: &[Owner]) -> Result<()> {
         out.write_all(b"\n")?;
     }
     out.flush()?;
-    Ok(())
-}
-
-fn read_owners(path: &Path) -> Result<Vec<Owner>> {
-    let file = fs::File::open(path).with_context(|| format!("opening {}", path.display()))?;
-    std::io::BufReader::new(file)
-        .lines()
-        .filter(|line| line.as_ref().map_or(true, |line| !line.is_empty()))
-        .map(|line| Ok(serde_json::from_str(&line?)?))
-        .collect()
-}
-
-/// `src`'s entries recreated under the empty `dst`: directories with their
-/// staging modes, links, and files as hardlinks to the same inodes (copies
-/// across filesystems), so files hardlinked together stay so. The target
-/// metadata manifest is left out: the caller writes its own.
-fn clone_tree(src: &Path, dst: &Path) -> Result<()> {
-    let mut dirs = Vec::new();
-    for item in walkdir::WalkDir::new(src).follow_links(false).min_depth(1).sort_by_file_name() {
-        let item = item?;
-        let rel = item.path().strip_prefix(src)?;
-        if rel == Path::new(target::MANIFEST) {
-            continue;
-        }
-        let to = dst.join(rel);
-        let md = fs::symlink_metadata(item.path())?;
-        if md.is_dir() {
-            fs::create_dir(&to)?;
-            fs::set_permissions(&to, fs::Permissions::from_mode(0o700))?;
-            dirs.push((to, md.permissions().mode() & 0o7777));
-        } else if md.file_type().is_symlink() {
-            std::os::unix::fs::symlink(fs::read_link(item.path())?, &to)?;
-        } else if md.is_file() {
-            if let Err(error) = fs::hard_link(item.path(), &to) {
-                if error.raw_os_error() != Some(libc::EXDEV) {
-                    return Err(error).with_context(|| format!("linking {}", to.display()));
-                }
-                fs::copy(item.path(), &to)?;
-                fs::set_permissions(&to, fs::Permissions::from_mode(md.permissions().mode() & 0o7777))?;
-            }
-        } else {
-            bail!("unsupported inode in a composed tree: {}", item.path().display());
-        }
-    }
-    for (dir, mode) in dirs.iter().rev() {
-        fs::set_permissions(dir, fs::Permissions::from_mode(*mode))?;
-    }
     Ok(())
 }
 

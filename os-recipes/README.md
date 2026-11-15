@@ -18,7 +18,8 @@ Qt and C++ runtime. The variant's `*-apps-build-root.rhai` recipe makes one
 tree of the base lock and the apps-build lock (`sources/*-apps-build-lock.rhai`:
 compiler, CMake, Qt's development files; on Fedora composed by the builder from
 its unpack store, on Alpine installed by apk); the builder makes a root image
-of it and runs `desktop-apps.rhai` in that root (`src/desktop_apps.rs`). The
+of it and runs `desktop-apps.rhai` in that root (`src/desktop_apps.rs`); the
+tree is published as a prebuilt, which the `rec-apps` group recipe pins. The
 build root is never part of an image.
 
 A system tree is made in steps the builder caches separately
@@ -32,8 +33,10 @@ step to the next as one archive (`target_pack_tree`, `target_unpack_tree`).
 `system-files.rhai` holds the file helpers the effects step shares with
 `installed-system.rhai` without importing it.
 
-Base and desktop packages, including applications bundled into a desktop image,
-are image-owned here. The workspace's top-level
+Only the base system is image-owned here: no image carries software above it.
+`root-effects.rhai` is the root effects recipe the base ships for Recipe, and
+`release-medium.rhai` assembles the default software set the release medium
+carries for the installer. The workspace's top-level
 [`recipes/`](../../../recipes/README.md) is the separate catalog for software
 users manage independently of the image. Both collections share one format and
 engine; their consumers and output lifecycles differ. User package activation is

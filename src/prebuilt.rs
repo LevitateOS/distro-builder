@@ -27,8 +27,8 @@
 //! compares the whole tree both ways (no missing and no extra entries). See
 //! [`desktop_apps_key`], [`lookup_desktop_apps`] and [`store_desktop_apps`]. The display
 //! server family is such a tree too, one entry per distro that names a
-//! `desktop.display_server_recipe_script` ([`display_server_key`], [`lookup_display_server`],
-//! [`store_display_server`]).
+//! `desktop.display_server_recipe_script` ([`display_server_key`], [`store_display_server`]).
+//! Neither tree goes into an image: group recipes pin their published releases.
 //!
 //! The key leaves out Ginux and Recipe's bytes on purpose: they change how a compile
 //! is supervised, not what comes out of it (their declared behaviour versions are in).
@@ -1217,11 +1217,6 @@ pub fn lookup_desktop_apps(repo: &Path, variant: &distro_contract::Variant) -> R
 /// `tree` itself. `--no-prebuilt` still stores.
 pub fn store_desktop_apps(repo: &Path, variant: &distro_contract::Variant, tree: &Path) -> Result<PathBuf> {
     store_tree(repo, Family::DesktopApps, variant, tree, || desktop_apps_key(repo, variant), &[PathBuf::from("tools/gui")])
-}
-
-/// [`lookup_desktop_apps`] for the display server tree.
-pub fn lookup_display_server(repo: &Path, variant: &distro_contract::Variant) -> Result<Option<PathBuf>> {
-    lookup_tree(repo, Family::DisplayServer, variant, || display_server_key(repo, variant))
 }
 
 /// [`store_desktop_apps`] for the display server tree.

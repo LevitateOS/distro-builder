@@ -11,7 +11,8 @@ anyhow = "1.0"
 distro-contract = { path = "../contract" }
 distro-profile = { path = "../profile" }
 recinit = { path = "../../tools/recinit" }
-# install_tools::AB_ONLY_TREE: where the live medium keeps what only an A/B system gets.
+# install_tools::AB_ONLY_TREE, DEFAULT_SET_DIR, RECIPE_CACHE_DIR: where the live medium keeps
+# what only an A/B system gets, the default software set and its package cache.
 recstrap = { path = "../../tools/recstrap" }
 reciso = { path = "../../tools/reciso" }
 recuki = { path = "../../tools/recuki" }
@@ -24,5 +25,7 @@ serde_json = "1.0"
 sha2 = "0.10"
 toml = "0.8"
 walkdir = "2"
+# The small archives of a release (boot.tar.zst, recipes.tar.zst; src/update_release.rs).
+tar = "0.4"
 which = "5.0"
 tempfile = "3"

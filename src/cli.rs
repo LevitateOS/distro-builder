@@ -69,8 +69,10 @@ pub enum Command {
         package: String,
         output: PathBuf,
     },
-    /// Run `distro`'s rootfs-source acquisition of `flavour`'s lock (the
-    /// desktop system needs the base lock's too); `refresh` acquires again.
+    /// Run `distro`'s rootfs-source acquisition of `flavour`'s lock: the base
+    /// lock, or the desktop lock (what the group recipes pin beyond the base,
+    /// which fills the release medium's package cache); `refresh` acquires
+    /// again.
     PreseedRootfsSource {
         distro: String,
         flavour: Flavour,

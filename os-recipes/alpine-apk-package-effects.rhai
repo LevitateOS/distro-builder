@@ -1,15 +1,14 @@
 //! extends: package-effects.rhai
 // The APK backend of the package-effects step. The composed input is the
 // base tree (`alpine-apk-base-tree.rhai`: the base lock's APKs installed by
-// the locked apk.static, without their scripts, and captured); on the
-// desktop system (the `flavour` input) the same apk.static installs the
-// desktop lock (the `desktop_apks` input) over it, and the tree's metadata is
-// captured again from every installed package. The packages' scripts never
-// ran, so `package_effects` does what they would have done. The system
-// recipe (`alpine-live-source-rootfs.rhai`) configures the tree this
-// publishes.
+// the locked apk.static, without their scripts, and captured). The packages'
+// scripts never ran, so `package_effects` does what they would have done.
+// The system recipe (`alpine-live-source-rootfs.rhai`) configures the tree
+// this publishes. The desktop lock (what the group recipes in recipes/ pin
+// beyond the base) is read only for the commands it ships, which BusyBox
+// leaves to them.
 const RECIPE_API = 2;
-const NEEDS = #{ inputs: #{ composed: "directory", flavour: "file", apks: "directory", desktop_apks: "directory?" }, outputs: #{ tree: "file" }, memory_mib: 8192, storage_max_objects: 262144, timeout_secs: 14400 };
+const NEEDS = #{ inputs: #{ composed: "directory", apks: "directory" }, outputs: #{ tree: "file" }, memory_mib: 8192, storage_max_objects: 262144, timeout_secs: 14400 };
 import "sources/acorn-apk-lock.rhai" as lock;
 import "sources/acorn-apk-desktop-lock.rhai" as desktop_lock;
 import "system-files.rhai" as system;
@@ -19,25 +18,11 @@ let ctx = #{
     apk_tools: lock::apk_tools(),
 };
 
-// [input, lock rows]: the base lock, and the desktop lock on the desktop system.
-fn lock_sets(ctx) {
-    let sets = [["apks", lock::packages()]];
-    if flavour(ctx) == "desktop" { sets.push(["desktop_apks", desktop_lock::packages()]); }
-    sets
-}
-fn set_dir(ctx, set) { join_path(ctx.runtime.paths.inputs, set[0]) }
-fn apk_file(ctx, set, row) { join_path(set_dir(ctx, set), basename(row[2])) }
-// The names of the packages this tree installs.
-fn installed_names(ctx) {
-    let names = [];
-    for set in lock_sets(ctx) { for row in set[1] { names.push(row[0]); } }
-    names
-}
+fn apk_file(ctx, row) { join_path(join_path(ctx.runtime.paths.inputs, "apks"), basename(row[2])) }
 
 fn verify_inputs(ctx) {
-    let sets = lock_sets(ctx);
-    let files = [[apk_file(ctx, sets[0], ctx.apk_tools), ctx.apk_tools]];
-    for set in sets { for row in set[1] { files.push([apk_file(ctx, set, row), row]); } }
+    let files = [[apk_file(ctx, ctx.apk_tools), ctx.apk_tools]];
+    for row in lock::packages() { files.push([apk_file(ctx, row), row]); }
     for entry in files {
         let file = entry[0];
         if !is_file(file) { throw "the apk inputs lack " + basename(file) + "; run the rootfs source preseed"; }
@@ -49,51 +34,12 @@ fn verify_inputs(ctx) {
 
 fn unpack(ctx, root) {
     copy_composed(ctx, root);
-    let sets = lock_sets(ctx);
-    if sets.len() == 1 { return; }
-    // The desktop system: the desktop lock over the base tree, by the same
-    // apk.static. The base tree already has the release key and apk's
-    // database, so this run adds to them (no --initdb).
-    progress(0, 0, "preparing apk");
-    let build = ctx.runtime.paths.build;
-    let tools = join_path(build, "apk-tools");
-    if is_dir(tools) { rm(tools); }
-    mkdir(tools);
-    extract_with_format(apk_file(ctx, sets[0], ctx.apk_tools), tools, "apk");
-    let apk = join_path(tools, "sbin/apk.static");
-    if !is_file(apk) { throw "the locked apk-tools-static has no sbin/apk.static"; }
-    chmod(apk, 0o755);
-    let cache = join_path(build, "apk-cache");
-    mkdir(cache);
-    log("Installing the locked Alpine " + lock::release() + " desktop APK set over the base tree...");
-    let args = ["--root", root, "--usermode", "--no-progress", "--no-scripts",
-        "--force-non-repository", "--no-network", "--cache-dir", cache, "add"];
-    let dirs = [];
-    let total = 0;
-    for set in sets {
-        dirs.push(set_dir(ctx, set));
-        if set[0] == "apks" { continue; }
-        for row in set[1] { args.push(apk_file(ctx, set, row)); total += 1; }
-    }
-    // APK 3 installs as a non-root user in usermode; the packages' owners come
-    // from their metadata. One apk run installs them all: Recipe sees 0 until
-    // it ends.
-    progress(0, total, "desktop packages (one apk add)");
-    exec_checked(apk, args, #{uid: 1000, gid: 1000});
-    progress(total, total, "desktop packages (one apk add)");
-    progress(0, 0, "capturing the installed packages");
-    target_capture_apks(root, dirs + [cache]);
 }
 
 fn package_effects(ctx, root) {
     progress(0, 0, "package effects: busybox applets");
-    busybox_applets(root);
+    busybox_applets(root, desktop_lock::commands());
     script_accounts(ctx, root);
-    // pinentry's script points /usr/bin/pinentry at the curses one when no
-    // graphical one is installed.
-    if installed_names(ctx).contains("pinentry") && !exists(join_path(root, "usr/bin/pinentry")) {
-        system::link(root, "usr/bin/pinentry", "pinentry-curses");
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -337,8 +283,11 @@ fn add_member(root, member, name) {
 }
 
 // BusyBox's applet links, from its own packaged inventory; files the
-// full-size tools ship stay.
-fn busybox_applets(root) {
+// full-size tools ship stay, and no link is made for a command in `taken`
+// (what the desktop lock's packages ship, by their `cmd:` provides): a group
+// recipe that installs the full-size tool (bc, unzip, partprobe, ...) must
+// not find a base file in its place.
+fn busybox_applets(root, taken) {
     let privileged = ["bin/mount", "bin/umount", "bin/su", "usr/bin/crontab",
         "usr/bin/passwd", "usr/bin/traceroute", "usr/bin/traceroute6", "usr/bin/vlock"];
     for path in read_file(join_path(root, "etc/busybox-paths.d/busybox")).split("\n") {
@@ -350,7 +299,7 @@ fn busybox_applets(root) {
             throw "invalid packaged BusyBox applet path: " + path;
         }
         let dest = join_path(root, path);
-        if exists(dest) { continue; }
+        if exists(dest) || taken.contains(basename(path)) { continue; }
         let program = if privileged.contains(path) { "bbsuid" } else { "busybox" };
         if !is_file(join_path(root, "bin/" + program)) { throw "missing BusyBox provider: " + program; }
         mkdir(dirname(dest));

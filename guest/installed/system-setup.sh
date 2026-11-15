@@ -57,7 +57,7 @@ case "${1:-}" in
         esac
         ;;
     x11-keyboard)
-        # A desktop system's keyboard layout ($2, variant $3): the X server's
+        # A desktop's keyboard layout ($2, variant $3): the X server's
         # and the login screen's (xorg.conf.d, which systemd-localed also
         # reads), and on Plasma the default of every user's session.
         layout=$2 variant=${3:-}
@@ -75,7 +75,7 @@ case "${1:-}" in
         fi
         ;;
     autologin)
-        # A desktop system's display manager (SDDM) logs user $2 in to
+        # The desktop's display manager (SDDM) logs user $2 in to
         # session $3 at every boot without asking.
         mkdir -p /etc/sddm.conf.d
         printf '[Autologin]\nUser=%s\nSession=%s\n' "$2" "$3" > /etc/sddm.conf.d/20-autologin.conf
@@ -97,7 +97,14 @@ case "${1:-}" in
         chmod 0644 "$tmp"; mv -f "$tmp" /etc/hosts
         ;;
     user)
-        name=$2 shell=$3 groups=$4
+        # $5 (optional): groups the user joins where the system has them
+        # (a desktop session's device groups, which the software it got makes).
+        name=$2 shell=$3 groups=$4 optional=${5:-}
+        old_ifs=$IFS; IFS=,
+        for group in $optional; do
+            if grep -q "^$group:" /etc/group; then groups=${groups:+$groups,}$group; fi
+        done
+        IFS=$old_ifs
         # The account tool is the base distro's: shadow-utils' useradd on the
         # RPM (Fedora) base, busybox's adduser on the APK (Alpine) base.
         case "$packages" in

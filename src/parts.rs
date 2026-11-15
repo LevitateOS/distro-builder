@@ -7,14 +7,13 @@
 //! trees, its output files (path, bytes, sha256) and when it was finished.
 //!
 //! - `system-<flavour>` (base or desktop): the system tree (the rootfs
-//!   recipe's tree with the rootfs tools and apps, the kernel's modules, the
-//!   kernel binding, finalized metadata) in `rootfs-source/`, its rootfs
-//!   EROFS, the installed initramfs and the published release set
-//!   (`release.json`, inventory, signature, `live/` and `boot/` members,
-//!   `system-sources.sha256`). Built from the checkout's system sources,
-//!   the builder's own crates, Recipe's and Ginux's declared behaviour
-//!   versions (and their bytes in exact mode) and the Ginux root, the kernel,
-//!   busybox and the release policy and signing input (`system_inputs`).
+//!   recipe's tree with the rootfs tools and apps, the kernel's modules,
+//!   finalized metadata) in `rootfs-source/`, its rootfs EROFS, the
+//!   installed initramfs and the release set (`release.json`, `live/` and
+//!   `boot/` members, `system-sources.sha256`). Built from the checkout's
+//!   system sources, the builder's own crates, Recipe's and Ginux's declared
+//!   behaviour versions (and their bytes in exact mode) and the Ginux root,
+//!   the kernel and busybox (`system_inputs`).
 //! - `overlay-<product>`: the product's overlay tree (live session, overlay
 //!   tools, install screen) built on its flavour's system tree, and its
 //!   EROFS. Built from the system part (its key and its exact build), the
@@ -190,9 +189,6 @@ pub(crate) fn system(variant: &Variant, flavour: Flavour, kernel: &Path) -> Resu
             let what = step("adding the kernel modules to the rootfs");
             crate::release::add_modules(&rootfs, &modules, release).context(what)?;
 
-            let what = step("binding the kernel to its installed module tree");
-            crate::release::bind_kernel(kernel, &rootfs, release).context(what)?;
-
             let what = step("writing the rootfs image");
             levitate_recipe::target::finalize(&rootfs)
                 .context("finalizing intended release metadata")
@@ -222,19 +218,16 @@ pub(crate) fn system(variant: &Variant, flavour: Flavour, kernel: &Path) -> Resu
 
             let what = step("publishing the installed-system release manifest");
             sources::record(dir, &inputs["system-sources"])?;
-            let signing_key = std::env::var_os(SIGNING_KEY_ENV).map(PathBuf::from);
-            let produced = crate::release_manifest::write(
+            crate::release_manifest::write(
                 variant,
                 flavour,
                 &rootfs,
                 dir,
+                release,
                 &kernel.join(KERNEL_IMAGE_PATH),
                 &initramfs_installed,
-                signing_key.as_deref(),
             )
             .context(what)?;
-            // Unmounts recab's verified copy before the part is published.
-            drop(produced);
             seq.finish();
             Ok(())
         },
@@ -290,9 +283,6 @@ pub(crate) fn check_kernel(system: &Part, kernel: &Path) -> Result<()> {
     Ok(())
 }
 
-/// The environment variable naming the release signing key file.
-pub(crate) const SIGNING_KEY_ENV: &str = "RECAB_RELEASE_SIGNING_KEY";
-
 /// What the `flavour` system part is built from. Each input is named in
 /// `part.json`; none carries secret bytes.
 fn system_inputs(variant: &Variant, flavour: Flavour, kernel: &Path) -> Result<Inputs> {
@@ -305,7 +295,7 @@ fn system_inputs(variant: &Variant, flavour: Flavour, kernel: &Path) -> Result<I
         "system-sources".into(),
         sources::system_sources_digest(repo, &variant.id).context("fingerprinting the system's sources")?,
     );
-    // The crates the builder itself is compiled from (recinit, reciso, recab,
+    // The crates the builder itself is compiled from (recinit, reciso,
     // levitate-recipe, the contract...): they write the image, the installed
     // initramfs and the release set.
     let builder_crates = crate::recipe::tools::crate_closure_dirs(repo, Path::new("distro/builder"))?;
@@ -347,7 +337,7 @@ fn system_inputs(variant: &Variant, flavour: Flavour, kernel: &Path) -> Result<I
             format!("absent: {}", rootfs_tar.display())
         },
     );
-    // The kernel the system's modules and binding come from.
+    // The kernel the system's modules come from.
     let release = crate::release::kernel_release(kernel)?;
     inputs.insert("kernel-image".into(), file_sha256(&kernel.join(KERNEL_IMAGE_PATH))?.0);
     inputs.insert(
@@ -358,36 +348,6 @@ fn system_inputs(variant: &Variant, flavour: Flavour, kernel: &Path) -> Result<I
     inputs.insert(
         "busybox".into(),
         file_sha256(&crate::release::busybox(variant).context("acquiring busybox")?)?.0,
-    );
-    // The release policy and its public authority, and whether and with which
-    // key the manifest is signed (the key file's digest, never its bytes).
-    inputs.insert(
-        "release-policy".into(),
-        hex(&Sha256::digest(serde_json::to_vec(&variant.contract.release)?)),
-    );
-    let authority = variant.path(distro_contract::release::production::AUTHORITY_FILE);
-    inputs.insert(
-        "release-authority".into(),
-        match (&variant.contract.release.production, authority.is_file()) {
-            (Some(_), true) => file_sha256(&authority)?.0,
-            (Some(_), false) => format!("absent: {}", authority.display()),
-            (None, _) => "none".into(),
-        },
-    );
-    inputs.insert(
-        "release-signing".into(),
-        match std::env::var_os(SIGNING_KEY_ENV) {
-            None => "unsigned".into(),
-            Some(path) => {
-                let path = PathBuf::from(path);
-                format!(
-                    "signed, key file sha256 {}",
-                    file_sha256(&path)
-                        .with_context(|| format!("reading the release signing key {SIGNING_KEY_ENV}"))?
-                        .0
-                )
-            }
-        },
     );
     Ok(inputs)
 }

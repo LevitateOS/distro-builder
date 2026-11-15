@@ -1,6 +1,5 @@
-//! TUI apps on an image: one compiled binary holding every app a layer carries, and a
-//! command per app. The live install screen and the installed system each have their
-//! own binary, so one layer never shadows the other's.
+//! TUI apps on an image: one compiled binary holding every app the live install screen
+//! carries, and a command per app.
 //!
 //! `bun build --compile` embeds the bun runtime, so each binary is tens of megabytes; one
 //! binary per layer keeps that to a single copy. It runs the app named by the command it
@@ -15,22 +14,19 @@ use crate::tui_apps::{TuiApp, Workspace};
 use anyhow::{Context, Result, bail};
 use distro_contract::install_ux::BIN_DIR;
 use distro_contract::profile::Libc;
-use distro_contract::{Profile, SYSTEM_TUI_APPS};
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 /// The install screen's binary (test-install-base overlay).
 pub(crate) const INSTALL_BINARY: &str = "usr/local/libexec/install-tui";
-/// The installed system's binary (system rootfs).
-pub(crate) const SYSTEM_BINARY: &str = "usr/local/libexec/system-tui";
 
 /// The one file of the TUI binary's prebuilt, and the recipe's output of that name.
 const PROGRAM: &str = "program";
 
 const LIB_DIRS: &[&str] = &["usr/lib", "usr/lib64", "lib", "lib64"];
 
-/// Compiles `apps` into one binary at `binary_path` (`INSTALL_BINARY` or `SYSTEM_BINARY`)
+/// Compiles `apps` into one binary at `binary_path` (`INSTALL_BINARY`)
 /// in `layer` and links `BIN_DIR/<name>` to it for each. `rootfs` is the root the
 /// binary will run on, with C library `libc`.
 pub(crate) fn install(
@@ -102,42 +98,7 @@ pub(crate) fn install(
     Ok(())
 }
 
-/// Puts the installed system's TUI apps (`SYSTEM_TUI_APPS`) into the system `rootfs`,
-/// which every product builds on. Each app's tools must be in the rootfs itself.
-pub(crate) fn install_system(repo_root: &Path, rootfs: &Path, profile: &Profile) -> Result<()> {
-    use crate::pipeline::live_tools::{LIVE_TOOLS, ToolLayer};
-    let workspace = Workspace::load(repo_root)?;
-    let apps = SYSTEM_TUI_APPS
-        .iter()
-        .map(|name| workspace.app(name))
-        .collect::<Result<Vec<_>>>()?;
-    for app in &apps {
-        for tool in &app.tools {
-            let shipped = LIVE_TOOLS.iter().any(|live| {
-                live.layer == ToolLayer::Rootfs && live.binary.unwrap_or(live.package) == tool
-            });
-            if !shipped {
-                bail!(
-                    "the installed system's app '{}' runs {tool}, but the system rootfs doesn't \
-                     ship a binary called that: add it to the builder's rootfs tools \
-                     (pipeline/live_tools.rs)",
-                    app.name
-                );
-            }
-        }
-    }
-    install(
-        repo_root,
-        rootfs,
-        rootfs,
-        SYSTEM_BINARY,
-        profile.libc,
-        &apps,
-    )
-    .context("building the installed system's TUI apps")
-}
-
-/// The key of the TUI binary `stem` (`install-tui` or `system-tui`) for `libc`'s
+/// The key of the TUI binary `stem` (`install-tui`) for `libc`'s
 /// target: its source closure, the target, both recipes (`bun-toolchain` pins the
 /// bun version), the compiler image and Recipe's declared behaviour.
 fn tui_key(repo_root: &Path, stem: &str, target: &str, source: &Path) -> Result<crate::prebuilt::Key> {
@@ -155,23 +116,13 @@ fn tui_key(repo_root: &Path, stem: &str, target: &str, source: &Path) -> Result<
 }
 
 /// `distro-builder prebuilt key tui <stem> --distro <id>`: prepares the source and
-/// computes the key. `stem` is the binary's file name, `install-tui` or `system-tui`.
+/// computes the key. `stem` is the binary's file name, `install-tui`.
 pub fn prebuilt_key(repo_root: &Path, stem: &str, libc: Libc) -> Result<crate::prebuilt::Key> {
     let workspace = Workspace::load(repo_root)?;
-    let apps: Vec<&TuiApp> = if stem == file_stem(INSTALL_BINARY) {
-        crate::install_ux::Screen::resolve(&workspace)?.apps()
-    } else if stem == file_stem(SYSTEM_BINARY) {
-        SYSTEM_TUI_APPS
-            .iter()
-            .map(|name| workspace.app(name))
-            .collect::<Result<_>>()?
-    } else {
-        bail!(
-            "unknown TUI binary '{stem}'; expected {} or {}",
-            file_stem(INSTALL_BINARY),
-            file_stem(SYSTEM_BINARY)
-        );
-    };
+    if stem != file_stem(INSTALL_BINARY) {
+        bail!("unknown TUI binary '{stem}'; expected {}", file_stem(INSTALL_BINARY));
+    }
+    let apps: Vec<&TuiApp> = crate::install_ux::Screen::resolve(&workspace)?.apps();
     let work = repo_root.join(".artifacts/work/prebuilt-key");
     fs::create_dir_all(&work)?;
     let source = prepare_source(repo_root, &work, &apps)?;

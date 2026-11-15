@@ -67,7 +67,7 @@ pub fn select_no_prebuilt() {
 pub enum Family {
     /// The install tools (`recab`, `recstrap`, ...), one entry per crate.
     Tools,
-    /// The TUI binary (`install-tui`, `system-tui`).
+    /// The TUI binary (`install-tui`).
     Tui,
     /// The Qt desktop apps tree (`tools/gui/`), one entry per distro: its `name` is the distro id.
     DesktopApps,
@@ -739,12 +739,9 @@ pub fn list(repo: &Path) -> Result<Vec<Part>> {
 }
 
 /// The TUI binaries: file name and path in an image.
-fn tui_binaries() -> [(&'static str, &'static str); 2] {
+fn tui_binaries() -> [(&'static str, &'static str); 1] {
     let stem = |path: &'static str| Path::new(path).file_name().and_then(|n| n.to_str()).unwrap_or(path);
-    [
-        (stem(crate::tui_binary::INSTALL_BINARY), crate::tui_binary::INSTALL_BINARY),
-        (stem(crate::tui_binary::SYSTEM_BINARY), crate::tui_binary::SYSTEM_BINARY),
-    ]
+    [(stem(crate::tui_binary::INSTALL_BINARY), crate::tui_binary::INSTALL_BINARY)]
 }
 
 /// Compiles the TUI binary `name` for `libc` through `tui_binary::install` (which fills
@@ -754,16 +751,9 @@ fn build_tui(repo: &Path, name: &str, libc: distro_contract::profile::Libc) -> R
     let (_, binary_path) = tui_binaries()
         .into_iter()
         .find(|(stem, _)| *stem == name)
-        .with_context(|| format!("unknown TUI binary '{name}'; expected install-tui or system-tui"))?;
+        .with_context(|| format!("unknown TUI binary '{name}'; expected install-tui"))?;
     let workspace = crate::tui_apps::Workspace::load(repo)?;
-    let apps: Vec<&crate::tui_apps::TuiApp> = if binary_path == crate::tui_binary::INSTALL_BINARY {
-        crate::install_ux::Screen::resolve(&workspace)?.apps()
-    } else {
-        distro_contract::SYSTEM_TUI_APPS
-            .iter()
-            .map(|app| workspace.app(app))
-            .collect::<Result<_>>()?
-    };
+    let apps: Vec<&crate::tui_apps::TuiApp> = crate::install_ux::Screen::resolve(&workspace)?.apps();
     let scratch = tempfile::tempdir()?;
     let rootfs = scratch.path().join("rootfs");
     fs::create_dir_all(rootfs.join("usr/lib"))?;

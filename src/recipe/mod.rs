@@ -132,16 +132,14 @@ pub fn select_exact_identity() {
     EXACT_FLAG.store(true, std::sync::atomic::Ordering::SeqCst);
 }
 
-/// Whether this build uses exact identity: `--exact` selected it, or the
-/// release is signed (`RECAB_RELEASE_SIGNING_KEY` is set), since a signed
-/// release is what production publishes. Then every Recipe invocation gets
+/// Whether this build uses exact identity (`--exact` selected it). Then every
+/// Recipe invocation gets
 /// `--exact-identity` (Recipe reuses saved state only from byte-identical
 /// Recipe and Ginux binaries), and the system part's key carries the Recipe
 /// and launcher bytes (`crate::parts`). Otherwise both name the tools by
 /// Recipe's declared behaviour versions (`levitate_recipe::identity`).
 pub fn exact_identity() -> bool {
     EXACT_FLAG.load(std::sync::atomic::Ordering::SeqCst)
-        || std::env::var_os(crate::parts::SIGNING_KEY_ENV).is_some()
 }
 
 /// The root image Recipe runs in, as `(reference, rootfs tar)`: the ambient

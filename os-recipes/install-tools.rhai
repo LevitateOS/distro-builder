@@ -3,9 +3,7 @@
 // whatever its rootfs's libc.
 //   --input source=<standalone vendored tree of the tool's crate>
 // BIN names the binary (default recstrap); INSTALL_PATH where it goes in the
-// package tree (default usr/bin/<BIN>). recab also packages its trial service,
-// which it writes itself for the image's init system (INIT_SYSTEM, the
-// variant's profile). recipe also packages the official source of recipes
+// package tree (default usr/bin/<BIN>). recipe also packages the official source of recipes
 // (the file that names it and a copy of it at the pinned commit) and the same
 // pinned runtime image/launcher the builder selected, supplied as typed inputs.
 // Input `program`, when given, is the already compiled binary: it is
@@ -27,7 +25,6 @@ let ctx = #{
     rust_target: rust_target,
     rootfs: join_path(RUNTIME.paths.output, "rootfs"),
     install_path: if is_def_var("INSTALL_PATH") { INSTALL_PATH } else { "usr/bin/" + bin },
-    init_system: if is_def_var("INIT_SYSTEM") { INIT_SYSTEM } else { "" },
     source: join_path(RUNTIME.paths.inputs, "source"),
     prebuilt: join_path(RUNTIME.paths.inputs, "program"),
     built_program: join_path(RUNTIME.paths.build, "target/" + rust_target + "/release/" + bin),
@@ -153,10 +150,6 @@ fn install(ctx) {
     chmod(ctx.program, 0o755);
     let installed = join_path(ctx.rootfs, ctx.install_path);
     mkdir(dirname(installed)); copy_file(ctx.program, installed); chmod(installed, 0o755);
-    if ctx.name == "recab" {
-        if ctx.init_system == "" { throw "recab packages its trial service for an init system: pass INIT_SYSTEM"; }
-        exec_checked(ctx.program, ["install-unit", "--root", ctx.rootfs, "--init", ctx.init_system, "--bin", "/" + ctx.install_path]);
-    }
     if ctx.name == "recipe" {
         recipe_state(ctx.rootfs);
         recipe_runtime(ctx);

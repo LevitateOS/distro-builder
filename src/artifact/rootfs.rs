@@ -66,12 +66,10 @@ pub fn create_erofs(
     // Target ownership/modes/xattrs travel in tar headers, independently of
     // staging privileges. Never bake host ownership or staging read grants in.
     // The tar streams straight into mkfs.erofs (no source argument: it reads
-    // stdin) and, through an in-process pipe, into the inventory parser, so
-    // the inventory still describes exactly the bytes the image writer read.
-    // No temporary tar is written, synced and read back: on a desktop tree
-    // that was 3.3 GB forced to disk and read twice more, and the image step
-    // was bound by that I/O, not by compression. With a fixed UUID and time
-    // the image is the same, byte for byte, as one made from a file.
+    // stdin). No temporary tar is written, synced and read back: on a desktop
+    // tree that was 3.3 GB forced to disk and read twice more, and the image
+    // step was bound by that I/O, not by compression. With a fixed UUID and
+    // time the image is the same, byte for byte, as one made from a file.
     let mut mkfs = std::process::Command::new("mkfs.erofs")
         .args(["-z", &compression_arg])
         .args(["-C", &chunk_size.to_string()])
@@ -83,44 +81,19 @@ pub fn create_erofs(
         .spawn()
         .context("starting mkfs.erofs")?;
     let image_input = mkfs.stdin.take().context("mkfs.erofs has no stdin")?;
-    let (inventory_output, inventory_input) = std::io::pipe().context("creating the inventory pipe")?;
-    let inventory = std::thread::spawn(move || {
-        distro_contract::release::SystemInventory::from_tar(std::io::BufReader::new(inventory_output))
-    });
     let written = (|| -> Result<()> {
-        let mut tee = Tee(image_input, std::io::BufWriter::new(inventory_input));
-        levitate_recipe::target::write_tar(source_dir, &mut tee)?;
-        std::io::Write::flush(&mut tee)?;
-        // Closing both ends signals end of stream to mkfs.erofs and the parser.
-        drop(tee);
+        let mut input = std::io::BufWriter::new(image_input);
+        levitate_recipe::target::write_tar(source_dir, &mut input)?;
+        std::io::Write::flush(&mut input)?;
+        // Closing the pipe signals end of stream to mkfs.erofs.
+        drop(input);
         Ok(())
     })();
     let status = mkfs.wait().context("waiting for mkfs.erofs")?;
-    let inventory = inventory
-        .join()
-        .map_err(|_| anyhow::anyhow!("the inventory parser panicked"))?;
     if !status.success() {
         bail!("mkfs.erofs importing the rootfs tar failed: {status}");
     }
     written.context("streaming the rootfs tar into mkfs.erofs")?;
-    let inventory = inventory.context("reading the image-writer inventory")?;
-
-    // Record the exact image-writer input, preserving logical target metadata.
-    // Release emission uses this binding without needing the host kernel to
-    // understand the target kernel's EROFS compression algorithms.
-    use sha2::{Digest, Sha256};
-    let mut image = fs::File::open(output)?;
-    let mut hash = Sha256::new();
-    std::io::copy(&mut image, &mut hash)?;
-    let provenance = distro_contract::release::RootfsProvenance {
-        schema_version: 1,
-        rootfs_sha256: format!("{:x}", hash.finalize()),
-        inventory,
-    };
-    distro_contract::runs::write_atomic(
-        &distro_contract::release::provenance_path(output),
-        &serde_json::to_vec(&provenance)?,
-    )?;
 
     // Print size
     let metadata = fs::metadata(output)?;
@@ -148,22 +121,6 @@ fn image_uuid(source_dir: &Path, output: &Path) -> Result<String> {
         "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
         b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7], b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15]
     ))
-}
-
-/// Writes everything to both writers: the tar to mkfs.erofs and to the
-/// inventory parser.
-struct Tee<A: std::io::Write, B: std::io::Write>(A, B);
-
-impl<A: std::io::Write, B: std::io::Write> std::io::Write for Tee<A, B> {
-    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-        self.0.write_all(bytes)?;
-        self.1.write_all(bytes)?;
-        Ok(bytes.len())
-    }
-    fn flush(&mut self) -> std::io::Result<()> {
-        self.0.flush()?;
-        self.1.flush()
-    }
 }
 
 fn format_size_human(bytes: u64) -> String {

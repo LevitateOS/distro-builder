@@ -9,8 +9,8 @@ search path; variant declarations select the rootfs and preseed producers.
 Every executable recipe uses the shared Recipe API 2 Rhai format and engine in
 `tools/recipe`, with its own `NEEDS`. Its `install` hook writes an owned output
 tree inside Ginux. Recipe publishes the declared files and directories, and the
-builder consumes them to assemble images. recab owns activation and updates of
-installed system images.
+builder consumes them to assemble images. recab owns the two roots of an A/B
+installation.
 
 The desktop apps (`gui/` in the workspace) are compiled here too, but not in
 Recipe's usual root: a Qt program has to be compiled against the distro's own

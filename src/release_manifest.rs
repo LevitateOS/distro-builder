@@ -1,78 +1,44 @@
-//! Publish one release set for media and online distribution. This does not
-//! build images: it consumes a prepared tree and its already-built artifacts.
-use anyhow::{Context, Result, ensure};
-use distro_contract::{Variant, release::*};
+//! The release set of a system part: its rootfs image, kernel and installed
+//! initramfs under their ISO paths, and `release.json`
+//! (`distro_contract::release::ReleaseManifest`) naming each with its size and
+//! SHA-256. `write` publishes it from already-built artifacts; `verify`
+//! checks a set before the combiner puts it on the ISO.
+use anyhow::{ensure, Context, Result};
+use distro_contract::{release::*, Variant};
 use distro_profile::Flavour;
 use std::{
     fs,
-    io::Read,
     path::{Path, PathBuf},
 };
 
-/// Keep the verified input paths alive through ISO assembly, rather than
-/// reopening the mutable run-directory artifact names after validation.
-pub struct ProducedRelease {
-    pub path: PathBuf,
-    pub inputs: recab::release::VerifiedRelease,
+/// A release set that `verify` checked: its manifest and where its members
+/// are.
+pub struct VerifiedRelease {
+    dir: PathBuf,
+    manifest: ReleaseManifest,
 }
 
-/// Read the explicitly supplied signing key without allowing it to become a
-/// checkout input or part of the prepared/published system. Call before writing
-/// public release objects; the configured public key remains the authority.
-pub(crate) fn signing_key(
-    variant: &Variant,
-    path: &Path,
-    public_roots: &[&Path],
-) -> Result<Vec<u8>> {
-    let secret = read_signing_key(variant, path, public_roots)?;
-    sign(
-        b"",
-        &secret,
-        variant
-            .contract
-            .release
-            .trust
-            .as_ref()
-            .context("configure release.trust before signing")?,
-    )?;
-    Ok(secret)
-}
-
-/// File custody checks shared by root authorization and release publication.
-/// The caller must additionally verify this key against the required role.
-pub(crate) fn read_signing_key(
-    variant: &Variant,
-    path: &Path,
-    public_roots: &[&Path],
-) -> Result<Vec<u8>> {
-    let path = fs::canonicalize(path).context("opening distribution signing key")?;
-    ensure!(
-        !path.starts_with(fs::canonicalize(&variant.repo_root)?),
-        "distribution signing key must stay outside the checkout"
-    );
-    for root in public_roots {
-        ensure!(
-            !path.starts_with(fs::canonicalize(root)?),
-            "distribution signing key must stay outside prepared and published trees"
-        );
+impl VerifiedRelease {
+    pub fn manifest(&self) -> &ReleaseManifest {
+        &self.manifest
     }
-    let file = levitate_recipe::fsx::open_regular(&path)?;
-    use std::os::unix::fs::PermissionsExt;
-    ensure!(
-        file.metadata()?.permissions().mode() & 0o077 == 0,
-        "private release keys must not be accessible to group or other users"
-    );
-    ensure!(
-        file.metadata()?.len() <= 16384,
-        "release signing key exceeds bound"
-    );
-    let mut secret = Vec::new();
-    file.take(16385).read_to_end(&mut secret)?;
-    Ok(secret)
+    pub fn manifest_path(&self) -> PathBuf {
+        self.dir.join(MANIFEST)
+    }
+    pub fn rootfs(&self) -> PathBuf {
+        self.dir.join(&self.manifest.artifacts.rootfs.path)
+    }
+    pub fn kernel(&self) -> PathBuf {
+        self.dir.join(&self.manifest.artifacts.kernel.path)
+    }
+    pub fn initramfs(&self) -> PathBuf {
+        self.dir.join(&self.manifest.artifacts.initramfs.path)
+    }
 }
 
 fn artifact(base: &Path, path: &str) -> Result<Artifact> {
-    let mut file = levitate_recipe::fsx::open_regular(&base.join(path))?;
+    let mut file = levitate_recipe::fsx::open_regular(&base.join(path))
+        .with_context(|| format!("opening release member {path}"))?;
     let size = file.metadata()?.len();
     use sha2::{Digest, Sha256};
     let mut hash = Sha256::new();
@@ -83,6 +49,7 @@ fn artifact(base: &Path, path: &str) -> Result<Artifact> {
         sha256: format!("{:x}", hash.finalize()),
     })
 }
+
 fn link(source: &Path, destination: &Path) -> Result<()> {
     if source == destination {
         return Ok(());
@@ -97,77 +64,47 @@ fn link(source: &Path, destination: &Path) -> Result<()> {
     fs::hard_link(source, destination)
         .with_context(|| format!("linking release artifact {}", destination.display()))
 }
-/// Produces release.json, system-inventory.json and an optional release.sig in
-/// `dir`. The boot/live paths also form the online payload layout. Requires root
-/// for recab's read-only verification mount; performs no image/ISO/kernel build.
+
+/// The system identity `variant`'s contract gives the `flavour` system.
+fn identity(variant: &Variant, flavour: Flavour) -> Result<Identity> {
+    let contract = &variant.contract;
+    Ok(Identity {
+        distro: contract.identity.os_id.clone(),
+        architecture: match std::env::consts::ARCH {
+            "x86_64" => Architecture::X86_64,
+            "aarch64" => Architecture::Aarch64,
+            _ => anyhow::bail!("unsupported release architecture"),
+        },
+        init: contract.profile.init,
+        libc: contract.profile.libc,
+        flavour,
+        version: contract.identity.os_version.clone(),
+    })
+}
+
+/// The digest of the module tree `root` carries for `release`.
+fn modules_digest(root: &Path, release: &str) -> Result<String> {
+    recinit::installed::modules_digest(&root.join("usr/lib/modules").join(release))
+        .with_context(|| format!("hashing the {release} module tree of {}", root.display()))
+}
+
+/// Publishes the release set of the `flavour` system built from the tree
+/// `root` in `dir`: links the rootfs image and the installed initramfs and
+/// copies the kernel to their ISO paths, then writes `release.json`. Builds
+/// nothing.
 pub fn write(
     variant: &Variant,
     flavour: Flavour,
     root: &Path,
     dir: &Path,
+    kernel_release: &str,
     kernel: &Path,
     initramfs: &Path,
-    signing_key: Option<&Path>,
-) -> Result<ProducedRelease> {
+) -> Result<PathBuf> {
     let contract = &variant.contract;
-    let policy = &contract.release;
-    policy.validate()?;
-    ensure!(
-        policy.sequence > 0,
-        "configure a positive release.sequence before producing a release"
-    );
-    let root_policy: Policy = serde_json::from_slice(&fs::read(root.join(SOURCE_CONFIG))?)?;
-    ensure!(
-        root_policy == policy.installed(),
-        "prepared rootfs release policy differs from the variant contract"
-    );
-    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_secs();
-    let authority = if let Some(production) = &policy.production {
-        let file = levitate_recipe::fsx::open_regular(&variant.path(production::AUTHORITY_FILE))?;
-        ensure!(file.metadata()?.len() <= production::MAX_AUTHORITY as u64, "public delegation exceeds bound");
-        let mut raw = Vec::new(); file.take(production::MAX_AUTHORITY as u64 + 1).read_to_end(&mut raw)?;
-        let verified = production::AuthorityProof::parse(&raw)?.verify(production, &contract.identity.os_id, &policy.channel, now)?;
-        ensure!(fs::read(root.join("usr/lib/recab/release-keys.json"))? == raw, "prepared root has stale public authority; prepare it again");
-        Some((verified, raw))
-    } else { None };
-    let secret = if authority.is_some() || policy.trust.is_some() {
-        let path = signing_key.context("signed releases require an explicit distribution PKCS#8 signing key")?;
-        let key = read_signing_key(variant, path, &[root, dir])?;
-        if let Some((authority, _)) = &authority { authority.sign(production::SigningRole::Release, b"", &key, now)?; }
-        else { sign(b"", &key, policy.trust.as_ref().unwrap())?; }
-        Some(key)
-    } else {
-        ensure!(signing_key.is_none(), "configure release trust before signing; a private key cannot choose its own authority");
-        None
-    };
-    if let Some((_, raw)) = &authority {
-        distro_contract::runs::write_atomic(&dir.join(production::AUTHORITY_FILE), raw)?;
-    }
     let sources = crate::pipeline::sources::recorded(dir)
         .context("release has no system-sources.sha256 provenance record")?;
     hash(&sources)?;
-    let proof_file = levitate_recipe::fsx::open_regular(&provenance_path(
-        &dir.join(&contract.artifacts.rootfs),
-    ))?;
-    ensure!(
-        proof_file.metadata()?.len() <= MAX_INVENTORY + 1024 * 1024,
-        "image provenance exceeds bound"
-    );
-    let proof: RootfsProvenance = serde_json::from_reader(proof_file)?;
-    ensure!(
-        proof.schema_version == 1,
-        "unsupported image provenance version"
-    );
-    proof.inventory.validate()?;
-    ensure!(
-        serde_json::to_vec(&proof.inventory)?
-            == serde_json::to_vec(&SystemInventory::from_target(
-                levitate_recipe::target::inspect(root)?
-            )?)?,
-        "prepared tree differs from image-writer inventory"
-    );
-    let inventory = proof.inventory.clone();
-    distro_contract::runs::write_atomic(&dir.join(INVENTORY), &serde_json::to_vec(&inventory)?)?;
     link(
         &dir.join(&contract.artifacts.rootfs),
         &dir.join(recinit::live::ROOTFS_ISO_PATH),
@@ -181,125 +118,54 @@ pub fn write(
         initramfs,
         &dir.join(recinit::live::INITRAMFS_INSTALLED_ISO_PATH),
     )?;
-    let binding: serde_json::Value =
-        serde_json::from_slice(&fs::read(root.join("usr/lib/recab/kernel.json"))?)?;
-    let manifest = ReleaseManifest {
-        schema_version: 1,
-        identity: Identity {
-            distro: contract.identity.os_id.clone(),
-            architecture: match std::env::consts::ARCH {
-                "x86_64" => Architecture::X86_64,
-                "aarch64" => Architecture::Aarch64,
-                _ => anyhow::bail!("unsupported release architecture"),
-            },
-            init: contract.profile.init,
-            libc: contract.profile.libc,
-            flavour,
-            channel: policy.channel.clone(),
-            sequence: policy.sequence,
-            version: contract.identity.os_version.clone(),
+    let manifest = ReleaseManifest::new(
+        identity(variant, flavour)?,
+        sources,
+        Kernel {
+            release: kernel_release.into(),
+            modules_sha256: modules_digest(root, kernel_release)?,
         },
-        sources_sha256: sources,
-        compatibility: Compatibility {
-            minimum_recab: recab::release::RECAB_VERSION.into(),
-            state_major: STATE_MAJOR,
-            state_minor: STATE_MINOR,
-            boot_protocol: BOOT_PROTOCOL,
-        },
-        kernel: Kernel {
-            release: binding["release"]
-                .as_str()
-                .context("kernel release missing")?
-                .into(),
-            modules_sha256: binding["modules_digest"]
-                .as_str()
-                .context("module binding missing")?
-                .into(),
-        },
-        artifacts: Artifacts {
+        Artifacts {
             rootfs: artifact(dir, recinit::live::ROOTFS_ISO_PATH)?,
-            inventory: artifact(dir, INVENTORY)?,
             kernel: artifact(dir, recinit::live::KERNEL_ISO_PATH)?,
             initramfs: artifact(dir, recinit::live::INITRAMFS_INSTALLED_ISO_PATH)?,
         },
-    };
-    ensure!(
-        manifest.artifacts.rootfs.sha256 == proof.rootfs_sha256,
-        "rootfs image differs from image-writer provenance"
     );
     manifest.validate()?;
-    let bytes = serde_json::to_vec_pretty(&manifest)?;
-    if let (Some((authority, _)), Some(secret)) = (&authority, &secret) {
-        let signature = authority.sign(production::SigningRole::Release, &bytes, secret, now)?;
-        distro_contract::runs::write_atomic(&dir.join(SIGNATURE), &signature)?;
-    } else if let (Some(trust), Some(secret)) = (&policy.trust, &secret) {
-        let signature = sign(&bytes, secret, trust)?;
-        distro_contract::runs::write_atomic(&dir.join(SIGNATURE), &signature)?;
-    }
-    let mut candidate = tempfile::NamedTempFile::new_in(dir)?;
-    std::io::Write::write_all(&mut candidate, &bytes)?;
-    candidate.as_file().sync_all()?;
-    let verified = recab::release::verify_produced_bundle(
-        root,
-        candidate.path(),
-        policy.trust.as_ref(),
-        policy.trust.is_none(),
-        &proof,
-    )
-    .context("validating the produced release set")?;
-    ensure!(
-        verified.id() == digest(&bytes),
-        "release verification identity changed"
-    );
-    // The manifest is the last publication, after the exact set is validated.
     let destination = dir.join(MANIFEST);
-    distro_contract::runs::write_atomic(&destination, &bytes)?;
-    Ok(ProducedRelease {
-        path: destination,
-        inputs: verified,
-    })
+    distro_contract::runs::write_atomic(&destination, &serde_json::to_vec_pretty(&manifest)?)?;
+    Ok(destination)
 }
 
-/// Verifies the release set already published in `dir` (its manifest, its
-/// signature or local trust as the variant's policy has it, every member's
-/// size and hash, and `root`, the tree it was built from, against the
-/// rootfs image's provenance), as `write` verifies the set it publishes.
-/// The returned paths are recab's frozen copy of the verified set.
-pub fn verify(variant: &Variant, root: &Path, dir: &Path) -> Result<ProducedRelease> {
-    let contract = &variant.contract;
-    let policy = &contract.release;
-    policy.validate()?;
-    let proof_file = levitate_recipe::fsx::open_regular(&provenance_path(
-        &dir.join(&contract.artifacts.rootfs),
-    ))?;
+/// Verifies the release set published in `dir`: its manifest names this
+/// variant's system, every member has its recorded size and SHA-256, and
+/// `root`, the tree it was built from, carries the module tree it binds.
+pub fn verify(variant: &Variant, root: &Path, dir: &Path) -> Result<VerifiedRelease> {
+    let raw = fs::read(dir.join(MANIFEST))
+        .with_context(|| format!("reading {}", dir.join(MANIFEST).display()))?;
+    let manifest = ReleaseManifest::parse(&raw)?;
+    let expected = identity(variant, manifest.identity.flavour)?;
     ensure!(
-        proof_file.metadata()?.len() <= MAX_INVENTORY + 1024 * 1024,
-        "image provenance exceeds bound"
+        manifest.identity == expected,
+        "the release set names another system than {} ({:?})",
+        variant.id,
+        manifest.identity
     );
-    let proof: RootfsProvenance = serde_json::from_reader(proof_file)?;
+    for member in manifest.artifacts.all() {
+        let found = artifact(dir, &member.path)?;
+        ensure!(
+            found.size == member.size && found.sha256 == member.sha256,
+            "release member {} differs from release.json",
+            member.path
+        );
+    }
     ensure!(
-        proof.schema_version == 1,
-        "unsupported image provenance version"
+        modules_digest(root, &manifest.kernel.release)? == manifest.kernel.modules_sha256,
+        "the system tree's {} module tree differs from release.json",
+        manifest.kernel.release
     );
-    let path = dir.join(MANIFEST);
-    let verified = recab::release::verify_produced_bundle(
-        root,
-        &path,
-        policy.trust.as_ref(),
-        policy.trust.is_none(),
-        &proof,
-    )
-    .context("validating the release set")?;
-    ensure!(
-        verified.manifest().artifacts.rootfs.sha256 == proof.rootfs_sha256,
-        "rootfs image differs from image-writer provenance"
-    );
-    ensure!(
-        verified.id() == digest(&fs::read(&path)?),
-        "release verification identity changed"
-    );
-    Ok(ProducedRelease {
-        path,
-        inputs: verified,
+    Ok(VerifiedRelease {
+        dir: dir.to_path_buf(),
+        manifest,
     })
 }

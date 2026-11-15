@@ -12,7 +12,7 @@ use distro_profile::InitSystem;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::kernel::{KERNEL_IMAGE_PATH, KERNEL_MODULES_DIR, KERNEL_RELEASE_PATH};
+use crate::kernel::{KERNEL_MODULES_DIR, KERNEL_RELEASE_PATH};
 use crate::recipe::{recipe_work_dir, Invocation};
 
 /// What a live UKI boots into; each role is one UKI and one boot menu entry.
@@ -192,12 +192,11 @@ pub fn assemble(
     crate::parts::check_kernel(&system, kernel)?;
 
     // The release set is the system part's; verify it as linked here, with
-    // the tree it was built from, and take the ISO's members from recab's
-    // verified copy.
+    // the tree it was built from, and take the ISO's members from it.
     let what = step("verifying the installed-system release set");
-    let release_manifest = crate::release_manifest::verify(variant, &rootfs, dir).context(what.clone())?;
+    let release_set = crate::release_manifest::verify(variant, &rootfs, dir).context(what.clone())?;
     {
-        let manifest = release_manifest.inputs.manifest();
+        let manifest = release_set.manifest();
         ensure!(
             manifest.identity.flavour == product.flavour(),
             "{what}: the release set is the {} system, not {}",
@@ -220,9 +219,9 @@ pub fn assemble(
     let iso = dir.join(names.iso(product));
     let menu = format!("{} {}", identity.os_name, product.title());
     let mut config = reciso::IsoConfig::new(
-        release_manifest.inputs.kernel(),
+        release_set.kernel(),
         &initramfs_live,
-        release_manifest.inputs.rootfs(),
+        release_set.rootfs(),
         &identity.iso_label,
         &iso,
     );
@@ -244,52 +243,22 @@ pub fn assemble(
         &identity.os_id,
         &identity.os_version,
     ));
-    config.extra_files = vec![(
-        release_manifest.inputs.initramfs(),
-        recinit::live::INITRAMFS_INSTALLED_ISO_PATH.to_string(),
-    )];
-    config.extra_files.push((
-        release_manifest.inputs.manifest_path(),
-        distro_contract::release::MANIFEST.into(),
-    ));
-    config.extra_files.push((
-        release_manifest.inputs.inventory_path(),
-        distro_contract::release::INVENTORY.into(),
-    ));
-    if let Some(signature) = release_manifest.inputs.signature_path() {
-        config
-            .extra_files
-            .push((signature, distro_contract::release::SIGNATURE.into()));
-    }
-    if contract.release.production.is_some() {
-        let authority=release_manifest.inputs.manifest_path().with_file_name(distro_contract::release::production::AUTHORITY_FILE);
-        anyhow::ensure!(authority.is_file(),"verified production release lacks its public authority proof");
-        config.extra_files.push((authority,distro_contract::release::production::AUTHORITY_FILE.into()));
-    }
+    config.extra_files = vec![
+        (
+            release_set.initramfs(),
+            recinit::live::INITRAMFS_INSTALLED_ISO_PATH.to_string(),
+        ),
+        (
+            release_set.manifest_path(),
+            distro_contract::release::MANIFEST.into(),
+        ),
+    ];
     config.systemd_boot = rootfs.join(SYSTEMD_BOOT_EFI);
     let iso = reciso::create_iso(&config, &|message| crate::tprintln!("  {message}")).context(what)?;
     seq.finish();
 
     print_summary(dir)?;
     Ok(iso)
-}
-
-/// Writes the kernel binding `usr/lib/recab/kernel.json` into `rootfs`: the
-/// kernel `release`, the digest of the kernel image in `kernel` and the
-/// digest of the module tree the rootfs carries for it.
-pub(crate) fn bind_kernel(kernel: &Path, rootfs: &Path, release: &str) -> Result<()> {
-    let kernel_digest = crate::parts::file_sha256(&kernel.join(KERNEL_IMAGE_PATH))?.0;
-    let modules_digest =
-        recinit::installed::modules_digest(&rootfs.join("usr/lib/modules").join(release))?;
-    let binding = serde_json::json!({
-        "version": 1,
-        "release": release,
-        "kernel_digest": kernel_digest,
-        "modules_digest": modules_digest,
-    });
-    fs::create_dir_all(rootfs.join("usr/lib/recab"))?;
-    fs::write(rootfs.join("usr/lib/recab/kernel.json"), serde_json::to_vec(&binding)?)?;
-    Ok(())
 }
 
 /// The kernel's release (`kernel.release`, one line).

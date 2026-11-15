@@ -1,6 +1,5 @@
 //! Explicit offline source preparation and managed producers for live tools.
 use anyhow::{bail, Context, Result};
-use distro_profile::Profile;
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -447,32 +446,21 @@ pub fn tool_binaries(package: &str) -> Result<Vec<String>> {
 /// Compile `package`'s `binary` (its default when `None`) through its recipe,
 /// as a static musl program on every distro, and return the published package tree,
 /// which holds it at `usr/bin/<binary>`.
-pub(crate) fn build_tool_tree(
-    repo: &Path,
-    package: &str,
-    binary: Option<&str>,
-    profile: &Profile,
-) -> Result<PathBuf> {
+pub(crate) fn build_tool_tree(repo: &Path, package: &str, binary: Option<&str>) -> Result<PathBuf> {
     let (_, _, binaries) = tool(package)?;
     let binary = binary.unwrap_or(binaries[0]);
     if !binaries.contains(&binary) {
         bail!("package {package} does not build binary {binary}");
     }
-    let init = profile.init.as_str();
     let source = prepare_tool_source(repo, package)?;
     let recipe = repo
         .join("distro/builder/os-recipes")
         .join("install-tools.rhai");
-    // The tree depends on the init system (recab's trial service).
-    let work = repo
-        .join(".artifacts/work/recipe-tools")
-        .join(binary)
-        .join(init);
+    let work = repo.join(".artifacts/work/recipe-tools").join(binary);
     let install_path = format!("usr/bin/{binary}");
     let mut invocation = super::Invocation::new(repo, "install", &recipe, &work)
         .define("BIN", binary)
         .define("INSTALL_PATH", &install_path)
-        .define("INIT_SYSTEM", init)
         .input("source", source.path())
         .input("program", &compile_crate(repo, package)?.join(binary));
     // The package manager ships the same pinned runtime the builder uses.

@@ -27,7 +27,7 @@
 
 use anyhow::{bail, Context, Result};
 use distro_contract::profile::Flavour;
-use distro_contract::{Variant, DESKTOP_APPS, DESKTOP_APP_ENTRIES, DESKTOP_HELPERS};
+use distro_contract::{Variant, DESKTOP_APPS, DESKTOP_APP_ENTRIES};
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::Read;
@@ -119,7 +119,7 @@ pub(crate) fn compile_in_build_root(
     let repo = &variant.repo_root;
     let (reference, image) = build_root(variant).context("making the apps-build root")?;
     // The static Recipe the image itself ships: it runs in any root.
-    let worker = crate::recipe::tools::build_tool_tree(repo, "levitate-recipe", None, &variant.contract.profile)
+    let worker = crate::recipe::tools::build_tool_tree(repo, "levitate-recipe", None)
         .context("building the static Recipe that runs inside the apps-build root")?
         .join("usr/bin/recipe");
     fs::create_dir_all(work).with_context(|| format!("creating '{}'", work.display()))?;
@@ -130,19 +130,13 @@ pub(crate) fn compile_in_build_root(
     invocation.root(reference, image).worker(worker).run()?.directory("rootfs")
 }
 
-/// Refuses a desktop rootfs that lacks one of the desktop apps, its menu entry
-/// or one of the helper programs ([`DESKTOP_HELPERS`], which have no menu entry).
+/// Refuses a desktop rootfs that lacks one of the desktop apps or its menu entry.
 pub(crate) fn check(rootfs: &Path) -> Result<()> {
     for (app, entry) in DESKTOP_APPS.iter().zip(DESKTOP_APP_ENTRIES) {
         for path in [format!("usr/bin/{app}"), entry.to_string()] {
             if !rootfs.join(&path).is_file() {
                 bail!("the desktop system lacks /{path} (the desktop app {app})");
             }
-        }
-    }
-    for helper in DESKTOP_HELPERS {
-        if !rootfs.join(format!("usr/bin/{helper}")).is_file() {
-            bail!("the desktop system lacks /usr/bin/{helper} (the desktop helper)");
         }
     }
     Ok(())

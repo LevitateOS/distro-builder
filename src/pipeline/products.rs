@@ -144,7 +144,7 @@ pub(crate) fn build_overlay(variant: &Variant, product: ProductId, rootfs: &Path
         create_live_overlay(variant, &LiveSession::new(variant, product), rootfs, overlay)?;
     }
     if build.install_screen {
-        add_tools(&variant.repo_root, overlay, ToolLayer::Overlay, &variant.id, &contract.profile)
+        add_tools(&variant.repo_root, overlay, ToolLayer::Overlay, &variant.id)
             .with_context(|| format!("adding the live tools for {}", variant.id))?;
         crate::install_ux::write_payload(
             &variant.repo_root,
@@ -165,49 +165,10 @@ pub(crate) fn build_overlay(variant: &Variant, product: ProductId, rootfs: &Path
 pub(crate) fn prepare_system(variant: &Variant, flavour: Flavour, rootfs: &Path) -> Result<()> {
     let source = materialize_rootfs_source(variant, flavour)?;
     levitate_recipe::target::merge_tree(&source, rootfs)?;
-    let update_source = rootfs.join(distro_contract::release::SOURCE_CONFIG);
-    fs::create_dir_all(update_source.parent().unwrap())?;
-    fs::write(
-        &update_source,
-        serde_json::to_vec(&variant.contract.release.installed())?,
-    )?;
-    if let Some(source) = &variant.contract.release.source {
-        let text = fs::read_to_string(variant.repo_root.join(&source.recipe))?;
-        let marker = "network: [] /* recab configured endpoint */";
-        anyhow::ensure!(
-            text.matches(marker).count() == 1,
-            "acquisition recipe must declare its configurable network marker exactly once"
-        );
-        let mut endpoints = std::collections::BTreeSet::from([distro_contract::release::endpoint(&source.index)?]);
-        if let Some(production) = &variant.contract.release.production {
-            endpoints.insert(distro_contract::release::endpoint(&production.asset_prefix)?);
-            for origin in &production.redirect_origins { endpoints.insert(distro_contract::release::endpoint(origin)?); }
-            let proof = fs::read(variant.path(distro_contract::release::production::AUTHORITY_FILE))?;
-            distro_contract::release::production::AuthorityProof::parse(&proof)?.verify(production,
-                &variant.contract.identity.os_id, &variant.contract.release.channel,
-                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_secs())?;
-            fs::write(rootfs.join("usr/lib/recab/release-keys.json"), proof)?;
-            levitate_recipe::target::set_mode(rootfs, Path::new("usr/lib/recab/release-keys.json"), 0o644)?;
-        }
-        let rendered = text.replace(
-            marker,
-            &format!("network: {}", serde_json::to_string(&endpoints)?),
-        );
-        let path = rootfs.join(distro_contract::release::ACQUISITION_RECIPE);
-        fs::create_dir_all(path.parent().unwrap())?;
-        fs::write(&path, rendered)?;
-        levitate_recipe::target::set_mode(
-            rootfs,
-            std::path::Path::new(distro_contract::release::ACQUISITION_RECIPE),
-            0o644,
-        )?;
-    }
     let role = rootfs.join(recinit::live::PAYLOAD_ROLE_FILE);
     fs::write(&role, format!("{}\n", recinit::live::ROLE_ROOTFS))
         .with_context(|| format!("writing {}", role.display()))?;
-    add_tools(&variant.repo_root, rootfs, ToolLayer::Rootfs, &variant.id, &variant.contract.profile)?;
-    crate::tui_binary::install_system(&variant.repo_root, rootfs, &variant.contract.profile)
-        .with_context(|| format!("adding the installed system's TUI apps for {}", variant.id))?;
+    add_tools(&variant.repo_root, rootfs, ToolLayer::Rootfs, &variant.id)?;
     if flavour == Flavour::Desktop {
         crate::display_server::install_system(variant, rootfs)
             .with_context(|| format!("adding the display server for {}", variant.id))?;

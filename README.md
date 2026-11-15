@@ -39,7 +39,7 @@ The builder selects `distro/builder/os-recipes` explicitly and consumes the
 files and trees those recipes publish. Their `install` hooks assemble outputs
 inside Ginux; the builder turns those outputs into OS images. Packages included
 in a base or desktop image, including desktop applications, belong to that
-image's lifecycle. recab owns staging and switching installed system images.
+image's lifecycle. recab owns the two roots of an A/B installation.
 
 The workspace's top-level [`recipes/`](../../recipes/README.md) is the official
 source of user-managed software, a repository of its own pinned here. The
@@ -47,10 +47,7 @@ Recipe tool package ships it as a source: `/usr/share/recipe/sources/levitate.to
 says where it is fetched from, and `/usr/share/recipe/sources/levitate/` is a
 copy at the pinned commit, with its published `index.json`, that Recipe uses
 until it has fetched a newer index. It sits alongside the builder's selected
-pinned Ginux root image and static launcher. Root's override catalog remains under `/var/lib/recipe`. On immutable A/B
-installs, Recipe package commands target recab's inactive preparation, and system
-software is selected under the booted slot's `/usr/lib/recipe/profile`. Login
-shells add that profile and ordinary users' independent profiles to `PATH`.
+pinned Ginux root image and static launcher. Root's override catalog remains under `/var/lib/recipe`.
 
 The builder always passes `--no-activate`: it consumes recipe outputs to compose
 images, without activating packages on the build host. The user catalog is not
@@ -109,10 +106,9 @@ from and kept under `.artifacts/parts/<distro>/<kind>/<key>/`
 (`docs/build-redesign.md`, section 0 at the repository root):
 
 - `system-base` and `system-desktop`: the system tree (`rootfs-source/`: the
-  rootfs recipe's tree with the rootfs tools and apps, the kernel's modules
-  and the kernel binding `usr/lib/recab/kernel.json`, metadata finalized), the
-  rootfs EROFS, the installed initramfs and the release set (`release.json`,
-  `system-inventory.json`, signature, `live/` and `boot/` members,
+  rootfs recipe's tree with the rootfs tools and apps and the kernel's
+  modules, metadata finalized), the rootfs EROFS, the installed initramfs and
+  the release set (`release.json`, `live/` and `boot/` members,
   `system-sources.sha256`). test-base-rootfs, test-live-ssh, test-install-base and
   test-installed-boot share `system-base`; release has `system-desktop`.
 - `overlay-<product>`: the product's overlay tree (live session, overlay
@@ -122,12 +118,10 @@ A part's key is a SHA-256 over its kind, the distro and named inputs, all
 recorded in its `part.json` with its output files (path, bytes, sha256):
 
 - system: the flavour, `system-sources.sha256`'s digest, the source closure of
-  the builder's own crates (recinit, reciso, recab, levitate-recipe...),
+  the builder's own crates (recinit, reciso, levitate-recipe...),
   Recipe's declared behaviour versions and the identity mode (`declared`, or
   `exact` with the Recipe CLI's and the Ginux launcher's SHA-256), the Ginux root (`GINUX_ROOT`, and the `GINUX_ROOTFS` tar's
-  digest), the kernel (release, image digest, module tree digest), busybox,
-  the release policy and its production authority, and whether the manifest
-  is signed and the digest of the `RECAB_RELEASE_SIGNING_KEY` file;
+  digest), the kernel (release, image digest, module tree digest) and busybox;
 - overlay: the system part's key and exact build, the product, the overlay
   tools' crate closures and the running builder executable.
 
@@ -149,9 +143,8 @@ part again, because the system ships the launcher, but its Recipe steps are
 reused). `release build <product> <distro> --exact` (`cargo xtask build
 <product> <distro> --exact`) passes `--exact-identity` to every Recipe
 invocation and puts the Recipe CLI's and launcher's bytes into the system
-part's key, so a release comes only from what byte-identical tools built. A
-signed build (`RECAB_RELEASE_SIGNING_KEY` set), the production release path,
-is always exact. When to bump the declared versions is stated in
+part's key, so a release comes only from what byte-identical tools built.
+When to bump the declared versions is stated in
 `tools/recipe/src/identity.rs`.
 
 The **combiner** (`release build <product> <distro>`, `src/release.rs`)
@@ -245,10 +238,9 @@ label preserves artifact bytes and checksums; private Recipe exports retain thei
 existing permissions. See `tools/recqemu/README.md` at the repository root.
 
 After explicit builds, run `cargo xtask test all levitate` and
-`cargo xtask test all acorn` in the operator's session-libvirt context, then
-`cargo xtask test ab-update levitate` and `cargo xtask test ab-update acorn`.
-The current test CLI defaults to A/B installation. Selecting `--mode mutable`
-skips A/B in `all`; a standalone `ab-update` still needs an A/B install. The
+`cargo xtask test all acorn` in the operator's session-libvirt context.
+The test CLI defaults to A/B installation. Selecting `--mode mutable`
+skips `other-root` in `all`; a standalone `other-root` still needs an A/B install. The
 `test-install-base` scenario retains actual guest installer PTY interaction in
 `install-pty.log`, in addition to its tool/split-pane smoke controls. Version/help
 or smoke alone does not establish interaction. These commands are acceptance
@@ -269,7 +261,7 @@ Every line the builder prints starts with the local time (`HH:MM:SS`; `tprintln!
 ## Prebuilt programs
 
 Our own tools (`recpart`, `recstrap`, `recab`, `recipe`, `install-split`) and the TUI
-binary (`install-tui`, `system-tui`) and the Qt desktop apps (family `desktop-apps`, one whole tree per distro: programs, menu entries, polkit actions, Recipe's metadata, kept with exact modes and links) are identified by a **key**, the SHA-256 of
+binary (`install-tui`) and the Qt desktop apps (family `desktop-apps`, one whole tree per distro: programs, menu entries, polkit actions, Recipe's metadata, kept with exact modes and links) are identified by a **key**, the SHA-256 of
 everything their compile depends on (`src/prebuilt.rs`): the prepared source closure,
 the compile recipe, the target, the compiler image digest and Recipe's two behaviour
 versions (`ENGINE_BEHAVIOUR`, `GINUX_BEHAVIOUR`; `prebuilt::behaviour`). Nothing that does
@@ -282,7 +274,7 @@ against `prebuilt.json`), a download of release `<family>-<key16>` from `Levitat
 again), or a compile, which fills the cache. Any download failure is a miss. One line per
 program says which: `[prebuilt] recab: local|downloaded|compiled <key16>`.
 
-- `release build --exact` (and any signed build) never uses prebuilts and touches no cache.
+- `release build --exact` never uses prebuilts and touches no cache.
 - `--no-prebuilt` (`cargo xtask build ... --no-prebuilt`) compiles but still fills the cache.
 - `distro-builder prebuilt key <tools|tui|desktop-apps> <name> [--distro <id>]` prints the key (CI uses it);
   a TUI key needs `--distro` for its libc; for `desktop-apps` the name is the distro and no flag is taken.
@@ -310,120 +302,14 @@ at your option.
 
 ## Release manifest
 
-The system part emits `release.json`, `system-inventory.json` and, when
-configured, `release.sig` beside its other outputs, and the combiner verifies
-that set again in each release directory before writing the ISO. The ISO carries the exact
-same manifest/inventory/signature as the online bundle; payload members use its
-`boot/` and `live/` layout. The image writer records intended metadata from the
-actual tar input and binds it to the resulting EROFS image. Release emission
-refuses missing/stale image provenance, a changed prepared tree or mismatched
-kernel, modules, initramfs, identity or runtime protocol.
+The system part emits `release.json` (`distro_contract::release`) beside its
+other outputs: the system's identity, the digest of its sources, its kernel
+release and module-tree digest, and the size and SHA-256 of the rootfs image,
+kernel and installed initramfs under their ISO paths (`live/`, `boot/`). The
+combiner verifies that set again in each release directory (identity, every
+member's size and hash, the module tree of the system tree it was built from)
+and puts it on the ISO. Preflight checks a release run against it. The format
+is in [the release contract](../contract/docs/releases.md).
 
-To emit/verify metadata for **already produced** artifacts, without starting a
-system build:
-
-```sh
-distro-builder --repo-root /path/to/LevitateOS release manifest \
-  levitate base /path/to/prepared/rootfs-source /path/to/release
-```
-
-The release directory must contain the rootfs image, its image-writer provenance,
-`system-sources.sha256`, `boot/vmlinuz` and `boot/initramfs-installed.img`. The
-prepared tree must still match the image. An older image without provenance is
-not silently blessed by supplying matching filenames.
-
-Configure release ordering and optional source/trust in the variant's `[release]`
-contract. The checked-in development channels have no production endpoint/key.
-Signed emission requires `--signing-key /private/release.pk8`; full release
-assembly reads that explicit path from `RECAB_RELEASE_SIGNING_KEY`. The key must
-match the configured distribution public key. Key custody and deployment of the
-published directory remain release operations. Manifest and index publication
-refuse signing keys inside the checkout, prepared root, release bundle or
-publication directory (using resolved paths). Key format and authority are
-checked before public release objects are written. Supply an external private
-key file; do not put key bytes in command arguments, defines or logs.
-
-The approved P14 production design starts with separate root, release and index
-roles and an explicit version-2 policy; it does not reinterpret the legacy
-`release.trust` key. These preparatory commands use configured public production
-policy and disposable or externally held private keys:
-
-```sh
-distro-builder --repo-root /path/to/LevitateOS release authorize \
-  levitate /path/to/public-role-document.json /path/to/feed/release-keys.json \
-  --root-key /private/root.pk8
-distro-builder --repo-root /path/to/LevitateOS release verify-feed \
-  levitate /path/to/feed
-```
-
-Authorization signs exact public document bytes and verifies role separation,
-scope, validity and monotonic replacement. It can renew expired, correctly
-root-signed authorization. Feed verification checks the root proof, index-role
-signature, audience/epoch/freshness, release-role signatures and transport maps
-against the existing system manifests. Its JSON explicitly reports that payloads
-were not fetched/verified and production was not enabled. These commands do not
-build, upload or change an installed system. Private key files must also exclude
-group/other access. The delegated reader, transport publisher and publication/refresh
-workflows are implemented. Public-origin installed scenario support and applicable
-runtime validation remain pending; existing variant defaults remain disabled.
-See `tools/recab/RELEASE-ENGINEERING.md` for the approved design.
-
-For legacy development feeds, configure the single-key source explicitly:
-
-```toml
-[release.source]
-index = "https://updates.example.org/development/index.json"
-recipe = "distro/builder/os-recipes/update-acquire.rhai"
-[release.trust]
-ed25519 = "<64 lowercase hex characters of the public release key>"
-```
-
-The example URL is a placeholder, not a configured LevitateOS service. The builder
-packages the private acquisition recipe with only that endpoint in `NEEDS.network`
-and writes its installed path into the root policy. It must contain exactly one
-`network: [] /* recab configured endpoint */` marker. Production signing keys
-stay outside the checkout and published directory.
-
-Publish an already signed bundle into a local serveable directory:
-
-```sh
-distro-builder --repo-root /path/to/LevitateOS release index \
-  levitate /path/to/release /path/to/published 1 --signing-key /private/release.pk8
-```
-
-The index sequence must advance. The publisher serializes writers, copies and
-checks immutable `releases/<manifest SHA256>/` objects, signs the index, publishes
-its content-addressed signature first and replaces `index.json` last. Retain
-older release objects/signatures for clients with pinned downloads. Serving or
-uploading that directory is explicit; this command performs no network publish.
-
-For this legacy feed, the server exposes that directory's layout at the exact
-configured HTTPS index URL. Deploy immutable `releases/` objects and
-`index-signatures/` before replacing `index.json`, and retain older referenced
-objects. Copying only `index.sig` is insufficient: recab requests
-`index-signatures/<SHA256(index.json)>.sig`. Keep the index refreshable by clients
-and serve the signed bytes without rewriting them.
-
-Production enablement remains pending: both distro contracts still have development
-sequence 1 with no production origin or trust key. The approved Pages/immutable
-Release service and separate signing roles are implemented, but canonical origin
-confirmation, public authority, private-key custody, protected environments and
-release runtime provisioning still need to be completed. Existing local fixture
-passes do not establish a production service. Installed check/download/apply
-against the published service and applicable current runtime evidence remain
-outstanding; no full build or VM run is implied by the publishing commands.
-
-The format and trust rules are in
-[the shared release contract](../contract/docs/releases.md). Full new distro,
-ISO and kernel builds have not been run for P07/P08.
-
-
-Production x86_64 transport and metadata publication use `release transport`,
-`release publish` and `release verify-online`. `cargo xtask release` supplies the
-operator upload/refresh/deploy workflow; see the superproject's
-[production publication guide](https://github.com/LevitateOS/LevitateOS/blob/master/release/updates/README.md).
-These consume existing signed artifacts and explicit Recipe runtime inputs.
-They do not build systems or establish installed production readiness. The
-legacy `release index` command remains for development feeds and refuses a
-production policy. Production origins, keys and stable enablement remain
-pending provisioning and applicable validation.
+Nothing here signs, indexes or publishes releases for installed systems:
+updates are designed later, on the shared release-engineering track.

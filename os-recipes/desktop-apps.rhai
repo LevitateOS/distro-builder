@@ -104,6 +104,7 @@ fn installed_files(ctx) {
     let files = [];
     for program in ctx.programs { files.push(["usr/bin/" + program, 0o755]); }
     for name in ["recipe", "recab", "disk"] { files.push(["usr/share/applications/org.levitateos." + name + ".desktop", 0o644]); }
+    for name in ["recipe", "recab", "disk"] { files.push(["usr/share/icons/hicolor/scalable/apps/org.levitateos." + name + ".svg", 0o644]); }
     for name in ["recipe", "recab"] { files.push(["usr/share/polkit-1/actions/org.levitateos." + name + ".policy", 0o644]); }
     files
 }

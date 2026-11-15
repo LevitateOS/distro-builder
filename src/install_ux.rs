@@ -1,11 +1,11 @@
 //! The live ISO's install screen, from login to the split pane.
 //!
-//! The screen is the same on every variant (`distro_contract::install_ux`): the
-//! hub and the docs side by side in the split pane, and the other install apps
-//! as commands. On each console it lists, getty starts the launcher in place of
-//! login (the live overlay writes those getty lines). The launcher runs the split
-//! pane with the hub on the left and the docs on the right, and becomes a root
-//! login shell when the screen ends. A serial console runs the screen only when
+//! The screen is the same on every variant (`distro_contract::install_ux`): a
+//! root shell and the docs side by side in the split pane, and the helper
+//! install apps as commands typed in that shell. On each console it lists, getty
+//! starts the launcher in place of login (the live overlay writes those getty
+//! lines). The launcher runs the split pane with a root shell on the left and the
+//! docs on the right, and becomes a root login shell when the screen ends. A serial console runs the screen only when
 //! the boot-injection payload sets `SERIAL_KEY=1`; otherwise it gets the shell
 //! straight away.
 //!
@@ -14,7 +14,7 @@
 //! has no use for the install screen. Paths are relative to a layer's root.
 
 use anyhow::{bail, Context, Result};
-use distro_contract::install_ux::{APPS, BIN_DIR, CONSOLES, DOCS, DOCS_PAGE, DOCS_PANE, HUB, SHELL};
+use distro_contract::install_ux::{APPS, BIN_DIR, CONSOLES, DOCS, DOCS_PAGE, DOCS_PANE, SHELL};
 use distro_contract::{LookContract, Profile};
 use std::path::Path;
 
@@ -32,33 +32,25 @@ pub const LIVE_LOGIN_HINT: &str = "root is logged in on every console (no passwo
 
 /// The screen's apps, resolved from the workspace.
 pub struct Screen<'a> {
-    pub hub: &'a TuiApp,
     pub docs: &'a TuiApp,
     /// The other apps, commands for the shell beside the docs.
     pub extra: Vec<&'a TuiApp>,
 }
 
 impl<'a> Screen<'a> {
-    /// The screen's apps in `workspace`. Each must exist, the hub and the docs must
-    /// take the distro's name by a declared flag (the hub its shell too), and the
-    /// docs must declare how a page is opened.
+    /// The screen's apps in `workspace`. Each must exist, the docs must take the
+    /// distro's name by a declared flag and declare how a page is opened.
     pub fn resolve(workspace: &'a Workspace) -> Result<Self> {
         let screen = Self {
-            hub: workspace.app(HUB)?,
             docs: workspace.app(DOCS)?,
             extra: APPS.iter().map(|name| workspace.app(name)).collect::<Result<_>>()?,
         };
-        for (app, shell) in [(screen.hub, true), (screen.docs, false)] {
-            let flags = &app.distro_args;
-            if flags.os_name.is_none() || (shell && flags.shell.is_none()) {
-                bail!(
-                    "the install screen tells {} the distro's name{}: its package.json must \
-                     declare levitate.distroArgs.osName{}",
-                    app.name,
-                    if shell { " and shell" } else { "" },
-                    if shell { " and .shell" } else { "" },
-                );
-            }
+        if screen.docs.distro_args.os_name.is_none() {
+            bail!(
+                "the install screen tells {} the distro's name: its package.json must \
+                 declare levitate.distroArgs.osName",
+                screen.docs.name,
+            );
         }
         screen.docs.page_arg()?;
         Ok(screen)
@@ -66,19 +58,16 @@ impl<'a> Screen<'a> {
 
     /// Every app the screen's TUI binary carries.
     pub fn apps(&self) -> Vec<&'a TuiApp> {
-        [self.hub, self.docs].into_iter().chain(self.extra.iter().copied()).collect()
+        [self.docs].into_iter().chain(self.extra.iter().copied()).collect()
     }
 
-    /// The pane commands on `os_name`: the hub's, and the docs' at their page.
+    /// The pane commands on `os_name`: a root login shell on the left, and the
+    /// docs, at their page, on the right.
     pub fn panes(&self, os_name: &str) -> Result<[Vec<String>; 2]> {
-        let command = |app: &TuiApp| {
-            let mut argv = vec![format!("/{BIN_DIR}/{}", app.name)];
-            argv.extend(app.distro_argv(os_name, SHELL));
-            argv
-        };
-        let mut docs = command(self.docs);
+        let mut docs = vec![format!("/{BIN_DIR}/{}", self.docs.name)];
+        docs.extend(self.docs.distro_argv(os_name, SHELL));
         docs.extend([DOCS_PANE.to_string(), self.docs.page_arg()?.to_string(), DOCS_PAGE.to_string()]);
-        Ok([command(self.hub), docs])
+        Ok([vec![SHELL.to_string(), "-l".to_string()], docs])
     }
 }
 
@@ -156,7 +145,7 @@ pub(crate) fn write_payload(
     )
         .context("building the install screen's TUI apps")?;
 
-    let [hub, docs] = screen.panes(os_name)?;
+    let [shell, docs] = screen.panes(os_name)?;
     let look_args = split_look_args(look);
     let serial: Vec<String> = CONSOLES
         .iter()
@@ -169,7 +158,7 @@ pub(crate) fn write_payload(
         &crate::guest::INSTALL_UX,
         &[
             ("SHELL", Word(SHELL)),
-            ("LEFT", Argv(&hub)),
+            ("LEFT", Argv(&shell)),
             ("SPLIT", Word(&split)),
             ("LOOK", Argv(&look_args)),
             ("DOCS_ARGV", Argv(&docs)),

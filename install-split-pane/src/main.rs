@@ -1,6 +1,6 @@
 //! install-split: the install screen's terminal host.
 //!
-//! Two panes side by side with no frame, the install hub on the left and the docs on
+//! Two panes side by side with no frame, a root shell on the left and the install guide on
 //! the right, each running a program in its own PTY, drawn through a vt100 emulator.
 //! The pane without the keyboard is drawn dimmer. The bottom row lists the host's
 //! keys as keycaps. Every other key goes to the focused pane. A pane whose program
@@ -227,7 +227,7 @@ fn print_help() {
     println!("  install-split --look ROLE=#RRGGBB... --left PROGRAM [ARGS...] --right PROGRAM [ARGS...]");
     println!("  install-split --smoke --look ROLE=#RRGGBB... --left PROGRAM [ARGS...] --right PROGRAM [ARGS...]");
     println!();
-    println!("Runs the left command (the install hub) beside the right one (the docs).");
+    println!("Runs the left command (a root shell) beside the right one (the install guide).");
     println!();
     println!("Options:");
     println!("  --look R=#H Palette colours, repeated, one per role: {} (the builder", LOOK_ROLES.join(", "));
@@ -282,7 +282,7 @@ impl Side {
 
     fn title(self) -> &'static str {
         match self {
-            Self::Left => "Install",
+            Self::Left => "Terminal",
             Self::Right => "Docs",
         }
     }

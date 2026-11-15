@@ -13,7 +13,7 @@
 // linker are the distro's own, and the programs link the C library, libpam,
 // libinput and libxkbcommon the system ships, dynamically. It declares no
 // network: cargo runs --locked --offline against the vendored crates.
-const RECIPE_API = 0;
+const RECIPE_API = 2;
 const NEEDS = #{
     inputs: #{ source: "directory" },
     outputs: #{ rootfs: "directory" },

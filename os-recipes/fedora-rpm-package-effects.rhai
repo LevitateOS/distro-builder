@@ -214,10 +214,10 @@ fn sysusers(root) {
         if t != "" && !t.ends_with("\n") { t += "\n"; }
         t
     };
-    let passwd = text.entry("etc/passwd");
-    let group = text.entry("etc/group");
-    let shadow = text.entry("etc/shadow");
-    let gshadow = text.entry("etc/gshadow");
+    let passwd = text.call("etc/passwd");
+    let group = text.call("etc/group");
+    let shadow = text.call("etc/shadow");
+    let gshadow = text.call("etc/gshadow");
     let users = ids(passwd);
     let groups = ids(group);
     let free = |used| { let id = 999; while used.values().contains(id) { id -= 1; } id };
@@ -234,7 +234,7 @@ fn sysusers(root) {
             let id = if w.len() > 2 { w[2] } else { "-" };
             if kind == "g" {
                 if name in groups { continue; }
-                let gid = if id == "-" { free.entry(groups) } else { parse_int(id) };
+                let gid = if id == "-" { free.call(groups) } else { parse_int(id) };
                 groups[name] = gid;
                 group += name + ":x:" + gid + ":\n";
                 gshadow += name + ":!::\n";
@@ -248,10 +248,10 @@ fn sysusers(root) {
                 uid = parse_int(parts[0]);
                 gid = if parts[1] in groups { groups[parts[1]] } else { parse_int(parts[1]) };
             } else {
-                uid = if id == "-" { free.entry(users + groups) } else { parse_int(id) };
+                uid = if id == "-" { free.call(users + groups) } else { parse_int(id) };
                 if name in groups { gid = groups[name]; }
                 else {
-                    gid = if groups.values().contains(uid) { free.entry(groups) } else { uid };
+                    gid = if groups.values().contains(uid) { free.call(groups) } else { uid };
                     groups[name] = gid;
                     group += name + ":x:" + gid + ":\n";
                     gshadow += name + ":!::\n";

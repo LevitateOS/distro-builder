@@ -18,6 +18,7 @@ AcornOS over Recipe. It reads each variant through `distro_contract::load`
   `ctx.outputs` (`recipe/outputs.rs`). The outputs a rootfs-source preseed must
   report are read statically from that recipe's `NEEDS.outputs`. Recipes own
   network and resource grants; variant TOML selects recipes and binds inputs.
+- `src/desktop_apps.rs`, `src/display_server.rs`: the Qt desktop apps from `tools/gui` and, for AcornOS, the display server compiled from source (see "Prebuilt programs").
 - `src/artifact/`: EROFS and overlay images and filesystem copies.
 - `distro_contract::runs` (`distro/contract`): the output directories (releases, parts) and the release run history.
 - `src/bin/`: the `distro-builder` binary. Its `usage()` in
@@ -27,11 +28,9 @@ AcornOS over Recipe. It reads each variant through `distro_contract::load`
   live overlay, tools, kernel) and their shared modules and locks. Each recipe
   documents what it produces; [the collection guide](os-recipes/README.md)
   explains its boundary with user-managed software.
-- `guest/`: files installed into the live and installed systems.
-- `install-split-pane/`: the live install screen's two-pane terminal.
-
-Ownership and output locations across the workspace are in the root
-`architecture.md`.
+- `guest/`: shell files installed into the live and installed systems.
+- `install-split-pane/`: the live install screen's two-pane terminal: a root
+  shell on the left, the installation guide on the right.
 
 ## Two consumers of one Recipe engine
 
@@ -39,7 +38,7 @@ The builder selects `distro/builder/os-recipes` explicitly and consumes the
 files and trees those recipes publish. Their `install` hooks assemble outputs
 inside Ginux; the builder turns those outputs into OS images. Packages included
 in a base or desktop image, including desktop applications, belong to that
-image's lifecycle. recab owns the two roots of an A/B installation.
+image. recab owns the two roots of an A/B installation.
 
 The workspace's top-level [`recipes/`](../../recipes/README.md) is the official
 source of user-managed software, a repository of its own pinned here. The
@@ -70,7 +69,7 @@ build never runs an older launcher or worker than the checkout. `GINUX_ROOT`,
 
 Each release records `system-sources.sha256` beside its rootfs: the digest of
 every source its system rootfs is built from (the builder, contract, profile,
-variant, TUI and GUI apps, the recipes repository and the rootfs tools' crate
+variant, the terminal apps in `tools/tui` and the Qt apps in `tools/gui`, the recipes repository and the rootfs tools' crate
 closures, uncommitted edits included), the Ginux launcher built from
 `tools/ginux` (by content: the system ships it as `usr/libexec/recipe/ginux`)
 and Recipe's declared behaviour versions of the Recipe and Ginux that run the
@@ -107,7 +106,7 @@ from and kept under `.artifacts/parts/<distro>/<kind>/<key>/`
 
 - `system-base` and `system-desktop`: the system tree (`rootfs-source/`: the
   rootfs recipe's tree with the rootfs tools and apps and the kernel's
-  modules, metadata finalized), the rootfs EROFS, the installed initramfs and
+  modules, its metadata completed), the rootfs EROFS, the installed initramfs and
   the release set (`release.json`, `live/` and `boot/` members,
   `system-sources.sha256`). test-base-rootfs, test-live-ssh, test-install-base and
   test-installed-boot share `system-base`; release has `system-desktop`.
@@ -205,14 +204,18 @@ sections 1 and 2; `src/compose.rs`), each a timeline step:
 3. **Package effects** (`<backend>-package-effects.rhai` over
    `package-effects.rhai`): copies the composed tree (AcornOS: the base tree,
    with the desktop lock installed over it by apk for the desktop), applies
-   what the packages' scripts would have done, finalizes the target metadata
-   and drops caches and logs. Its inputs are the composed tree, a `flavour`
+   what the packages' scripts would have done (on Fedora that includes the CA
+   trust bundles `update-ca-trust` writes, which the builder generates), completes
+   the target metadata and drops caches and logs. Its inputs are the composed tree, a `flavour`
    file and (AcornOS) the APKs: a configuration change never reruns it. It
    publishes the tree as one archive (`tree`).
 4. **System configuration** (the variant's rootfs recipe over
    `rootfs-producer.rhai`): copies that archive's tree (input `system`),
    applies `installed-system.rhai` with the builder's configuration inputs,
-   finalizes and runs the capability check.
+   completes the tree and runs the capability check. `installed-system.rhai`
+   also does the desktop's shipped choices: Firefox gets exactly one bookmark
+   (`levitateos.org`) and no Fedora defaults, and the Plasma panel carries the
+   Recipe app where Fedora puts Discover.
 
 Acquire the base package closure explicitly with
 `cargo xtask build rootfs-source <distro>` when it must be refreshed. A
@@ -239,13 +242,26 @@ existing permissions. See `tools/recqemu/README.md` at the repository root.
 
 After explicit builds, run `cargo xtask test all levitate` and
 `cargo xtask test all acorn` in the operator's session-libvirt context.
-The test CLI defaults to A/B installation. Selecting `--mode mutable`
+The test CLI defaults to A/B installation (`--mode ab`). Selecting `--mode mutable`
 skips `other-root` in `all`; a standalone `other-root` still needs an A/B install. The
 `test-install-base` scenario retains actual guest installer PTY interaction in
 `install-pty.log`, in addition to its tool/split-pane smoke controls. Version/help
 or smoke alone does not establish interaction. These commands are acceptance
 procedures, not claims that a particular source/product combination passed.
 The contribution queue owns current results and final delivery dependencies.
+
+## Where the tools go
+
+`src/pipeline/live_tools.rs` (`LIVE_TOOLS`) says which tool goes where:
+
+- On the live medium only (the product's overlay): `recpart`, `recstrap`,
+  `recfstab`, `recchroot`, `recsetup`, `recab` and `install-split`. `recab`
+  is never in the system image. `recsetup`'s A/B boot step puts it, its
+  `recab-started` service and, on the desktop, the recab app files
+  (`AB_DESKTOP_APP_FILES`, carried under `/usr/lib/recsetup/ab-only`) into the
+  target. A mutable install gets none of them.
+- In the system image: `recipe` and `recguest`. The desktop system starts
+  `recguest` only when the machine has its virtio port.
 
 ## Timeline and progress
 
@@ -260,8 +276,8 @@ Every line the builder prints starts with the local time (`HH:MM:SS`; `tprintln!
 
 ## Prebuilt programs
 
-Our own tools (`recpart`, `recstrap`, `recab`, `recipe`, `install-split`) and the TUI
-binary (`install-tui`) and the Qt desktop apps (family `desktop-apps`, one whole tree per distro: programs, menu entries, polkit actions, Recipe's metadata, kept with exact modes and links) are identified by a **key**, the SHA-256 of
+Our own tools (`recpart`, `recstrap`, `recab`, `recguest`, `recipe`, `install-split`), the TUI
+binary (`install-tui`), the Qt desktop apps (family `desktop-apps`, one whole tree per distro: programs, menu entries, polkit actions, Recipe's metadata, kept with exact modes and links) and the display server (family `display-server`, AcornOS only) are identified by a **key**, the SHA-256 of
 everything their compile depends on (`src/prebuilt.rs`): the prepared source closure,
 the compile recipe, the target, the compiler image digest and Recipe's two behaviour
 versions (`ENGINE_BEHAVIOUR`, `GINUX_BEHAVIOUR`; `prebuilt::behaviour`). Nothing that does
@@ -276,14 +292,14 @@ program says which: `[prebuilt] recab: local|downloaded|compiled <key16>`.
 
 - `release build --exact` never uses prebuilts and touches no cache.
 - `--no-prebuilt` (`cargo xtask build ... --no-prebuilt`) compiles but still fills the cache.
-- `distro-builder prebuilt key <tools|tui|desktop-apps> <name> [--distro <id>]` prints the key (CI uses it);
-  a TUI key needs `--distro` for its libc; for `desktop-apps` the name is the distro and no flag is taken.
-- The desktop apps key covers `tools/gui/` (tracked files, modes, worktree content), the base and apps-build
+- `distro-builder prebuilt key <tools|tui|desktop-apps|display-server> <name> [--distro <id>]` prints the key (CI uses it);
+  a TUI key needs `--distro` for its libc; for `desktop-apps` and `display-server` the name is the distro and no flag is taken.
+- The desktop apps key covers `tools/gui` (tracked files, modes, worktree content), the base and apps-build
   locks, the apps-build root, both preseed recipes and `desktop-apps.rhai` with their imports, the
   compiler image, Recipe's declared versions, the distro and its libc. On a hit `desktop_apps.rs` skips
   building the apps-build root and the compile; the cached tree is merged and `check` still runs.
   `prebuilt build desktop-apps <distro>` (elevated) fills the cache without ISO or download.
-- `distro-builder prebuilt publish <tools|tui|desktop-apps> <name> [--distro <id>]` (also `cargo xtask
+- `distro-builder prebuilt publish <tools|tui|desktop-apps|display-server> <name> [--distro <id>]` (also `cargo xtask
   prebuilt publish ...`, run as the user) uploads the cache entry of the current key with
   `gh`: it creates the release if missing, never replaces an asset with different bytes, and
   uploads `<family>-<name>.tar.gz` before `prebuilt.json`.
@@ -292,6 +308,22 @@ program says which: `[prebuilt] recab: local|downloaded|compiled <key16>`.
   it as `rootfs.tar.zst`, with `runtime.json`, to release `recipe-runtime-<digest16>`; a release that
   already has `rootfs.tar.zst` is left alone. Recipe downloads it on first use.
 
+## Release manifest
+
+The system part writes `release.json` (`distro_contract::release`) beside its
+other outputs. It is a small record of what the build produced: the system's
+identity, the digest of its sources, its kernel release and module-tree digest,
+and the size and SHA-256 of the rootfs image, kernel and installed initramfs
+under their ISO paths (`live/`, `boot/`). The combiner checks that set again in
+each release directory (identity, every member's size and hash, the module tree
+of the system tree it was built from) and puts it on the ISO. Preflight checks a
+release run against it. The format is in
+[the release contract](../contract/docs/releases.md).
+
+The builder does not sign, index or publish releases for installed systems.
+There is no update source: an installed system changes through Recipe and
+recab only.
+
 ## License
 
 Licensed under either of:
@@ -299,17 +331,3 @@ Licensed under either of:
 - MIT license ([LICENSE-MIT](LICENSE-MIT) or http://opensource.org/licenses/MIT)
 
 at your option.
-
-## Release manifest
-
-The system part emits `release.json` (`distro_contract::release`) beside its
-other outputs: the system's identity, the digest of its sources, its kernel
-release and module-tree digest, and the size and SHA-256 of the rootfs image,
-kernel and installed initramfs under their ISO paths (`live/`, `boot/`). The
-combiner verifies that set again in each release directory (identity, every
-member's size and hash, the module tree of the system tree it was built from)
-and puts it on the ISO. Preflight checks a release run against it. The format
-is in [the release contract](../contract/docs/releases.md).
-
-Nothing here signs, indexes or publishes releases for installed systems:
-updates are designed later, on the shared release-engineering track.

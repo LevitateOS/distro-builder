@@ -12,7 +12,7 @@ tree inside Ginux. Recipe publishes the declared files and directories, and the
 builder consumes them to assemble images. recab owns the two roots of an A/B
 installation.
 
-The desktop apps (`gui/` in the workspace) are compiled here too, but not in
+The desktop apps (`tools/gui` in the workspace) are compiled here too, but not in
 Recipe's usual root: a Qt program has to be compiled against the distro's own
 Qt and C++ runtime. The variant's `*-apps-build-root.rhai` recipe makes one
 tree of the base lock and the apps-build lock (`sources/*-apps-build-lock.rhai`:

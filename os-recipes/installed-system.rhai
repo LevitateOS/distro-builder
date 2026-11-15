@@ -409,8 +409,8 @@ fn bash_login(root) {
 }
 
 // Home directories live under /var, which A/B installs mount from the shared
-// STATE partition, so an update (which replaces the slot, not /var) keeps
-// them. The image's /home is a symlink to var/home; accounts keep /home/<name>
+// STATE partition, so a change made in the other root (which replaces the
+// root, not /var) keeps them. The image's /home is a symlink to var/home; accounts keep /home/<name>
 // as their home, which resolves through it. /var/home is created here for
 // mutable installs (/var on the root) and by recsetup for A/B installs.
 fn homes(root) {

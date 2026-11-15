@@ -17,7 +17,11 @@
 //!    with the static Recipe binary as its worker (the usual worker is built
 //!    for the host's C library, which an Alpine root does not have), and
 //!    publishes the tree `cmake --install` writes.
-//! 4. That tree is merged into the desktop system's rootfs.
+//! 4. That tree is merged into the desktop system's rootfs, all but the recab
+//!    app ([`AB_DESKTOP_APP_FILES`]), which only an A/B system gets: the desktop
+//!    live medium carries it in recsetup's A/B-only tree
+//!    ([`install_tools::AB_ONLY_TREE`]), and the A/B boot step copies it into the
+//!    target.
 //!
 //! Steps 1-3 are skipped when a prebuilt tree exists (`crate::prebuilt`, family
 //! `desktop-apps`): the local cache, else a download. A compile fills the cache.
@@ -27,7 +31,7 @@
 
 use anyhow::{bail, Context, Result};
 use distro_contract::profile::Flavour;
-use distro_contract::{Variant, DESKTOP_APPS, DESKTOP_APP_ENTRIES};
+use distro_contract::{Variant, AB_DESKTOP_APP_FILES, DESKTOP_APPS, DESKTOP_APP_ENTRIES};
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::Read;
@@ -37,15 +41,74 @@ use crate::pipeline::source::{apps_build_preseed_recipe, apps_build_root_recipe,
 use crate::process::Cmd;
 use crate::recipe::{rootfs_source, Invocation};
 
-/// Puts the desktop apps for `variant` into its desktop system `rootfs`: each app and
-/// the helper in `usr/bin`, each app's menu entry, and the polkit actions two of the apps
-/// ask the administrator's password through. The tree is a prebuilt one when there is one
-/// (never in an exact build, or with `--no-prebuilt`), else it is compiled and cached.
+/// Puts the desktop apps for `variant` into its desktop system `rootfs`: each app in
+/// `usr/bin`, its menu entry and its polkit actions, all but the recab app's files
+/// ([`install_ab_only`] puts those on the live medium). The tree is a prebuilt one when
+/// there is one (never in an exact build, or with `--no-prebuilt`), else it is compiled
+/// and cached.
 pub(crate) fn install_system(variant: &Variant, rootfs: &Path) -> Result<()> {
     let tree = obtain_tree(variant)?;
-    levitate_recipe::target::merge_tree(&tree, rootfs)
+    check_ab_files(&tree)?;
+    // The tree without the recab app, so its files never reach the rootfs.
+    let work = tempfile::tempdir()?;
+    let system = work.path().join("system");
+    levitate_recipe::target::merge_tree(&tree, &system)?;
+    let mut manifest = levitate_recipe::target::load(&system)?;
+    for file in AB_DESKTOP_APP_FILES {
+        fs::remove_file(system.join(file)).with_context(|| format!("leaving /{file} out of the rootfs"))?;
+        manifest.entries.remove(*file);
+    }
+    levitate_recipe::target::save(&system, &manifest)?;
+    levitate_recipe::target::merge_tree(&system, rootfs)
         .with_context(|| format!("merging the desktop apps into '{}'", rootfs.display()))?;
     check(rootfs)
+}
+
+/// Puts the recab app's files ([`AB_DESKTOP_APP_FILES`]) of `variant`'s desktop apps
+/// into the live `overlay`, below recsetup's A/B-only tree, with the metadata the
+/// compiled tree records for them.
+pub(crate) fn install_ab_only(variant: &Variant, overlay: &Path) -> Result<()> {
+    let tree = obtain_tree(variant)?;
+    check_ab_files(&tree)?;
+    let incoming = levitate_recipe::target::load(&tree)?;
+    let mut manifest = levitate_recipe::target::load(overlay)?;
+    let prefix = install_tools::AB_ONLY_TREE.trim_start_matches('/');
+    for file in AB_DESKTOP_APP_FILES {
+        let dest = overlay.join(prefix).join(file);
+        fs::create_dir_all(dest.parent().context("an app file has a parent")?)?;
+        fs::copy(tree.join(file), &dest).with_context(|| format!("copying /{file} into the live medium"))?;
+        let entry = incoming
+            .entries
+            .get(*file)
+            .cloned()
+            .with_context(|| format!("the desktop apps' tree records no metadata for /{file}"))?;
+        manifest.entries.insert(format!("{prefix}/{file}"), entry);
+    }
+    levitate_recipe::target::save(overlay, &manifest)
+}
+
+/// Refuses a desktop apps' tree whose recab app files are not exactly
+/// [`AB_DESKTOP_APP_FILES`]: a recab file the list misses would reach every rootfs.
+fn check_ab_files(tree: &Path) -> Result<()> {
+    for file in AB_DESKTOP_APP_FILES {
+        if !tree.join(file).is_file() {
+            bail!("the desktop apps' tree lacks /{file} (the recab app)");
+        }
+    }
+    for entry in walkdir::WalkDir::new(tree).follow_links(false) {
+        let entry = entry?;
+        let relative = entry.path().strip_prefix(tree)?.to_string_lossy().into_owned();
+        if !entry.file_type().is_dir()
+            && relative.contains("recab")
+            && !AB_DESKTOP_APP_FILES.contains(&relative.as_str())
+        {
+            bail!(
+                "the desktop apps' tree has /{relative}, a recab app file that AB_DESKTOP_APP_FILES \
+                 (distro/contract) does not list; only an A/B system may get it"
+            );
+        }
+    }
+    Ok(())
 }
 
 /// The desktop apps tree: prebuilt (local or downloaded), else compiled and stored.

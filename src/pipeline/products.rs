@@ -155,6 +155,10 @@ pub(crate) fn build_overlay(variant: &Variant, product: ProductId, rootfs: &Path
             &contract.look,
         )
         .with_context(|| format!("writing the install screen for {}", variant.id))?;
+        if product.flavour() == Flavour::Desktop {
+            crate::desktop_apps::install_ab_only(variant, overlay)
+                .with_context(|| format!("adding the recab app to the live medium of {}", variant.id))?;
+        }
     }
     check_live_only(overlay, rootfs)
 }

@@ -11,6 +11,8 @@ anyhow = "1.0"
 distro-contract = { path = "../contract" }
 distro-profile = { path = "../profile" }
 recinit = { path = "../../tools/recinit" }
+# install_tools::AB_ONLY_TREE: where the live medium keeps what only an A/B system gets.
+recstrap = { path = "../../tools/recstrap" }
 reciso = { path = "../../tools/reciso" }
 recuki = { path = "../../tools/recuki" }
 libc = "0.2"

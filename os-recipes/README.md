@@ -20,7 +20,11 @@ compiler, CMake, Qt's development files; on Fedora composed by the builder from
 its unpack store, on Alpine installed by apk); the builder makes a root image
 of it and runs `desktop-apps.rhai` in that root (`src/desktop_apps.rs`); the
 tree is published as a prebuilt, which the `rec-apps` group recipe pins. The
-build root is never part of an image.
+display server (`xlibre.rhai`) and the login screen (`reclogin.rhai`, which
+links the distro's libpam, libinput and libxkbcommon and is compiled with the
+distro's own Rust from a vendored offline source closure) are compiled in the
+same root and published the same way (`src/display_server.rs`,
+`src/login_screen.rs`). The build root is never part of an image.
 
 A system tree is made in steps the builder caches separately
 (`../README.md`, "The system tree"): `fedora-rpm-unpack.rhai` unpacks each

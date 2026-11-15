@@ -19,6 +19,7 @@ pub(crate) mod tui_binary;
 pub(crate) mod default_set;
 pub(crate) mod desktop_apps;
 pub(crate) mod display_server;
+pub(crate) mod login_screen;
 pub mod prebuilt;
 pub mod process;
 pub mod timeline;

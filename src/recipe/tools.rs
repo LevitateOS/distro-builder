@@ -81,7 +81,29 @@ pub fn prepare_tool_source_into(repo: &Path, package: &str, output: &Path) -> Re
 
 fn prepare_tool_source_at(repo: &Path, package: &str, source: &Path) -> Result<()> {
     let (_, relative, _) = tool(package)?;
-    let relative = PathBuf::from(relative);
+    prepare_crate_source_at(repo, Path::new(relative), source)
+        .with_context(|| format!("preparing the offline source closure for {package}"))
+}
+
+/// [`prepare_tool_source`] for any workspace crate, named by its directory
+/// relative to the repository: the crate and its local dependencies, a
+/// one-member workspace that inherits the root's `[workspace.package]` and
+/// `[workspace.dependencies]`, the root's `Cargo.lock` pruned to the crate's
+/// closure, and every crates.io dependency vendored under `vendor/` with
+/// `.cargo/config.toml` pointing there (`/inputs/source/vendor`). Compiling it
+/// needs no network: `cargo build --locked --offline`. The login screen
+/// (`crate::login_screen`), which is not a static tool, is prepared this way.
+pub(crate) fn prepare_crate_source(repo: &Path, relative: &Path) -> Result<tempfile::TempDir> {
+    let source = tempfile::Builder::new()
+        .prefix("recipe-crate-source-")
+        .tempdir()?;
+    prepare_crate_source_at(repo, relative, source.path())
+        .with_context(|| format!("preparing the offline source closure of {}", relative.display()))?;
+    Ok(source)
+}
+
+fn prepare_crate_source_at(repo: &Path, relative: &Path, source: &Path) -> Result<()> {
+    let relative = relative.to_path_buf();
     let repo = repo.canonicalize()?;
     let root_manifest: toml::Value = toml::from_str(&fs::read_to_string(repo.join("Cargo.toml"))?)?;
     let root_workspace = root_manifest.get("workspace");
@@ -122,7 +144,7 @@ fn prepare_tool_source_at(repo: &Path, package: &str, source: &Path) -> Result<(
         .arg(source.join("Cargo.toml"))
         .arg(source.join("vendor"))
         .dir(&repo)
-        .error_msg(format!("preparing the offline source closure for {package}"))
+        .error_msg(format!("vendoring the crates.io dependencies of {}", relative.display()))
         .run()?;
     omit_vendor_development_files(&source.join("vendor"))?;
     let selected_lock = fs::read_to_string(source.join("Cargo.lock"))?;

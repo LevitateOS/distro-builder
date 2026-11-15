@@ -1,6 +1,7 @@
-// The root the desktop apps (tools/gui/) and the display server (xlibre.rhai) are
-// compiled in on an Alpine variant: the base lock's APKs (the `apks` input)
-// and the apps-build lock's (the `apps_build_apks` input) installed into one
+// The root the desktop apps (tools/gui/), the display server (xlibre.rhai) and
+// the login screen (reclogin.rhai) are compiled in on an Alpine variant: the
+// base lock's APKs (the `apks` input) and the apps-build lock's (the
+// `apps_build_apks` input) installed into one
 // tree by the locked apk.static, without their scripts. The builder makes a
 // root image of the tree and runs `desktop-apps.rhai` and `xlibre.rhai` in
 // it, so they are compiled by the distro's own compiler against the distro's
@@ -36,13 +37,16 @@ fn verify_inputs(ctx) {
     }
 }
 
-// What the tree must have to compile the apps and XLibre: the first one
-// missing, or "".
+// What the tree must have to compile the apps, XLibre and reclogin: the first
+// one missing, or "".
 fn missing(root) {
     for path in ["usr/bin/g++", "usr/bin/ld", "usr/bin/make", "usr/bin/cmake", "bin/sh",
                  "usr/lib/cmake/Qt6Widgets/Qt6WidgetsConfig.cmake", "usr/lib/cmake/Qt6Svg/Qt6SvgConfig.cmake",
                  "usr/bin/meson", "usr/bin/samu", "usr/bin/git", "usr/bin/pkg-config",
-                 "usr/lib/pkgconfig/xfont2.pc", "usr/lib/pkgconfig/epoxy.pc", "usr/lib/pkgconfig/libinput.pc"] {
+                 "usr/lib/pkgconfig/xfont2.pc", "usr/lib/pkgconfig/epoxy.pc", "usr/lib/pkgconfig/libinput.pc",
+                 // reclogin (reclogin.rhai): Rust, and the libraries it links
+                 "usr/bin/cargo", "usr/bin/rustc", "usr/bin/cc",
+                 "usr/lib/libpam.so", "usr/lib/libinput.so", "usr/lib/libxkbcommon.so"] {
         if !exists(join_path(root, path)) { return "/" + path; }
     }
     ""

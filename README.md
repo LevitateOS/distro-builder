@@ -301,7 +301,7 @@ Every line the builder prints starts with the local time (`HH:MM:SS`; `tprintln!
 ## Prebuilt programs
 
 Our own tools (`recpart`, `recstrap`, `recab`, `recguest`, `recupdate`, `recipe`, `install-split`), the TUI
-binary (`install-tui`), the Qt desktop apps (family `desktop-apps`, one whole tree per distro: programs, menu entries, polkit actions, Recipe's metadata, kept with exact modes and links) and the display server (family `display-server`, AcornOS only) are identified by a **key**, the SHA-256 of
+binary (`install-tui`), the Qt desktop apps (family `desktop-apps`, one whole tree per distro: programs, menu entries, polkit actions, Recipe's metadata, kept with exact modes and links) the display server (family `display-server`, AcornOS only) and the login screen (family `login-screen`, reclogin, one tree per distro) are identified by a **key**, the SHA-256 of
 everything their compile depends on (`src/prebuilt.rs`): the prepared source closure,
 the compile recipe, the target, the compiler image digest and Recipe's two behaviour
 versions (`ENGINE_BEHAVIOUR`, `GINUX_BEHAVIOUR`; `prebuilt::behaviour`). Nothing that does
@@ -316,14 +316,25 @@ program says which: `[prebuilt] recab: local|downloaded|compiled <key16>`.
 
 - `release build --exact` never uses prebuilts and touches no cache.
 - `--no-prebuilt` (`cargo xtask build ... --no-prebuilt`) compiles but still fills the cache.
-- `distro-builder prebuilt key <tools|tui|desktop-apps|display-server> <name> [--distro <id>]` prints the key (CI uses it);
-  a TUI key needs `--distro` for its libc; for `desktop-apps` and `display-server` the name is the distro and no flag is taken.
+- `distro-builder prebuilt key <tools|tui|desktop-apps|display-server|login-screen> <name> [--distro <id>]` prints the key (CI uses it);
+  a TUI key needs `--distro` for its libc; for `desktop-apps`, `display-server` and `login-screen` the name is the distro and no flag is taken.
 - The desktop apps key covers `tools/gui` (tracked files, modes, worktree content), the base and apps-build
   locks, the apps-build root, both preseed recipes and `desktop-apps.rhai` with their imports, the
   compiler image, Recipe's declared versions, the distro and its libc. On a hit `desktop_apps.rs` skips
   building the apps-build root and the compile; the cached tree is merged and `check` still runs.
   `prebuilt build desktop-apps <distro>` (elevated) fills the cache without ISO or download.
-- `distro-builder prebuilt publish <tools|tui|desktop-apps|display-server> <name> [--distro <id>]` (also `cargo xtask
+- The login screen (`src/login_screen.rs`, `os-recipes/reclogin.rhai`) links the distro's own libpam,
+  libinput and libxkbcommon, so it is compiled like the desktop apps: in the apps-build root, with
+  the distro's own Rust (`rust`, `cargo` and the libraries' development packages are in
+  `desktop.apps_build_packages`). Its source is the offline closure the static tools use
+  (`recipe::tools::prepare_crate_source`: the crate with `dist/` and `assets/`, a one-member
+  workspace inheriting the root's package fields, the pruned `Cargo.lock`, every crate vendored),
+  compiled `--locked --offline` with no network. Its key covers that closure, `reclogin.rhai`, the
+  distro's `os_id` and init system, the apps-build root (both locks, its recipes), the compiler
+  image, Recipe's declared versions, the distro and its libc. `prebuilt build login-screen <distro>`
+  (elevated) fills the cache; no image carries the tree: the `login-screen` group recipe pins it
+  (prepared in `tools/reclogin/dist/recipe/`, not yet in `recipes/`).
+- `distro-builder prebuilt publish <tools|tui|desktop-apps|display-server|login-screen> <name> [--distro <id>]` (also `cargo xtask
   prebuilt publish ...`, run as the user) uploads the cache entry of the current key with
   `gh`: it creates the release if missing, never replaces an asset with different bytes, and
   uploads `<family>-<name>.tar.gz` before `prebuilt.json`.

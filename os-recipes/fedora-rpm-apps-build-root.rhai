@@ -1,5 +1,6 @@
-// The root the desktop apps (tools/gui/) are compiled in on a Fedora variant: the
-// base lock's RPMs and the apps-build lock's, without firmware and without
+// The root the desktop apps (tools/gui/) and the login screen (reclogin.rhai)
+// are compiled in on a Fedora variant: the base lock's RPMs and the apps-build
+// lock's, without firmware and without
 // their scripts, composed by the builder from its unpack store into one tree
 // (the `composed` input: `tree.tar`, the tree in `target_pack_tree`'s format,
 // and `packages.txt`, one `<sha256> <id>` line per package in order). The
@@ -54,10 +55,14 @@ fn verify_inputs(ctx) {
     }
 }
 
-// What the tree must have to compile the apps: the first one missing, or "".
+// What the tree must have to compile the apps and reclogin: the first one
+// missing, or "".
 fn missing(root) {
     for path in ["usr/bin/g++", "usr/bin/ld", "usr/bin/make", "usr/bin/cmake", "usr/bin/sh",
-                 "usr/lib64/cmake/Qt6Widgets/Qt6WidgetsConfig.cmake", "usr/lib64/cmake/Qt6Svg/Qt6SvgConfig.cmake"] {
+                 "usr/lib64/cmake/Qt6Widgets/Qt6WidgetsConfig.cmake", "usr/lib64/cmake/Qt6Svg/Qt6SvgConfig.cmake",
+                 // reclogin (reclogin.rhai): Rust, and the libraries it links
+                 "usr/bin/cargo", "usr/bin/rustc", "usr/bin/cc",
+                 "usr/lib64/libpam.so", "usr/lib64/libinput.so", "usr/lib64/libxkbcommon.so"] {
         if !exists(join_path(root, path)) { return "/" + path; }
     }
     ""

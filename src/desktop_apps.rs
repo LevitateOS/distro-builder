@@ -157,19 +157,22 @@ fn compile_tree(variant: &Variant) -> Result<PathBuf> {
         &repo.join("distro/builder/os-recipes/desktop-apps.rhai"),
         &work,
         &[("source", source.path())],
+        &[],
     )
     .context("compiling the desktop apps through Recipe")
 }
 
 /// Runs the OS recipe `recipe` in `variant`'s apps-build root (made first, see [`build_root`]),
 /// with the static Recipe as its worker, keeping its state under `work`, and returns the tree
-/// it publishes as its output `rootfs`. The desktop apps and the display server
-/// (`crate::display_server`) are compiled this way.
+/// it publishes as its output `rootfs`, with `inputs` imported and `defines` set. The
+/// desktop apps, the display server (`crate::display_server`) and the login screen
+/// (`crate::login_screen`) are compiled this way.
 pub(crate) fn compile_in_build_root(
     variant: &Variant,
     recipe: &Path,
     work: &Path,
     inputs: &[(&str, &Path)],
+    defines: &[(&str, &str)],
 ) -> Result<PathBuf> {
     let repo = &variant.repo_root;
     let (reference, image) = build_root(variant).context("making the apps-build root")?;
@@ -181,6 +184,9 @@ pub(crate) fn compile_in_build_root(
     let mut invocation = Invocation::new(repo, "install", recipe, work.join("recipe"));
     for (name, path) in inputs {
         invocation = invocation.input(name, path);
+    }
+    for (name, value) in defines {
+        invocation = invocation.define(name, value);
     }
     invocation.root(reference, image).worker(worker).run()?.directory("rootfs")
 }

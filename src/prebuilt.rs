@@ -1,5 +1,6 @@
-//! Prebuilt programs of our own tools, the TUI binary, the desktop apps (Qt) and the
-//! display server compiled from source (XLibre on AcornOS).
+//! Prebuilt programs of our own tools, the TUI binary, the desktop apps (Qt), the
+//! display server compiled from source (XLibre on AcornOS) and the login screen
+//! (reclogin).
 //!
 //! An OS build needs the same few programs again and again. Each is identified by a
 //! **key**: the SHA-256 of everything its compile depends on (the source closure the
@@ -27,8 +28,10 @@
 //! compares the whole tree both ways (no missing and no extra entries). See
 //! [`desktop_apps_key`], [`lookup_desktop_apps`] and [`store_desktop_apps`]. The display
 //! server family is such a tree too, one entry per distro that names a
-//! `desktop.display_server_recipe_script` ([`display_server_key`], [`store_display_server`]).
-//! Neither tree goes into an image: group recipes pin their published releases.
+//! `desktop.display_server_recipe_script` ([`display_server_key`], [`store_display_server`]),
+//! and so is the login screen family, one entry per distro ([`login_screen_key`],
+//! [`store_login_screen`]). None of these trees goes into an image: group recipes pin
+//! their published releases.
 //!
 //! The key leaves out Ginux and Recipe's bytes on purpose: they change how a compile
 //! is supervised, not what comes out of it (their declared behaviour versions are in).
@@ -74,10 +77,14 @@ pub enum Family {
     /// The display server tree compiled from source (`desktop.display_server_recipe_script`),
     /// one entry per distro that has one: its `name` is the distro id.
     DisplayServer,
+    /// The login screen tree (`tools/reclogin`: reclogind, reclogin-greeter, their PAM,
+    /// service, account and brand files), compiled per distro against its own libpam,
+    /// libinput and libxkbcommon: its `name` is the distro id.
+    LoginScreen,
 }
 
 impl Family {
-    pub const NAMES: &'static str = "tools, tui, desktop-apps, display-server";
+    pub const NAMES: &'static str = "tools, tui, desktop-apps, display-server, login-screen";
 
     pub fn name(self) -> &'static str {
         match self {
@@ -85,6 +92,7 @@ impl Family {
             Self::Tui => "tui",
             Self::DesktopApps => "desktop-apps",
             Self::DisplayServer => "display-server",
+            Self::LoginScreen => "login-screen",
         }
     }
 
@@ -94,13 +102,14 @@ impl Family {
             "tui" => Some(Self::Tui),
             "desktop-apps" => Some(Self::DesktopApps),
             "display-server" => Some(Self::DisplayServer),
+            "login-screen" => Some(Self::LoginScreen),
             _ => None,
         }
     }
 
     /// Whether the family's name is a distro id (one tree per distro).
     pub fn per_distro(self) -> bool {
-        matches!(self, Self::DesktopApps | Self::DisplayServer)
+        matches!(self, Self::DesktopApps | Self::DisplayServer | Self::LoginScreen)
     }
 }
 
@@ -318,7 +327,7 @@ impl Payload {
         match family {
             Family::Tools => Ok(Self::Files(crate::recipe::tools::tool_binaries(name)?)),
             Family::Tui => Ok(Self::Files(vec!["program".into()])),
-            Family::DesktopApps | Family::DisplayServer => Ok(Self::Tree),
+            Family::DesktopApps | Family::DisplayServer | Family::LoginScreen => Ok(Self::Tree),
         }
     }
 }
@@ -702,6 +711,7 @@ pub fn key_for(repo: &Path, family: Family, name: &str, distro: Option<&str>) ->
         }
         Family::DesktopApps => desktop_apps_key(repo, &distro_contract::load(repo, name)?),
         Family::DisplayServer => display_server_key(repo, &distro_contract::load(repo, name)?),
+        Family::LoginScreen => login_screen_key(repo, &distro_contract::load(repo, name)?),
     }
 }
 
@@ -713,9 +723,10 @@ pub struct Part {
     pub distro: Option<String>,
 }
 
-/// Every prebuilt part: each tool package, the desktop apps of every distro, the display
-/// server of every distro that compiles one, and each TUI binary once per libc (the first
-/// distro with that libc stands for the others: the key depends on the libc alone).
+/// Every prebuilt part: each tool package, the desktop apps and the login screen of every
+/// distro, the display server of every distro that compiles one, and each TUI binary once
+/// per libc (the first distro with that libc stands for the others: the key depends on the
+/// libc alone).
 pub fn list(repo: &Path) -> Result<Vec<Part>> {
     let mut parts: Vec<Part> = crate::recipe::tools::tool_packages()
         .into_iter()
@@ -728,6 +739,7 @@ pub fn list(repo: &Path) -> Result<Vec<Part>> {
         if variant.contract.desktop.display_server_recipe_script.is_some() {
             parts.push(Part { family: Family::DisplayServer, name: id.clone(), distro: None });
         }
+        parts.push(Part { family: Family::LoginScreen, name: id.clone(), distro: None });
         if !libcs.insert(variant.contract.profile.libc.bun_target()) {
             continue;
         }
@@ -782,6 +794,10 @@ pub fn build(repo: &Path, family: Family, name: &str, distro: Option<&str>) -> R
         Family::DisplayServer => {
             let variant = distro_contract::load(repo, name)?;
             crate::display_server::build_cache(&variant)?;
+        }
+        Family::LoginScreen => {
+            let variant = distro_contract::load(repo, name)?;
+            crate::login_screen::build_cache(&variant)?;
         }
         Family::Tools => {
             crate::recipe::tools::compile_crate(repo, name)?;
@@ -1203,6 +1219,45 @@ pub fn display_server_key(repo: &Path, variant: &distro_contract::Variant) -> Re
         ("behaviour", behaviour()),
     ]);
     Ok(Key::new(&fields))
+}
+
+/// The key of the login screen tree for `variant`: the prepared offline source closure of
+/// `tools/reclogin` (its sources, `dist/` and `assets/`, the inherited workspace fields, the
+/// pruned `Cargo.lock` and the vendored crates), the recipe that compiles it with what it
+/// imports, the per-OS facts it is given (`login_screen::defines`), the apps-build root it
+/// compiles in ([`build_root_fields`]: both locks, which pin the Rust toolchain and the
+/// libraries it links, and the root's recipes), the compiler image, Recipe's declared
+/// behaviour versions, and the distro and its libc.
+pub fn login_screen_key(repo: &Path, variant: &distro_contract::Variant) -> Result<Key> {
+    let source = crate::login_screen::prepare_source(repo)?;
+    let defines: Vec<String> =
+        crate::login_screen::defines(variant).iter().map(|(name, value)| format!("{name}={value}")).collect();
+    let mut fields = vec![
+        ("family", "login-screen".into()),
+        ("distro", variant.id.clone()),
+        ("libc", variant.contract.profile.libc.as_str().into()),
+        ("defines", defines.join(",")),
+        ("source_closure", dir_digest(source.path())?),
+        ("login_screen_recipe", recipe_digest(repo, &repo.join(crate::login_screen::RECIPE))?),
+    ];
+    fields.extend(build_root_fields(repo, variant)?);
+    fields.extend([
+        ("compiler_image", crate::recipe::compiler_image_reference(repo)?),
+        ("behaviour", behaviour()),
+    ]);
+    Ok(Key::new(&fields))
+}
+
+/// [`store_desktop_apps`] for the login screen tree.
+pub fn store_login_screen(repo: &Path, variant: &distro_contract::Variant, tree: &Path) -> Result<PathBuf> {
+    store_tree(
+        repo,
+        Family::LoginScreen,
+        variant,
+        tree,
+        || login_screen_key(repo, variant),
+        &[PathBuf::from(crate::login_screen::CRATE_DIR)],
+    )
 }
 
 /// The verified desktop apps tree for `variant`, from the local cache, else downloaded; `None`

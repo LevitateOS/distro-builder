@@ -25,9 +25,9 @@ pub enum Command {
         no_prebuilt: bool,
     },
     /// Print the key of a prebuilt (`prebuilt::Key`): `family` is `tools`,
-    /// `tui`, `desktop-apps` or `display-server`, `name` a tool package, a TUI binary
-    /// (`install-tui`) or, for the desktop apps and the display server, the
-    /// distro; a TUI's libc comes from `distro`.
+    /// `tui`, `desktop-apps`, `display-server` or `login-screen`, `name` a tool
+    /// package, a TUI binary (`install-tui`) or, for the desktop apps, the display
+    /// server and the login screen, the distro; a TUI's libc comes from `distro`.
     PrebuiltKey {
         family: String,
         name: String,
@@ -94,10 +94,10 @@ pub fn usage() -> String {
          transform build product-erofs <prepared_dir>       write a prepared product's EROFS images\n  \
          artifact prepare-tool-source <package> <dir>       write a tool's offline source tree\n  \
          artifact preseed-rootfs-source <distro> [--desktop] [--refresh]  acquire a distro's base (or desktop) lock\n  \
-         prebuilt key <tools|tui|desktop-apps|display-server> <name> [--distro <id>]    print the key of a prebuilt (a tool package; install-tui, which needs --distro; or desktop-apps/display-server <distro>)\n  \
+         prebuilt key <tools|tui|desktop-apps|display-server|login-screen> <name> [--distro <id>]    print the key of a prebuilt (a tool package; install-tui, which needs --distro; or desktop-apps/display-server/login-screen <distro>)\n  \
          prebuilt list                                      print every prebuilt part (<family> <name> [--distro <id>]), one per line\n  \
-         prebuilt build <tools|tui|desktop-apps|display-server> <name> [--distro <id>]  compile that part into the local cache (no download, no ISO; needs root) and print its key and cache directory\n  \
-         prebuilt publish <tools|tui|desktop-apps|display-server> <name> [--distro <id>]  upload the local cache entry of that key to the prebuilt repository's release with gh\n  \
+         prebuilt build <tools|tui|desktop-apps|display-server|login-screen> <name> [--distro <id>]  compile that part into the local cache (no download, no ISO; needs root) and print its key and cache directory\n  \
+         prebuilt publish <tools|tui|desktop-apps|display-server|login-screen> <name> [--distro <id>]  upload the local cache entry of that key to the prebuilt repository's release with gh\n  \
          prebuilt publish-runtime                           compress the Recipe runtime image and upload it to the release recipe-runtime-<digest16> with gh",
         releases = ProductId::list(ProductId::iso_products()),
         products = ProductId::list(ProductId::ALL),

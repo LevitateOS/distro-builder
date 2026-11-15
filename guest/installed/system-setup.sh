@@ -75,11 +75,36 @@ case "${1:-}" in
         fi
         ;;
     autologin)
-        # The desktop's display manager (SDDM) logs user $2 in to
-        # session $3 at every boot without asking.
-        mkdir -p /etc/sddm.conf.d
-        printf '[Autologin]\nUser=%s\nSession=%s\n' "$2" "$3" > /etc/sddm.conf.d/20-autologin.conf
-        chmod 0644 /etc/sddm.conf.d/20-autologin.conf
+        # Log user $2 in to session $3 at boot without asking.
+        if [ -x /usr/bin/reclogind ]; then
+            # reclogin is the login screen of this system: its settings file
+            # (the other lines of an existing file are kept; a key already
+            # there is replaced in place, a missing one is added).
+            file=/etc/reclogin.conf
+            tmp=$(mktemp "${file}.XXXXXX")
+            if [ -f "$file" ]; then
+                awk -v user="$2" -v session="$3" '
+                    /^[[:space:]]*autologin[[:space:]]*=/ { if (!u++) print "autologin = " user; next }
+                    /^[[:space:]]*autologin_session[[:space:]]*=/ { if (!s++) print "autologin_session = " session; next }
+                    { print }
+                    END {
+                        if (!u) print "autologin = " user
+                        if (!s) print "autologin_session = " session
+                    }
+                ' "$file" > "$tmp"
+            else
+                printf 'autologin = %s\nautologin_session = %s\n' "$2" "$3" > "$tmp"
+            fi
+            chmod 0644 "$tmp"
+            mv "$tmp" "$file"
+        else
+            # SDDM is still the login screen of a system without reclogin.
+            # This branch is removed at the switch to reclogin, when no
+            # system has SDDM any more.
+            mkdir -p /etc/sddm.conf.d
+            printf '[Autologin]\nUser=%s\nSession=%s\n' "$2" "$3" > /etc/sddm.conf.d/20-autologin.conf
+            chmod 0644 /etc/sddm.conf.d/20-autologin.conf
+        fi
         ;;
     hostname)
         printf '%s\n' "$2" > /etc/hostname

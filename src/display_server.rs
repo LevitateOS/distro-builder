@@ -39,6 +39,6 @@ pub(crate) fn build_cache(variant: &Variant) -> Result<()> {
 fn compile_tree(variant: &Variant) -> Result<PathBuf> {
     let recipe = recipe(variant).context("no display server recipe")?;
     let work = variant.repo_root.join(".artifacts/work/display-server").join(&variant.id);
-    crate::desktop_apps::compile_in_build_root(variant, &recipe, &work, &[])
+    crate::desktop_apps::compile_in_build_root(variant, &recipe, &work, &[], &[])
         .with_context(|| format!("compiling the display server through '{}'", recipe.display()))
 }

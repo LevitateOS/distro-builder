@@ -5,7 +5,7 @@
 // command.
 
 fn release() { "v3.24" }
-fn locked_on() { "2026-11-15" }
+fn locked_on() { "2026-11-16" }
 fn mirror() { "https://dl-cdn.alpinelinux.org/alpine/v3.24" }
 
 // The key Alpine signs the release's packages with: [file name, PEM].

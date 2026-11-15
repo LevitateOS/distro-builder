@@ -5,7 +5,7 @@
 // command.
 
 fn release() { "v3.24" }
-fn locked_on() { "2026-11-15" }
+fn locked_on() { "2026-11-16" }
 fn mirror() { "https://dl-cdn.alpinelinux.org/alpine/v3.24" }
 
 // The key Alpine signs the release's packages with: [file name, PEM].
@@ -40,6 +40,8 @@ fn packages() {
         ["cairo-dev", "cairo-dev-1.18.4-r1", "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/cairo-dev-1.18.4-r1.apk", "5ed67544a0b919ce4991586485135c4a7afaae8e2eeb9266866df96d823d1f33"],
         ["cairo-gobject", "cairo-gobject-1.18.4-r1", "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/cairo-gobject-1.18.4-r1.apk", "ec302c75a24edaa4a2f867cfb5eec85cf30efe184044bab6e2b9678840e2bc2a"],
         ["cairo-tools", "cairo-tools-1.18.4-r1", "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/cairo-tools-1.18.4-r1.apk", "194d6a55b9e5b1999859b820dac2c53c49905ae89adae103469c54fca1858e6f"],
+        ["cargo", "cargo-1.96.1-r0", "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/cargo-1.96.1-r0.apk", "5d5c394ba9805bc2af0cd7ffee8b66c9e541ff37a5629515cd2d3ce28aa0b5ac"],
+        ["cargo-bash-completions", "cargo-bash-completions-1.96.1-r0", "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/cargo-bash-completions-1.96.1-r0.apk", "2f8383a716b442c9c4d9c5895b6fc1cfcd0dbc5766d6f9f72ed6b9db251f6b6e"],
         ["clang22-headers", "clang22-headers-22.1.3-r2", "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/clang22-headers-22.1.3-r2.apk", "a987e1e1b7e0c42a1868ca44b703fe07367cbdda4a71675a2517d5f5d0bc86fe"],
         ["clang22-libs", "clang22-libs-22.1.3-r2", "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/clang22-libs-22.1.3-r2.apk", "fbc673dd4057cec92532f9ae70fa1304ae56e3bc320b9fbbc54a99627b83be80"],
         ["cmake", "cmake-4.2.3-r0", "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/cmake-4.2.3-r0.apk", "960e712886a5453c2c2573364ecc98c28fc7e081270396c5d9a69756caa102c8"],
@@ -149,6 +151,7 @@ fn packages() {
         ["libproxy", "libproxy-0.5.12-r0", "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/libproxy-0.5.12-r0.apk", "9656ff4015e4f2654f58e99dde115dd6c243bf6d22b92cfcc5f7b63f3b44d2e8"],
         ["libproxy-dev", "libproxy-dev-0.5.12-r0", "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/libproxy-dev-0.5.12-r0.apk", "dd922dc94f6ba96c30184d266188614ea70c0af5c7ab7a949b352cff12bf9d2d"],
         ["libsm", "libsm-1.2.6-r0", "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/libsm-1.2.6-r0.apk", "dd7eff58a46fd60e4afee9c7c1c3508920b0e1d6560129e59aee82329f68afc8"],
+        ["libssh2", "libssh2-1.11.1-r4", "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/libssh2-1.11.1-r4.apk", "13f707f411380e1e195e590ba80bce4c2406ffed6b28ef03f75043b45db156d5"],
         ["libstdc++-dev", "libstdc++-dev-15.2.0-r5", "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/libstdc++-dev-15.2.0-r5.apk", "62ce308cdbf127dcac6eee1520a4ffec8dc98b30974653908842fe4cc7d90b43"],
         ["libtasn1", "libtasn1-4.21.0-r0", "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/libtasn1-4.21.0-r0.apk", "407f255c5af989f4e22a5e9404c4558f6fda04f14a4209a2ca1e06c3f2ba476e"],
         ["libtasn1-dev", "libtasn1-dev-4.21.0-r0", "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/libtasn1-dev-4.21.0-r0.apk", "37bd5a7c3bf22a2e25e98daa69ab3ac2b3e3792dcc7807580f4e5afacac19d0a"],
@@ -195,6 +198,7 @@ fn packages() {
         ["libxxf86vm", "libxxf86vm-1.1.7-r0", "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/libxxf86vm-1.1.7-r0.apk", "887a3c5438e1db624d07ac23d16ec08d21fb16de438d75ad2dd5637c958b4108"],
         ["libxxf86vm-dev", "libxxf86vm-dev-1.1.7-r0", "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/libxxf86vm-dev-1.1.7-r0.apk", "e716412f06ff11929ca29a63d38acd29e94759c5c41a789e5026495dc78ebbbe"],
         ["linux-headers", "linux-headers-7.0.0-r1", "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/linux-headers-7.0.0-r1.apk", "c4535f3f0dc6fd4d80efa7ff2a7a72a2d3f8dae31e2587c0785cc3243889cdf2"],
+        ["linux-pam-dev", "linux-pam-dev-1.7.1-r2", "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/linux-pam-dev-1.7.1-r2.apk", "56a40ac7b7f4f7c61057f6d561c0046d83b4a091e7835098864817586735e60f"],
         ["llvm22-libs", "llvm22-libs-22.1.3-r1", "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/llvm22-libs-22.1.3-r1.apk", "dec15bdd29b6ec7fc22aee43bac153a22e6b132c599e5e5d9ccd0d159eae764f"],
         ["lz4-libs", "lz4-libs-1.10.0-r1", "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/lz4-libs-1.10.0-r1.apk", "3ad4912ab8ecf5f6236fdb751f88243006b3a8f152684e455b781e16284dd298"],
         ["make", "make-4.4.1-r4", "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/make-4.4.1-r4.apk", "a916626a876f64c6b6fb32a6bf0fa93351d09fae0aa7684135642390da647e60"],
@@ -250,7 +254,9 @@ fn packages() {
         ["qt6-qtsvg-dev", "qt6-qtsvg-dev-6.11.1-r0", "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/qt6-qtsvg-dev-6.11.1-r0.apk", "0cd0ef1ffefb8bcf648c95c53434ca29c50ac84143770616aa51157c7d04ece0"],
         ["qt6-qtwayland", "qt6-qtwayland-6.11.1-r0", "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/qt6-qtwayland-6.11.1-r0.apk", "1e28d146293ecd4193a5df51332f06841363d8fec6a5dda4107101563d6ed6fb"],
         ["rhash-libs", "rhash-libs-1.4.6-r0", "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/rhash-libs-1.4.6-r0.apk", "7d14a70040f83f40ae5ea8829e3eb58d82f06d959478658b81b30033d390651f"],
+        ["rust", "rust-1.96.1-r0", "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/rust-1.96.1-r0.apk", "09adcccc230473a82c6e95875a9ca3d705013e3de58e651f029dcf8e4bf82f1d"],
         ["samurai", "samurai-1.2-r8", "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/samurai-1.2-r8.apk", "f959c2baf5a6438bd7d74aa16b56c8526c116233052a71d598940e6f5b4400f9"],
+        ["scudo-malloc", "scudo-malloc-22.1.3-r0", "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/scudo-malloc-22.1.3-r0.apk", "3a34e54040c95c585a49fcb0d07e794cc0e9093d1dd61860a508c300d0edf3d4"],
         ["spirv-llvm-translator-libs", "spirv-llvm-translator-libs-22.1.0-r0", "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/spirv-llvm-translator-libs-22.1.0-r0.apk", "9fc368205cacb8006a1f0b1412f65458ace79b1d04d34806532670854d932114"],
         ["spirv-tools", "spirv-tools-1.4.341.0-r0", "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/spirv-tools-1.4.341.0-r0.apk", "6034c22c4f61fb76e517c1d5b11ef5c26c7154d2baeacec8b0a9dcca94ff9a93"],
         ["sqlite", "sqlite-3.53.4-r0", "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/sqlite-3.53.4-r0.apk", "c51f4aae4fdbbec678639cdaa7af6758eef331dbf7299e2777fa7020b41ff194"],
@@ -319,6 +325,7 @@ fn commands() {
         "c89",
         "c99",
         "cairo-trace",
+        "cargo",
         "cc",
         "cmake",
         "cmake3.5",
@@ -461,6 +468,8 @@ fn commands() {
         "ranlib",
         "readelf",
         "recode-sr-latin",
+        "rustc",
+        "rustdoc",
         "samu",
         "size",
         "slencheck",

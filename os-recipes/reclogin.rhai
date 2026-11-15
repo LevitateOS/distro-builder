@@ -13,7 +13,7 @@
 // linker are the distro's own, and the programs link the C library, libpam,
 // libinput and libxkbcommon the system ships, dynamically. It declares no
 // network: cargo runs --locked --offline against the vendored crates.
-const RECIPE_API = 2;
+const RECIPE_API = 0;
 const NEEDS = #{
     inputs: #{ source: "directory" },
     outputs: #{ rootfs: "directory" },
@@ -99,6 +99,10 @@ fn installed_files(ctx) {
     }
     if ctx.init == "systemd" {
         files.push(["usr/lib/systemd/system/reclogin.service", 0o644, "dist/systemd/reclogin.service"]);
+        // The guest's own systemd --user and what it starts are not children of
+        // the desktop process, so reclogin's kernel filter does not reach them.
+        files.push(["usr/lib/systemd/system/user@60600.service.d/50-reclogin-guest.conf", 0o644,
+            "dist/guest/user@60600.service.d/50-reclogin-guest.conf"]);
     } else {
         files.push(["etc/init.d/reclogin", 0o755, "dist/openrc/reclogin"]);
         files.push(["usr/libexec/reclogin/reclogind-run", 0o755, "dist/openrc/reclogind-run"]);

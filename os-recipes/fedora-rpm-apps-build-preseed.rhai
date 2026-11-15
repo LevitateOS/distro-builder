@@ -1,5 +1,5 @@
 //! extends: locked-preseed.rhai
-// The locked Fedora RPMs that compiling the desktop apps (gui/) needs beyond
+// The locked Fedora RPMs that compiling the desktop apps (tools/gui/) needs beyond
 // the base (the apps-build lock): the compiler, CMake and Qt's development
 // files. The apps-build root recipe imports them as `apps_build_rpms`. None
 // of them goes into an image.

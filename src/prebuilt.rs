@@ -69,7 +69,7 @@ pub enum Family {
     Tools,
     /// The TUI binary (`install-tui`, `system-tui`).
     Tui,
-    /// The Qt desktop apps tree (`gui/`), one entry per distro: its `name` is the distro id.
+    /// The Qt desktop apps tree (`tools/gui/`), one entry per distro: its `name` is the distro id.
     DesktopApps,
     /// The display server tree compiled from source (`desktop.display_server_recipe_script`),
     /// one entry per distro that has one: its `name` is the distro id.
@@ -1076,28 +1076,28 @@ fn closure_digest(files: &BTreeMap<String, String>) -> String {
     hex(&hash.finalize())
 }
 
-/// A digest of `gui/`: every file git tracks or would add (untracked and not ignored), by
+/// A digest of `tools/gui/`: every file git tracks or would add (untracked and not ignored), by
 /// path, exact mode and worktree content (a link's target), so local edits change it. A
-/// tracked file deleted in the worktree is left out. Everything under `gui/` counts, the
+/// tracked file deleted in the worktree is left out. Everything under `tools/gui/` counts, the
 /// `fixtures/` stand-ins too, though the compile's source copy leaves them out: a change
 /// there misses once, which is harmless.
 fn gui_digest(repo: &Path) -> Result<String> {
-    // gui/ is a submodule (LevitateOS/desktop-apps): git lists its files from
-    // inside it; they are named as before, under gui/, so the key is the same.
+    // tools/gui/ is a submodule (LevitateOS/desktop-apps): git lists its files from
+    // inside it; paths are named under tools/gui/, so the 2026-11 move there changed the key.
     let listing = Cmd::new("git")
         .arg("-C")
-        .arg(repo.join("gui"))
+        .arg(repo.join("tools/gui"))
         .args(["ls-files", "-z", "--cached", "--others", "--exclude-standard"])
-        .error_msg("listing the files of gui/ with git")
+        .error_msg("listing the files of tools/gui/ with git")
         .run()?;
     let paths: BTreeSet<String> = listing
         .stdout
         .split('\0')
         .filter(|path| !path.is_empty())
-        .map(|path| format!("gui/{path}"))
+        .map(|path| format!("tools/gui/{path}"))
         .collect();
     if paths.is_empty() {
-        bail!("git lists no files under gui/ in '{}'", repo.display());
+        bail!("git lists no files under tools/gui/ in '{}'", repo.display());
     }
     let mut hash = Sha256::new();
     for path in paths {
@@ -1115,7 +1115,7 @@ fn gui_digest(repo: &Path) -> Result<String> {
         } else if metadata.is_file() {
             ("f", file_digest(&full)?)
         } else {
-            bail!("unsupported entry '{}' under gui/", full.display());
+            bail!("unsupported entry '{}' under tools/gui/", full.display());
         };
         hash.update(format!("{kind}\0{path}\0{mode:o}\0{content}\n"));
     }
@@ -1141,7 +1141,7 @@ pub(crate) fn behaviour() -> String {
     )
 }
 
-/// The key of the desktop apps tree for `variant`: the `gui/` tree, the base and apps-build
+/// The key of the desktop apps tree for `variant`: the `tools/gui/` tree, the base and apps-build
 /// locks (the root the apps compile in is made from both), the apps-build root recipe, both
 /// preseed recipes and `desktop-apps.rhai` with everything they import, the compiler image,
 /// Recipe's declared behaviour versions, and the distro and its libc.
@@ -1226,7 +1226,7 @@ pub fn lookup_desktop_apps(repo: &Path, variant: &distro_contract::Variant) -> R
 /// key the checkout has now and returns the cached tree. Exact mode stores nothing and returns
 /// `tree` itself. `--no-prebuilt` still stores.
 pub fn store_desktop_apps(repo: &Path, variant: &distro_contract::Variant, tree: &Path) -> Result<PathBuf> {
-    store_tree(repo, Family::DesktopApps, variant, tree, || desktop_apps_key(repo, variant), &[PathBuf::from("gui")])
+    store_tree(repo, Family::DesktopApps, variant, tree, || desktop_apps_key(repo, variant), &[PathBuf::from("tools/gui")])
 }
 
 /// [`lookup_desktop_apps`] for the display server tree.

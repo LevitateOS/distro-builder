@@ -1,5 +1,5 @@
 //! extends: locked-preseed.rhai
-// The locked Alpine APKs that compiling the desktop apps (gui/) needs beyond
+// The locked Alpine APKs that compiling the desktop apps (tools/gui/) needs beyond
 // the base (the apps-build lock): the compiler, CMake and Qt's development
 // files. The apps-build root recipe imports them as `apps_build_apks`. None
 // of them goes into an image. apk-tools-static comes with the base preseed.

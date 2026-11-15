@@ -1,4 +1,4 @@
-//! The desktop apps (`gui/`, [`DESKTOP_APPS`]) in the desktop system.
+//! The desktop apps (`tools/gui/`, [`DESKTOP_APPS`]) in the desktop system.
 //!
 //! A Qt program fits neither way the other programs are made: the Rust tools
 //! are one static binary for every distro and the TUI is compiled by bun per
@@ -223,11 +223,11 @@ fn sha256_of(path: &Path) -> Result<String> {
     Ok(hasher.finalize().iter().map(|byte| format!("{byte:02x}")).collect())
 }
 
-/// A plain copy of `gui/` for the recipe: the build files, the sources and
+/// A plain copy of `tools/gui/` for the recipe: the build files, the sources and
 /// the data files, without the stand-ins (`fixtures/`), which only a
 /// checkout uses.
 fn source_snapshot(repo: &Path, work: &Path) -> Result<tempfile::TempDir> {
-    let root = repo.join("gui");
+    let root = repo.join("tools/gui");
     if !root.join("CMakeLists.txt").is_file() {
         bail!("'{}' has no CMakeLists.txt: the desktop apps' source is missing", root.display());
     }
@@ -236,7 +236,7 @@ fn source_snapshot(repo: &Path, work: &Path) -> Result<tempfile::TempDir> {
         .follow_links(false)
         .sort_by_file_name()
         .into_iter()
-        // gui/ is a submodule: its `.git` link is the checkout's, not source.
+        // tools/gui/ is a submodule: its `.git` link is the checkout's, not source.
         .filter_entry(|entry| entry.file_name() != "fixtures" && entry.file_name() != ".git")
     {
         let entry = entry?;

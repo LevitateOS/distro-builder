@@ -1,4 +1,4 @@
-//! The terminal apps under `tui/apps/`, as their own `package.json` files describe them.
+//! The terminal apps under `tools/tui/apps/`, as their own `package.json` files describe them.
 //!
 //! Each app is a member of the root JavaScript workspace and declares itself once:
 //! its `bin` entry gives its one name (also the directory name and the package name
@@ -186,13 +186,13 @@ fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T> {
 
 impl Workspace {
     /// Reads the root `package.json` and every app's: TUI packages are the members
-    /// under `tui/`, apps the ones that declare a `bin`.
+    /// under `tools/tui/`, apps the ones that declare a `bin`.
     pub fn load(repo_root: &Path) -> Result<Self> {
         let root: RootManifest = read_json(&repo_root.join("package.json"))?;
         let packages: Vec<PathBuf> = root
             .workspaces
             .iter()
-            .filter(|member| member.starts_with("tui/"))
+            .filter(|member| member.starts_with("tools/tui/"))
             .map(|member| repo_root.join(member))
             .collect();
         let mut apps = Vec::new();

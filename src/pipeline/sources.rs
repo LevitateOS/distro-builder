@@ -38,8 +38,8 @@ pub fn system_sources_digest(repo: &Path, distro_id: &str) -> Result<String> {
         "distro/builder",
         "distro/contract",
         "distro/profile",
-        "tui",
-        "gui",
+        "tools/tui",
+        "tools/gui",
         "recipes",
     ]
     .iter()

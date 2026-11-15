@@ -286,7 +286,7 @@ program says which: `[prebuilt] recab: local|downloaded|compiled <key16>`.
 - `--no-prebuilt` (`cargo xtask build ... --no-prebuilt`) compiles but still fills the cache.
 - `distro-builder prebuilt key <tools|tui|desktop-apps> <name> [--distro <id>]` prints the key (CI uses it);
   a TUI key needs `--distro` for its libc; for `desktop-apps` the name is the distro and no flag is taken.
-- The desktop apps key covers `gui/` (tracked files, modes, worktree content), the base and apps-build
+- The desktop apps key covers `tools/gui/` (tracked files, modes, worktree content), the base and apps-build
   locks, the apps-build root, both preseed recipes and `desktop-apps.rhai` with their imports, the
   compiler image, Recipe's declared versions, the distro and its libc. On a hit `desktop_apps.rs` skips
   building the apps-build root and the compile; the cached tree is merged and `check` still runs.

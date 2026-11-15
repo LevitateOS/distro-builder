@@ -1,7 +1,7 @@
-// Compiles the desktop apps (gui/: recipe-gui, recab-gui, disk-gui and the
+// Compiles the desktop apps (tools/gui/: recipe-gui, recab-gui, disk-gui and the
 // helper levitate-agent) and publishes the tree they install: the programs in
 // usr/bin, the three apps' menu entries and their polkit actions.
-//   --input source=<the gui/ folder>
+//   --input source=<the tools/gui/ folder>
 // This recipe does not run in Recipe's usual root. The builder runs it in the
 // variant's apps-build root (the `*-apps-build-root.rhai` recipe's tree, as a
 // root image), so `cmake` and the compiler it finds are the distro's own and
@@ -38,7 +38,7 @@ fn is_acquired(ctx) {
 
 fn acquire(ctx) {
     if is_file(join_path(source(ctx), "CMakeLists.txt")) { return ctx; }
-    throw "Import the gui/ folder with --input source=PATH";
+    throw "Import the tools/gui/ folder with --input source=PATH";
 }
 
 fn is_built(ctx) {

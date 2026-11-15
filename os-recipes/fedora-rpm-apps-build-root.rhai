@@ -1,4 +1,4 @@
-// The root the desktop apps (gui/) are compiled in on a Fedora variant: the
+// The root the desktop apps (tools/gui/) are compiled in on a Fedora variant: the
 // base lock's RPMs and the apps-build lock's, without firmware and without
 // their scripts, composed by the builder from its unpack store into one tree
 // (the `composed` input: `tree.tar`, the tree in `target_pack_tree`'s format,

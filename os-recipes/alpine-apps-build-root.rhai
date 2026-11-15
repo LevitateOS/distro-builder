@@ -1,4 +1,4 @@
-// The root the desktop apps (gui/) and the display server (xlibre.rhai) are
+// The root the desktop apps (tools/gui/) and the display server (xlibre.rhai) are
 // compiled in on an Alpine variant: the base lock's APKs (the `apks` input)
 // and the apps-build lock's (the `apps_build_apks` input) installed into one
 // tree by the locked apk.static, without their scripts. The builder makes a

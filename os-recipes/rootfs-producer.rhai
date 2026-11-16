@@ -46,8 +46,8 @@ fn build(src, out) {
     target_unpack_tree(INPUTS.system, out);
     progress(0, 0, "system configuration");
     // The installed-system policy reads its inputs (os_release, branding,
-    // ...) by name from the folder Recipe stages every input in.
-    installed::apply(out, dirname(INPUTS.system), INIT_SYSTEM);
+    // ...) by name from INPUTS.
+    installed::apply(out, INIT_SYSTEM);
     progress(0, 0, "finalizing the configured tree");
     target_finalize(out);
 }

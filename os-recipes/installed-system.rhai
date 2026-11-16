@@ -5,17 +5,11 @@
 // recstrap installs and recab deploys.
 
 // ---------------------------------------------------------------------------
-// Files. Every mode is recorded in Recipe's target metadata. put, link,
-// directory and shadow_line have copies in `system-files.rhai` (the
+// Files. Every mode is recorded in Recipe's target metadata. `put` is the
+// engine's. link, directory and shadow_line have copies in `system-files.rhai` (the
 // package-effects step's); change both together.
 // ---------------------------------------------------------------------------
 
-fn put(root, path, content, mode) {
-    let dest = join_path(root, path);
-    mkdir(dirname(dest));
-    write_file(dest, content);
-    target_mode(root, path, mode);
-}
 fn link(root, path, target) {
     let dest = join_path(root, path);
     mkdir(dirname(dest));
@@ -243,8 +237,8 @@ fn all_consoles() { ["tty1", "tty2", "tty3", "tty4", "tty5", "tty6", "ttyS0"] }
 
 // The value of `field` in the builder's `os_release` input (the REC_* fields
 // are unquoted words).
-fn os_release_field(inputs, field) {
-    for line in read_file(join_path(inputs, "os_release")).split("\n") {
+fn os_release_field(field) {
+    for line in read_file(INPUTS.os_release).split("\n") {
         if line.starts_with(field + "=") { return trim(line.sub_string(field.len() + 1)); }
     }
     throw "the os_release input has no " + field;
@@ -254,15 +248,15 @@ fn os_release_field(inputs, field) {
 // tools read), from the contract: the builder's `os_release` input. A packaged
 // /etc/os-release keeps its packaged form and mode (Fedora's is a symlink to
 // usr/lib/os-release, which then holds this text).
-fn identity(root, inputs) {
-    let text = read_file(join_path(inputs, "os_release"));
+fn identity(root) {
+    let text = read_file(INPUTS.os_release);
     let path = join_path(root, "etc/os-release");
     if exists(path) { write_file(path, text); } else { put(root, "etc/os-release", text, 0o644); }
 }
 
 // The OS's PRETTY_NAME from the builder's `os_release` input, for the login banner.
-fn pretty_name(inputs) {
-    for line in read_file(join_path(inputs, "os_release")).split("\n") {
+fn pretty_name() {
+    for line in read_file(INPUTS.os_release).split("\n") {
         if line.starts_with("PRETTY_NAME=") {
             let name = line.sub_string(12);
             name = name.replace("\"", "");
@@ -274,24 +268,24 @@ fn pretty_name(inputs) {
 
 // The setup program reads the distro profile from /etc/os-release, so it is
 // installed as the builder rendered it (its `system_setup` input).
-fn setup_program(root, inputs) {
-    put(root, "usr/libexec/recipe-system-setup", read_file(join_path(inputs, "system_setup")), 0o755);
+fn setup_program(root) {
+    put(root, "usr/libexec/recipe-system-setup", read_file(INPUTS.system_setup), 0o755);
 }
 
 // The root effects recipe (the builder's `root_effects` input,
 // os-recipes/root-effects.rhai): Recipe runs it after every system change to
 // this root and writes what it makes as the reserved package system-effects
 // (the whole-root caches package scripts would have rebuilt).
-fn root_effects(root, inputs) {
-    put(root, "usr/lib/recipe/effects.rhai", read_file(join_path(inputs, "root_effects")), 0o644);
+fn root_effects(root) {
+    put(root, "usr/lib/recipe/effects.rhai", read_file(INPUTS.root_effects), 0o644);
 }
 
 // The wheel administrators' password-authenticated privilege rule, in the file
 // the distro profile names (the builder's `admin_rule_file` and `admin_rule`
 // inputs).
-fn admin_rule(root, inputs) {
-    put(root, read_file(join_path(inputs, "admin_rule_file")).trim(),
-        read_file(join_path(inputs, "admin_rule")).trim() + "\n", 0o440);
+fn admin_rule(root) {
+    put(root, read_file(INPUTS.admin_rule_file).trim(),
+        read_file(INPUTS.admin_rule).trim() + "\n", 0o440);
 }
 
 // Root's login shell is bash, which recsetup also gives new users, and
@@ -374,12 +368,12 @@ fn guest_agent(root, init) {
 // `wallpaper_dark`, 3840x2160 JPEGs) as a wallpaper package under the OS's
 // name. A desktop group recipe points its start button, About page, desktop
 // and login screen at them.
-fn branding(root, inputs) {
-    let mode = os_release_field(inputs, "REC_APPEARANCE");
+fn branding(root) {
+    let mode = os_release_field("REC_APPEARANCE");
     if mode != "light" && mode != "dark" { throw "unknown appearance " + mode + " (light or dark)"; }
     let tone = if mode == "dark" { "paper" } else { "ink" };
     let icons = "usr/share/icons/hicolor/";
-    let name = "distributor-logo-" + os_release_field(inputs, "ID");
+    let name = "distributor-logo-" + os_release_field("ID");
     let files = [
         [icons + "scalable/apps/" + name + ".svg", "logo_" + tone],
         [icons + "16x16/apps/" + name + ".svg", "logo_micro_" + tone],
@@ -387,23 +381,23 @@ fn branding(root, inputs) {
     // Plasma reads an image's size from its file name, and shows the
     // images_dark one under a dark colour scheme, the images one under a
     // light one.
-    let wallpapers = "usr/share/wallpapers/" + pretty_name(inputs);
+    let wallpapers = "usr/share/wallpapers/" + pretty_name();
     files.push([wallpapers + "/contents/images/3840x2160.jpg", "wallpaper_light"]);
     files.push([wallpapers + "/contents/images_dark/3840x2160.jpg", "wallpaper_dark"]);
     for file in files {
         mkdir(dirname(join_path(root, file[0])));
-        copy_file(join_path(inputs, file[1]), join_path(root, file[0]));
+        copy_file(INPUTS[file[1]], join_path(root, file[0]));
         target_mode(root, file[0], 0o644);
     }
     put(root, wallpapers + "/metadata.json",
-        "{\"KPlugin\": {\"Id\": \"" + pretty_name(inputs) + "\", \"Name\": \"" + pretty_name(inputs) + "\"}}\n", 0o644);
+        "{\"KPlugin\": {\"Id\": \"" + pretty_name() + "\", \"Name\": \"" + pretty_name() + "\"}}\n", 0o644);
 }
 
 // Apply the installed-system policy to the tree at `root`, whose init is `init`.
-fn apply(root, inputs, init) {
+fn apply(root, init) {
     check_init(init);
-    identity(root, inputs);
-    put(root, "etc/issue", pretty_name(inputs) + " \\l\n", 0o644);
+    identity(root);
+    put(root, "etc/issue", pretty_name() + " \\l\n", 0o644);
     put(root, "etc/locale.conf", "LANG=C.UTF-8\n", 0o644);
     locale_env(root, init);
     // sshd's privilege-separation directories.
@@ -421,12 +415,12 @@ fn apply(root, inputs, init) {
     bash_login(root);
     homes(root);
     lock_root(root);
-    setup_program(root, inputs);
-    root_effects(root, inputs);
-    admin_rule(root, inputs);
+    setup_program(root);
+    root_effects(root);
+    admin_rule(root);
     no_hibernation(root, init);
     guest_agent(root, init);
-    branding(root, inputs);
+    branding(root);
     if init == "openrc" {
         // D-Bus cannot initialize an existing empty machine-id, and /var/log
         // may be a fresh live tmpfs or the installed system's shared state.

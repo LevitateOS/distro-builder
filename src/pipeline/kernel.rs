@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use crate::recipe::{recipe_work_dir, Invocation, RecipeResult};
 use distro_contract::runs::kernel_dir;
 
-/// The kernel recipes, relative to the repo root. Autofix may edit only these.
+/// The kernel recipes, relative to the repo root.
 const RECIPES: &str = "distro/builder/os-recipes";
 /// The pins and the bundle rules both kernel recipes import.
 const METADATA: &str = "kernel/metadata.rhai";
@@ -43,16 +43,8 @@ pub struct KernelPin {
 pub enum Source {
     /// The published prebuilt bundle (`linux-prebuilt.rhai`).
     Prebuilt,
-    /// A source build (`linux.rhai`), optionally letting Recipe's autofix
-    /// patch the kernel recipes after a failure.
-    Compile { autofix: Option<Autofix> },
-}
-
-#[derive(Debug, Clone)]
-pub struct Autofix {
-    pub attempts: u8,
-    pub prompt_file: Option<PathBuf>,
-    pub llm_profile: Option<String>,
+    /// A source build (`linux.rhai`).
+    Compile,
 }
 
 /// What `.artifacts/kernel/<id>/current` holds.
@@ -138,10 +130,16 @@ pub fn status(variant: &Variant) -> Result<KernelStatus> {
     let (spec, pin) = metadata.spec(variant)?;
     let current = kernel_dir(&variant.repo_root, &variant.id);
     if std::fs::symlink_metadata(&current).is_err() {
-        return Ok(KernelStatus::Missing(format!("{} does not exist", current.display())));
+        return Ok(KernelStatus::Missing(format!(
+            "{} does not exist",
+            current.display()
+        )));
     }
     let root = bundle_root(&current)?;
-    let root = root.to_str().context("the kernel output path is not UTF-8")?.to_owned();
+    let root = root
+        .to_str()
+        .context("the kernel output path is not UTF-8")?
+        .to_owned();
     let mismatch: String = metadata.call("bundle_mismatch", (root, spec))?;
     Ok(if mismatch.is_empty() {
         KernelStatus::Ready(pin.release)
@@ -185,20 +183,9 @@ pub fn install(variant: &Variant, source: &Source, force: bool) -> Result<String
             // GitHub redirects release downloads to its asset host.
             "linux-prebuilt.rhai"
         }
-        Source::Compile { autofix } => {
+        Source::Compile => {
             if force {
                 args.extend(["--force-build".into(), "--force-install".into()]);
-            }
-            if let Some(fix) = autofix {
-                args.extend(["--autofix".into(), "--autofix-attempts".into(), fix.attempts.to_string()]);
-                args.extend(["--autofix-cwd".into(), repo_root.display().to_string()]);
-                args.extend(["--autofix-allow-path".into(), RECIPES.into()]);
-                if let Some(prompt) = &fix.prompt_file {
-                    args.extend(["--autofix-prompt-file".into(), prompt.display().to_string()]);
-                }
-                if let Some(profile) = &fix.llm_profile {
-                    args.extend(["--llm-profile".into(), profile.clone()]);
-                }
             }
             "linux.rhai"
         }
@@ -260,7 +247,10 @@ fn existing_bundle(current: &Path) -> Result<Option<PathBuf>> {
 /// variant's own.
 pub fn kconfig_text(variant: &Variant) -> Result<String> {
     let mut text = String::new();
-    for path in [variant.repo_root.join(SHARED_KCONFIG), variant.path("kconfig")] {
+    for path in [
+        variant.repo_root.join(SHARED_KCONFIG),
+        variant.path("kconfig"),
+    ] {
         text += &std::fs::read_to_string(&path)
             .with_context(|| format!("reading {}", path.display()))?;
         text.push('\n');
@@ -273,8 +263,7 @@ pub fn kconfig_text(variant: &Variant) -> Result<String> {
 fn merged_kconfig(variant: &Variant) -> Result<PathBuf> {
     let text = kconfig_text(variant)?;
     let work = recipe_work_dir(&variant.repo_root, &variant.id)?;
-    std::fs::create_dir_all(&work)
-        .with_context(|| format!("creating {}", work.display()))?;
+    std::fs::create_dir_all(&work).with_context(|| format!("creating {}", work.display()))?;
     let path = work.join("kconfig");
     std::fs::write(&path, text).with_context(|| format!("writing {}", path.display()))?;
     Ok(path)

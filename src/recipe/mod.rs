@@ -8,8 +8,8 @@
 
 pub mod linux;
 mod outputs;
-mod stamp;
 pub mod rootfs_source;
+mod stamp;
 pub mod tools;
 
 pub use crate::pipeline::paths::recipe_work_dir;
@@ -83,7 +83,10 @@ fn compiler_image(repo: &Path) -> Result<Option<(String, PathBuf)>> {
             )))
         }
     }
-    Ok(Some((format!("oci:recipe-compiler@sha256:{digest}"), rootfs)))
+    Ok(Some((
+        format!("oci:recipe-compiler@sha256:{digest}"),
+        rootfs,
+    )))
 }
 
 /// The compiler image's reference, for keys computed without the image (CI): the
@@ -197,10 +200,22 @@ pub fn ginux_binary(repo: &Path) -> Result<&'static Path> {
     let target_dir = std::env::var_os("CARGO_TARGET_DIR")
         .map(|target| PathBuf::from(target).join("ginux"))
         .unwrap_or_else(|| dir.join("target"));
-    crate::teprintln!("  building ginux (cargo build -p ginux-init --bin ginux --release in {GINUX_DIR})");
+    crate::teprintln!(
+        "  building ginux (cargo build -p ginux-init --bin ginux --release in {GINUX_DIR})"
+    );
     let step = crate::timeline::Step::begin("tool", "cargo build ginux");
     Cmd::new("cargo")
-        .args(["build", "-q", "-p", "ginux-init", "--bin", "ginux", "--release", "--target", GINUX_TARGET])
+        .args([
+            "build",
+            "-q",
+            "-p",
+            "ginux-init",
+            "--bin",
+            "ginux",
+            "--release",
+            "--target",
+            GINUX_TARGET,
+        ])
         .arg("--target-dir")
         .arg(&target_dir)
         .dir(&dir)
@@ -367,7 +382,7 @@ impl<'a> Invocation<'a> {
         self
     }
 
-    /// Other Recipe flags, passed as they are (the kernel's `--force-build`, `--autofix`).
+    /// Other Recipe flags, passed as they are (the kernel's `--force-build`).
     pub fn args<I, S>(mut self, args: I) -> Self
     where
         I: IntoIterator<Item = S>,
@@ -390,7 +405,9 @@ impl<'a> Invocation<'a> {
             Some((reference, _)) => reference.clone(),
             None => match compiler_image(self.repo)? {
                 Some((reference, _)) => reference,
-                None => std::env::var("GINUX_ROOT").unwrap_or_else(|_| "Recipe's default root".into()),
+                None => {
+                    std::env::var("GINUX_ROOT").unwrap_or_else(|_| "Recipe's default root".into())
+                }
             },
         };
         // The stamp reads the recipe file as Recipe will find it: a path
@@ -405,7 +422,11 @@ impl<'a> Invocation<'a> {
                 .join("distro/builder/os-recipes")
                 .join(recipe)
                 .with_extension("rhai");
-            if named.is_file() { named } else { run_dir.join(recipe) }
+            if named.is_file() {
+                named
+            } else {
+                run_dir.join(recipe)
+            }
         };
         let stamp = stamp::Stamp::for_run(
             self.repo,
@@ -419,7 +440,10 @@ impl<'a> Invocation<'a> {
         .with_context(|| format!("computing the done stamp of {}", recipe.display()))?;
         if let Some(result) = stamp.as_ref().and_then(stamp::Stamp::reuse) {
             let step = self.concurrent.is_none().then(|| {
-                crate::timeline::Step::begin("recipe", &format!("recipe {} {recipe_name} (unchanged)", self.phase))
+                crate::timeline::Step::begin(
+                    "recipe",
+                    &format!("recipe {} {recipe_name} (unchanged)", self.phase),
+                )
             });
             crate::tprintln!(
                 "  recipe {} {}: unchanged since its last run (stamp {}); reusing its result",
@@ -432,10 +456,9 @@ impl<'a> Invocation<'a> {
             }
             return Ok(result);
         }
-        let step = self
-            .concurrent
-            .is_none()
-            .then(|| crate::timeline::Step::begin("recipe", &format!("recipe {} {recipe_name}", self.phase)));
+        let step = self.concurrent.is_none().then(|| {
+            crate::timeline::Step::begin("recipe", &format!("recipe {} {recipe_name}", self.phase))
+        });
         // What the builder says about the run: on the terminal, or at the top
         // of its log.
         let mut log = match &self.log {
@@ -522,15 +545,25 @@ impl<'a> Invocation<'a> {
             }
         }
         for (name, value) in &self.env {
-            note(format!("    {}={}", name.to_string_lossy(), value.to_string_lossy()));
+            note(format!(
+                "    {}={}",
+                name.to_string_lossy(),
+                value.to_string_lossy()
+            ));
             cmd = cmd.env(name, value);
         }
         let ginux = ginux_binary(self.repo)?;
         let worker = self.worker.as_deref().unwrap_or(bin);
         cmd = cmd.env("GINUX_BIN", ginux).env("RECIPE_WORKER_BIN", worker);
         for (name, value) in [("GINUX_BIN", ginux), ("RECIPE_WORKER_BIN", worker)] {
-            if let Some(ambient) = std::env::var_os(name).filter(|ambient| Path::new(ambient) != value) {
-                note(format!("    {name}={} (the builder's own; ignoring {})", value.display(), Path::new(&ambient).display()));
+            if let Some(ambient) =
+                std::env::var_os(name).filter(|ambient| Path::new(ambient) != value)
+            {
+                note(format!(
+                    "    {name}={} (the builder's own; ignoring {})",
+                    value.display(),
+                    Path::new(&ambient).display()
+                ));
             } else {
                 note(format!("    {name}={}", value.display()));
             }
@@ -553,20 +586,28 @@ impl<'a> Invocation<'a> {
         }
         if let Some((reference, rootfs)) = &self.root {
             cmd = cmd.env("GINUX_ROOT", reference).env("GINUX_ROOTFS", rootfs);
-            note(format!("    GINUX_ROOT={reference} (this recipe's own root)"));
+            note(format!(
+                "    GINUX_ROOT={reference} (this recipe's own root)"
+            ));
             note(format!("    GINUX_ROOTFS={}", rootfs.display()));
         } else if let Some((reference, rootfs)) = compiler_image(self.repo)? {
-            cmd = cmd.env("GINUX_ROOT", &reference).env("GINUX_ROOTFS", &rootfs);
-            note(format!("    GINUX_ROOT={reference} (the pinned compiler image)"));
+            cmd = cmd
+                .env("GINUX_ROOT", &reference)
+                .env("GINUX_ROOTFS", &rootfs);
+            note(format!(
+                "    GINUX_ROOT={reference} (the pinned compiler image)"
+            ));
             note(format!("    GINUX_ROOTFS={}", rootfs.display()));
         }
         if let Some(file) = log.take() {
-            cmd = cmd.output_to(file).context("sending the recipe's output to its log")?;
+            cmd = cmd
+                .output_to(file)
+                .context("sending the recipe's output to its log")?;
         }
         cmd.run_interactive()?;
 
-        let bytes = std::fs::read(result.path())
-            .context("reading this invocation's recipe JSON result")?;
+        let bytes =
+            std::fs::read(result.path()).context("reading this invocation's recipe JSON result")?;
         let result = RecipeResult::from_json(&bytes)?;
         if let Some(stamp) = &stamp {
             if let Err(error) = stamp.save(&result) {

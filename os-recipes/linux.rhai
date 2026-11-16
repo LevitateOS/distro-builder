@@ -22,12 +22,6 @@ let ctx = #{
     tarball_url: "",
 };
 
-// AUTOFIX_PROMPT: This recipe is the SSOT for all kernel builds. Keep distros in parity.
-// Only edit files under `distro/builder/os-recipes/` to fix the failure.
-// Do NOT weaken lifecycle checks or correctness validation (kernel.release, artifacts-out enforcement, modules layout).
-// Do NOT add `|| true` or otherwise ignore failures; fix the real issue.
-// Keep changes minimal and local.
-
 /// Environment prefix for kernel make invocations.
 ///
 /// Resolve BISON_PKGDATADIR from the active `bison` on PATH so this works

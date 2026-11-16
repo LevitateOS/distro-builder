@@ -19,7 +19,7 @@
 //! its digest, and a multi-GB tree costs a `stat` per file, not a re-read.
 //!
 //! Never used in exact mode (a release reuses only what byte-identical tools
-//! made), for forced runs (`--force-acquire`, `--force-build`, `--autofix`) or
+//! made), for forced runs (`--force-acquire`, `--force-build`) or
 //! for phases other than `install` (a check can depend on state its outputs do
 //! not show).
 
@@ -38,7 +38,7 @@ use super::RecipeResult;
 const FORMAT: &str = "1";
 const DIRECTORY: &str = ".builder-stamps";
 const SMALL_FILE: u64 = 1 << 20;
-const FORCING: &[&str] = &["--force-acquire", "--force-build", "--autofix"];
+const FORCING: &[&str] = &["--force-acquire", "--force-build"];
 
 pub(crate) struct Stamp {
     path: PathBuf,
@@ -69,7 +69,10 @@ impl Stamp {
         field("format", FORMAT);
         field("phase", phase);
         field("recipe", &recipe.display().to_string());
-        field("recipe-closure", &crate::compose::recipe_identity(repo, recipe)?);
+        field(
+            "recipe-closure",
+            &crate::compose::recipe_identity(repo, recipe)?,
+        );
         field("work", &work.display().to_string());
         field("root", root);
         field("behaviour", &crate::prebuilt::behaviour());
@@ -83,7 +86,10 @@ impl Stamp {
                 return Ok(None);
             }
             if arg == "--input" {
-                let value = args.next().context("--input without a value")?.to_string_lossy();
+                let value = args
+                    .next()
+                    .context("--input without a value")?
+                    .to_string_lossy();
                 let (name, path) = value.split_once('=').context("--input without NAME=PATH")?;
                 field("input", name);
                 field("input-content", &tree_digest(Path::new(path))?);
@@ -91,7 +97,11 @@ impl Stamp {
                 field("arg", &arg);
             }
         }
-        let key: String = hash.finalize().iter().map(|byte| format!("{byte:02x}")).collect();
+        let key: String = hash
+            .finalize()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
         Ok(Some(Self {
             path: work.join(DIRECTORY).join(format!("{key}.json")),
             key,
@@ -155,13 +165,20 @@ fn outputs_digest(ctx: &Value) -> Result<String> {
             hash.update([0]);
         }
     }
-    Ok(hash.finalize().iter().map(|byte| format!("{byte:02x}")).collect())
+    Ok(hash
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect())
 }
 
 /// What a file or tree is, as the module comment describes.
 fn tree_digest(root: &Path) -> Result<String> {
     let mut hash = Sha256::new();
-    for item in walkdir::WalkDir::new(root).follow_links(false).sort_by_file_name() {
+    for item in walkdir::WalkDir::new(root)
+        .follow_links(false)
+        .sort_by_file_name()
+    {
         let item = item.with_context(|| format!("reading {}", root.display()))?;
         let md = item.metadata()?;
         let relative = item.path().strip_prefix(root).unwrap_or(item.path());
@@ -177,10 +194,23 @@ fn tree_digest(root: &Path) -> Result<String> {
                 file.read_to_end(&mut bytes)?;
                 hash.update(Sha256::digest(&bytes));
             } else {
-                hash.update(format!("{} {} {} {}", md.len(), md.mtime_nsec() + md.mtime() * 1_000_000_000, md.dev(), md.ino()).as_bytes());
+                hash.update(
+                    format!(
+                        "{} {} {} {}",
+                        md.len(),
+                        md.mtime_nsec() + md.mtime() * 1_000_000_000,
+                        md.dev(),
+                        md.ino()
+                    )
+                    .as_bytes(),
+                );
             }
         }
         hash.update([0]);
     }
-    Ok(hash.finalize().iter().map(|byte| format!("{byte:02x}")).collect())
+    Ok(hash
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect())
 }

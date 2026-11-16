@@ -45,6 +45,52 @@ fn cargo_env() {
     }
 }
 
+// WORKAROUND for a Ginux gap, musl roots only (AcornOS). musl's fcntl() adds
+// O_LARGEFILE (0o100000) to every F_SETFL argument; Linux ignores it on
+// x86-64, but Ginux answers F_SETFL on a pipe with any bit outside
+// O_NONBLOCK|O_APPEND|O_ACCMODE with EOPNOTSUPP (tools/ginux,
+// crates/ginux-init/src/channel_hooks.rs, the `72 => match r.rsi` arm; its
+// native-descriptor path in descriptors.rs accepts the bit). rustc then cannot
+// create its jobserver (jobserver's Client::new sets O_NONBLOCK on the pipe
+// with F_SETFL: "failed to create jobserver ... code: 95"), and cargo's output
+// reader (cargo-util read2) fails the same way. This preload answers F_SETFL
+// with the raw system call and without O_LARGEFILE (implied on x86-64, so the
+// call means the same) and leaves every other command to musl. It changes no
+// build output. Remove it once Ginux ignores the bits Linux's F_SETFL ignores.
+const FCNTL_SHIM_C = `#define _GNU_SOURCE
+#include <dlfcn.h>
+#include <fcntl.h>
+#include <stdarg.h>
+#include <sys/syscall.h>
+#include <unistd.h>
+
+int fcntl(int fd, int cmd, ...)
+{
+    static int (*real)(int, int, ...);
+    va_list ap;
+    va_start(ap, cmd);
+    unsigned long arg = va_arg(ap, unsigned long);
+    va_end(ap);
+    if (cmd == F_SETFL)
+        return syscall(SYS_fcntl, fd, cmd, arg & ~(unsigned long)O_LARGEFILE);
+    if (!real)
+        real = (int (*)(int, int, ...))dlsym(RTLD_NEXT, "fcntl");
+    return real(fd, cmd, arg);
+}
+`;
+
+// The preload for cargo and rustc on a musl root, built with the root's own cc
+// into the work folder (never into the tree); "" on a glibc root, whose
+// fcntl() passes F_SETFL's argument through unchanged.
+fn fcntl_shim() {
+    if !is_file("/lib/ld-musl-x86_64.so.1") { return ""; }
+    let src = join_path(WORK, "fcntl-setfl-shim.c");
+    let lib = join_path(WORK, "fcntl-setfl-shim.so");
+    write_file(src, FCNTL_SHIM_C);
+    exec_checked("cc", ["-shared", "-fPIC", "-O2", "-o", lib, src], #{ env: cargo_env() });
+    lib
+}
+
 fn check_defines() {
     if DEFINES.OS_ID != "levitateos" && DEFINES.OS_ID != "acornos" {
         throw "reclogin.rhai needs --define OS_ID=levitateos or acornos (the variant's identity.os_id), got '" + DEFINES.OS_ID + "'";
@@ -138,6 +184,8 @@ fn build(src, out) {
         }
     }
     let env = cargo_env();
+    let shim = fcntl_shim();
+    if shim != "" { env.LD_PRELOAD = shim; }
     // The workspace's rust-version is the floor cargo enforces; the log says
     // which toolchain this distro has, for when it refuses.
     log("toolchain: " + trim(exec_output("rustc", ["--version"], #{ env: env })) + ", " +

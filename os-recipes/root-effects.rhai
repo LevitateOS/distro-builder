@@ -18,8 +18,10 @@ const RECIPE_API = 1;
 // Recipe records it as the reserved package system-effects, replacing that
 // package's files at each run, and finishes it as a system tree.
 //
-// ldconfig is not among them: systemd's ldconfig.service makes
-// /etc/ld.so.cache at the first boot, and musl has no cache.
+// ldconfig is not among them: /etc/ld.so.cache must be written inside the
+// root, which this recipe sees only read-only, so Recipe itself runs the
+// root's own ldconfig after the effects, on a glibc root (tools/recipe
+// README, "Library cache"). musl has no cache.
 //
 // The caches follow the root, which changed: they are made again at every
 // run (RERUN).

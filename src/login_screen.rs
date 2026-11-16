@@ -8,9 +8,8 @@
 //! libraries (`desktop.apps_build_packages`), as dynamically linked programs of the
 //! OS's C library. Its tree is stored as the prebuilt family `login-screen`
 //! (`prebuilt build` / `prebuilt publish login-screen <distro>`). No image carries
-//! it: it reaches a system only through the `login-screen` group recipe, which pins
-//! the published release (written for both OSes in
-//! `tools/reclogin/dist/recipe/login-screen.rhai`, not yet in `recipes/`).
+//! it: it reaches a system only through the `login-screen` group recipe
+//! (`recipes/login-screen.rhai`), which pins the published release of each OS.
 //!
 //! The source goes in as an offline closure (`tools::prepare_crate_source`): the
 //! crate's files (its `dist/` and `assets/` included), a one-member workspace that

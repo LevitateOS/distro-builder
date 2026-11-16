@@ -2,7 +2,7 @@ const RECIPE_API = 1;
 // XLibre, the X server AcornOS's desktop runs (the fork of the X.Org server,
 // https://github.com/X11Libre), with XLibre's libinput input driver, compiled
 // from pinned source and published as one tree laid out like Alpine's
-// xorg-server package, so SDDM's /usr/bin/X keeps working:
+// xorg-server package, so the /usr/bin/X reclogin starts works:
 //   usr/bin/X -> Xorg (a sh script) -> usr/libexec/Xorg.wrap (setuid root,
 //   through the target metadata) -> usr/libexec/Xorg; modules under
 //   usr/lib/xorg/modules/xlibre-25 (the modesetting video driver is built in);
@@ -191,7 +191,7 @@ fn build(src, out) {
         let full = join_path(out, path);
         if exists(full) { rm(full); }
     }
-    // /usr/bin/X is the link SDDM starts; it must point at the wrapper script.
+    // /usr/bin/X is the link reclogin starts; it must point at the wrapper script.
     let x = join_path(out, "usr/bin/X");
     if !exists(x) { throw "installing wrote no /usr/bin/X"; }
     let script = read_file(join_path(out, "usr/bin/Xorg"));

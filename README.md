@@ -335,8 +335,8 @@ program says which: `[prebuilt] recab: local|downloaded|compiled <key16>`.
   compiled `--locked --offline` with no network. Its key covers that closure, `reclogin.rhai`, the
   distro's `os_id` and init system, the apps-build root (both locks, its recipes), the compiler
   image, Recipe's declared versions, the distro and its libc. `prebuilt build login-screen <distro>`
-  (elevated) fills the cache; no image carries the tree: the `login-screen` group recipe pins it
-  (prepared in `tools/reclogin/dist/recipe/`, not yet in `recipes/`).
+  (elevated) fills the cache; no image carries the tree: the `login-screen` group recipe
+  (`recipes/login-screen.rhai`) pins its published release.
 - `distro-builder prebuilt publish <tools|tui|desktop-apps|display-server|login-screen> <name> [--distro <id>]` (also `cargo xtask
   prebuilt publish ...`, run as the user) uploads the cache entry of the current key with
   `gh`: it creates the release if missing, never replaces an asset with different bytes, and

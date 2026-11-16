@@ -18,7 +18,7 @@ AcornOS over Recipe. It reads each variant through `distro_contract::load`
   (`pipeline/sources.rs`), the kernel artifact layout (`pipeline/kernel.rs`)
   and Recipe's work directory (`pipeline/paths.rs`).
 - `src/recipe/`: calling Recipe and reading what a recipe reports in
-  `ctx.outputs` (`recipe/outputs.rs`). The outputs a rootfs-source preseed must
+  the `outputs` of its result (`recipe/outputs.rs`). The outputs a rootfs-source preseed must
   report are read statically from that recipe's `NEEDS.outputs`. Recipes own
   network and resource grants; variant TOML selects recipes and binds inputs.
 - `src/desktop_apps.rs`, `src/display_server.rs`: the Qt desktop apps from `tools/gui` and, for AcornOS, the display server compiled from source (see "Prebuilt programs").
@@ -30,7 +30,10 @@ AcornOS over Recipe. It reads each variant through `distro_contract::load`
 - `os-recipes/`: OS artifact producers (source rootfs, installed system,
   live overlay, tools, kernel) and their shared modules and locks. Each recipe
   documents what it produces; [the collection guide](os-recipes/README.md)
-  explains its boundary with user-managed software.
+  explains its boundary with user-managed software. The kernel recipes
+  (`linux`, `linux-prebuilt`) publish one output, `bundle`; the builder checks
+  the kernel image and the modules inside it (`bundle_mismatch` from
+  `kernel/metadata.rhai`).
 - `guest/`: shell files installed into the live and installed systems.
 - `install-split-pane/`: the live install screen's two-pane terminal: a root
   shell on the left, the installation guide on the right.
@@ -38,8 +41,8 @@ AcornOS over Recipe. It reads each variant through `distro_contract::load`
 ## Two consumers of one Recipe engine
 
 The builder selects `distro/builder/os-recipes` explicitly and consumes the
-files and trees those recipes publish. Their `install` hooks assemble outputs
-inside Ginux; the builder turns those outputs into OS images. Every image is
+files and trees those recipes publish. Their `build` functions assemble outputs
+(inside Ginux when they start programs); the builder turns those outputs into OS images. Every image is
 the base system alone; software above the base (the desktop, its apps, audio,
 network, printing...) is group recipes in `recipes/`, installed through Recipe
 during the installation (docs/product-handoff.md 2.4). recab owns the two roots
@@ -57,7 +60,7 @@ The builder always passes `--no-activate`: it consumes recipe outputs to compose
 images, without activating packages on the build host. The user catalog is not
 the builder's recipe search path.
 
-Both collections use the same API 2 Rhai format and the same engine in
+Both collections use the same API 1 Rhai format and the same engine in
 `tools/recipe`. The directory split identifies the consumer and lifecycle; it
 does not introduce another recipe type or execution engine.
 

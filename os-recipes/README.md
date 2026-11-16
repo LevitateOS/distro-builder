@@ -6,10 +6,14 @@ toolchains and tools. `sources/` holds package locks and `kernel/` holds shared
 kernel facts. The builder selects this directory explicitly as its recipe
 search path; variant declarations select the rootfs and preseed producers.
 
-Every executable recipe uses the shared Recipe API 2 Rhai format and engine in
-`tools/recipe`, with its own `NEEDS`. Its `install` hook writes an owned output
-tree inside Ginux. Recipe publishes the declared files and directories, and the
-builder consumes them to assemble images. recab owns the two roots of an A/B
+Every executable recipe uses the shared Recipe API 1 Rhai format and engine in
+`tools/recipe` (`const RECIPE_API = 1;`), with its own `NEEDS`. Its `build(src, out)`
+function writes the owned output (inside Ginux when it starts programs), or its
+`SOURCES`, `FILES` and `PACKAGES` declarations do. Recipe publishes the declared
+files and directories, and the builder consumes them to assemble images. A normal
+recipe has one output; the kernel recipes publish one, `bundle`, holding the
+kernel image and its modules, which the builder checks with `bundle_mismatch`
+from `kernel/metadata.rhai`. recab owns the two roots of an A/B
 installation.
 
 The desktop apps (`tools/gui` in the workspace) are compiled here too, but not in

@@ -1,11 +1,12 @@
 //! extends: locked-preseed.rhai
+const RECIPE_API = 1;
 // The locked Fedora RPM set, which the rootfs recipe imports as `rpms`.
-const RECIPE_API = 2;
-const NEEDS = #{ inputs: #{ target: "directory?", store: "directory?" }, outputs: #{ rpms: "directory" }, network: ["dl.fedoraproject.org:443", "kojipkgs.fedoraproject.org:443"], memory_mib: 8192 };
-import "sources/levitate-rpm-lock.rhai" as lock;
-let ctx = #{
-    name: "fedora-rpm-preseed",
-    description: "Locked Fedora " + lock::release() + " RPM set",
-    output: "rpms",
-    files: lock::packages(),
+const NEEDS = #{
+    inputs: #{ store: "directory?" },
+    outputs: #{ rpms: "directory" },
+    network: ["dl.fedoraproject.org:443", "kojipkgs.fedoraproject.org:443"],
+    memory_mib: 8192,
 };
+const PACKAGE = #{ name: "fedora-rpm-preseed", description: "Locked Fedora 45 RPM set" };
+import "sources/levitate-rpm-lock.rhai" as lock;
+fn rows() { lock::packages() }

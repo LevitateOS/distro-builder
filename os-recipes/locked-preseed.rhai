@@ -1,35 +1,20 @@
+const RECIPE_API = 1;
 // The preseed of a rootfs source: downloads every file of a base's lock into
-// one output directory, which the rootfs recipe imports by that name. A lock
-// recipe starts with `//! extends: locked-preseed.rhai` and sets `ctx.output`
-// (the output's name) and `ctx.files` (its lock's [name, id, URL, SHA256]
-// rows). A file's name is its URL's basename.
-const RECIPE_API = 2;
+// the output directory, which the rootfs recipe imports by that output's
+// name. A lock recipe starts with `//! extends: locked-preseed.rhai`, declares
+// its NEEDS with its output, imports its lock and defines rows(): the lock's
+// [name, id, URL, SHA256] rows. A file's name is its URL's basename.
+//
+// The rows come from a lock module, so they are not SOURCES: the files are
+// downloaded here, in build (docs/recipe-format.md, section 3.1).
 const NEEDS = #{};
-
-fn dir_of(ctx) { join_path(ctx.runtime.paths.output, ctx.output) }
-fn file_of(ctx, row) { join_path(dir_of(ctx), basename(row[2])) }
-fn with_outputs(ctx) {
-    ctx.outputs = #{};
-    ctx.outputs[ctx.output] = dir_of(ctx);
-    ctx
-}
-
-fn is_acquired(ctx) {
-    for row in ctx.files {
-        let file = file_of(ctx, row);
-        if !is_file(file) { return needs_work(ctx, "missing " + basename(file)); }
-        verify_sha256(file, row[3]);
-    }
-    ready(with_outputs(ctx))
-}
 
 // The builder's content-addressed store, as the optional `store` input: files
 // named by their lowercase SHA-256, holding only what this lock needs. A copy
 // from it is verified like a download; a missing file means download.
-fn stored(ctx, row) {
-    let dir = join_path(ctx.runtime.paths.inputs, "store");
-    if !is_dir(dir) { return ""; }
-    let file = join_path(dir, row[3].to_lower());
+fn stored(row) {
+    if INPUTS.store == () { return ""; }
+    let file = join_path(INPUTS.store, row[3].to_lower());
     if is_file(file) { file } else { "" }
 }
 
@@ -42,39 +27,21 @@ fn fetch(row, file) {
 }
 
 // Take a row's file from the store when it holds it, otherwise download it.
-fn obtain(ctx, row, file) {
-    let kept = stored(ctx, row);
+fn obtain(row, file) {
+    let kept = stored(row);
     if kept == "" { return fetch(row, file); }
     copy_file(kept, file);
     verify_sha256(file, row[3]);
 }
 
-fn acquire(ctx) {
-    mkdir(dir_of(ctx));
-    let total = ctx.files.len();
+fn build(src, out) {
+    let rows = rows();
+    let total = rows.len();
     let done = 0;
     progress(0, total, "files");
-    for row in ctx.files {
-        let file = file_of(ctx, row);
-        if ctx.runtime.options.force_acquire || !is_file(file) {
-            obtain(ctx, row, file);
-        } else {
-            verify_sha256(file, row[3]);
-        }
+    for row in rows {
+        obtain(row, join_path(out, basename(row[2])));
         done += 1;
         progress(done, total, "files");
     }
-    with_outputs(ctx)
-}
-
-// Nothing to build or install: the downloads are the product.
-fn is_built(ctx) { is_acquired(ctx) }
-fn build(ctx) { ctx }
-fn is_installed(ctx) { is_acquired(ctx) }
-fn install(ctx) { with_outputs(ctx) }
-
-fn remove(ctx) {
-    if is_dir(dir_of(ctx)) { rm(dir_of(ctx)); }
-    ctx.outputs = #{};
-    ctx
 }

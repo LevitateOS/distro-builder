@@ -1,7 +1,9 @@
+const RECIPE_API = 1;
 // Compile a TUI layer from its immutable JavaScript source closure. The entry
 // and libc target are selected by the builder; package/toolchain facts and all
 // acquisition, lock checking, compilation and publication belong to recipes.
-const RECIPE_API = 2;
+// `bun install` fetches the frozen package graph itself, so nothing is
+// declared as SOURCES.
 const NEEDS = #{
     inputs: #{ source: "directory", runtime_target: "file" },
     outputs: #{ program: "file" },
@@ -13,86 +15,48 @@ const NEEDS = #{
     storage_max_objects: 32768,
     timeout_secs: 900,
 };
+const PACKAGE = #{ name: "tui-binary", description: "A TUI layer compiled from its JavaScript source closure" };
 let build_deps = ["bun-toolchain"];
-let ctx = #{
-    name: "tui-binary",
-    target: trim(read_file(join_path(RUNTIME.paths.inputs, "runtime_target"))),
-    state: #{ lock_sha: "", program_sha: "" },
-};
-fn workspace(ctx) { join_path(ctx.runtime.paths.build, "workspace") }
-fn compiler(ctx) { join_path(ctx.runtime.paths.dependencies, "bun-toolchain/compiler") }
-fn runtime(ctx) { join_path(ctx.runtime.paths.dependencies, "bun-toolchain/runtime") }
-fn built(ctx) { join_path(ctx.runtime.paths.build, "program") }
-fn program(ctx) { join_path(ctx.runtime.paths.output, "program") }
-fn sha(path) { trim(exec_output("sha256sum", [path])).split(" ")[0] }
-fn source_lock(ctx) { join_path(ctx.runtime.paths.inputs, "source/bun.lock") }
 
-fn is_acquired(ctx) {
-    if ctx.state.lock_sha.len() != 64 || !is_file(join_path(workspace(ctx), ".acquired")) ||
-        !is_dir(join_path(workspace(ctx), "node_modules")) {
-        return needs_work(ctx, "install frozen TUI workspace dependencies");
-    }
-    verify_sha256(source_lock(ctx), ctx.state.lock_sha);
-    verify_sha256(join_path(workspace(ctx), "bun.lock"), ctx.state.lock_sha);
-    ready(ctx)
-}
-fn acquire(ctx) {
-    let work = workspace(ctx);
-    if exists(work) { rm(work); }
-    mkdir(work);
-    copy_tree_contents(join_path(ctx.runtime.paths.inputs, "source"), work);
-    ctx.state.lock_sha = sha(source_lock(ctx));
-    exec_checked(compiler(ctx), ["install", "--frozen-lockfile", "--filter", "@levitate/*",
-        "--network-concurrency=4", "--concurrent-scripts=1", "--linker=hoisted", "--backend", "copyfile",
-        "--cache-dir", join_path(ctx.runtime.paths.build, "npm-cache")], #{ cwd: work,
-        // Bun's HTTP-thread ceiling is separate from the install CLI setting.
-        env: #{ PWD: work, BUN_CONFIG_MAX_HTTP_REQUESTS: "4" } });
-    verify_sha256(join_path(work, "bun.lock"), ctx.state.lock_sha);
-    if !is_dir(join_path(work, "node_modules")) { throw "Bun did not install the frozen TUI graph"; }
-    write_file(join_path(work, ".acquired"), ctx.state.lock_sha);
-    ctx
-}
-fn is_built(ctx) {
-    if ctx.state.program_sha.len() != 64 || !is_file(built(ctx)) {
-        return needs_work(ctx, "compile the selected TUI layer");
-    }
-    verify_sha256(built(ctx), ctx.state.program_sha);
-    ready(ctx)
-}
+fn sha(path) { trim(exec_output("sha256sum", [path])).split(" ")[0] }
+
 // docs/content's page index (src/generated/index.ts) is generated and
 // gitignored, so the source snapshot never carries it: make it here, from the
 // same sources, before the TUI that imports it is compiled. (Bun's JavaScript
 // needs /dev/urandom, which Recipe assigns where the launcher serves it.)
-fn generate_docs_index(ctx, work) {
+fn generate_docs_index(compiler, work) {
     let docs = join_path(work, "docs/content");
     if !is_file(join_path(docs, "scripts/build.ts")) { return; }
-    exec_checked(compiler(ctx), ["scripts/build.ts"], #{ cwd: docs, env: #{ PWD: docs } });
+    exec_checked(compiler, ["scripts/build.ts"], #{ cwd: docs, env: #{ PWD: docs } });
     if !is_file(join_path(docs, "src/generated/index.ts")) {
         throw "docs/content/scripts/build.ts wrote no src/generated/index.ts";
     }
 }
-fn build(ctx) {
-    let work = workspace(ctx);
-    verify_sha256(join_path(work, "bun.lock"), ctx.state.lock_sha);
-    generate_docs_index(ctx, work);
-    exec_checked(compiler(ctx), ["build", "entry.ts", "--compile", "--minify", "--target=" + ctx.target,
-        "--compile-executable-path", runtime(ctx), "--outfile", built(ctx)], #{ cwd: work, env: #{ PWD: work } });
-    if !is_file(built(ctx)) { throw "Bun wrote no TUI program"; }
-    ctx.state.program_sha = sha(built(ctx));
-    ctx
-}
-fn is_installed(ctx) {
-    if ctx.state.program_sha.len() != 64 || !is_file(program(ctx)) {
-        return needs_work(ctx, "publish the verified TUI program");
-    }
-    verify_sha256(program(ctx), ctx.state.program_sha);
-    ctx.outputs.program = program(ctx);
-    ready(ctx)
-}
-fn install(ctx) {
-    verify_sha256(built(ctx), ctx.state.program_sha);
-    copy_file(built(ctx), program(ctx));
-    chmod(program(ctx), 0o755);
-    ctx.outputs.program = program(ctx);
-    ctx
+
+fn build(src, out) {
+    let target = trim(read_file(INPUTS.runtime_target));
+    let compiler = DEPS["bun-toolchain"].compiler;
+    let runtime = DEPS["bun-toolchain"].runtime;
+
+    // Install the frozen workspace dependencies into a copy of the source.
+    let work = join_path(WORK, "workspace");
+    mkdir(work);
+    copy_tree_contents(INPUTS.source, work);
+    let lock_sha = sha(join_path(INPUTS.source, "bun.lock"));
+    exec_checked(compiler, ["install", "--frozen-lockfile", "--filter", "@levitate/*",
+        "--network-concurrency=4", "--concurrent-scripts=1", "--linker=hoisted", "--backend", "copyfile",
+        "--cache-dir", join_path(WORK, "npm-cache")], #{ cwd: work,
+        // Bun's HTTP-thread ceiling is separate from the install CLI setting.
+        env: #{ PWD: work, BUN_CONFIG_MAX_HTTP_REQUESTS: "4" } });
+    verify_sha256(join_path(work, "bun.lock"), lock_sha);
+    if !is_dir(join_path(work, "node_modules")) { throw "Bun did not install the frozen TUI graph"; }
+
+    // Compile the selected TUI layer.
+    generate_docs_index(compiler, work);
+    let built = join_path(WORK, "program");
+    exec_checked(compiler, ["build", "entry.ts", "--compile", "--minify", "--target=" + target,
+        "--compile-executable-path", runtime, "--outfile", built], #{ cwd: work, env: #{ PWD: work } });
+    if !is_file(built) { throw "Bun wrote no TUI program"; }
+    mv(built, out);
+    chmod(out, 0o755);
 }

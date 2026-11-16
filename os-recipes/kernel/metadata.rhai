@@ -36,16 +36,20 @@ fn source_spec(target) {
     spec
 }
 
-fn apply_source_spec(ctx) {
-    let spec = source_spec(ctx.target);
+// What the kernel source of `target` is called and where it comes from: the
+// description, exact version, source folder name, tarball name and URL. The
+// caller joins `source_dir_name` to its build folder for the source path.
+fn source_layout(target) {
+    let spec = source_spec(target);
     let major = spec.version.split(".")[0];
-    ctx.description = "Linux kernel (" + spec.version + ")";
-    ctx.kernel_version = spec.version;
-    ctx.source_dir_name = "linux-" + spec.version;
-    ctx.tarball_filename = "linux-" + spec.version + ".tar.xz";
-    ctx.tarball_url = "https://cdn.kernel.org/pub/linux/kernel/v" + major + ".x/" + ctx.tarball_filename;
-    ctx.source_path = join_path(ctx.runtime.paths.build, ctx.source_dir_name);
-    ctx
+    let tarball = "linux-" + spec.version + ".tar.xz";
+    #{
+        description: "Linux kernel (" + spec.version + ")",
+        kernel_version: spec.version,
+        source_dir_name: "linux-" + spec.version,
+        tarball_filename: tarball,
+        tarball_url: "https://cdn.kernel.org/pub/linux/kernel/v" + major + ".x/" + tarball,
+    }
 }
 
 fn artifact_root(kernel_artifact_root) {

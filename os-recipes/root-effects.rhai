@@ -165,10 +165,11 @@ fn mime_database(job) {
 
 // fontconfig's caches, made against a scratch system root whose fonts and
 // configuration are links into the root, so the caches land in the cache
-// folder the root's fonts.conf names first. Only a folder under /usr is
-// kept (Fedora: usr/lib/fontconfig/cache): Recipe does not own files under
-// /var, so where the root's fontconfig caches only there (Alpine) nothing is
-// kept and each user's own cache is made on first use. Also the X server's
+// folder the root's configuration names first. Only a folder under /usr is
+// kept, usr/lib/fontconfig/cache: Recipe does not own files under /var. Fedora
+// names it in fonts.conf; Alpine's fonts.conf names /var/cache/fontconfig, so
+// the desktop-libs group adds conf.d/00-system-cache.conf naming the /usr one
+// first (included before fonts.conf's own cachedir lines). Also the X server's
 // core font indexes (fonts.scale and fonts.dir, as mkfontdir writes them)
 // for each folder of bitmap fonts.
 fn fonts(job) {

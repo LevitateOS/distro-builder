@@ -7,6 +7,7 @@
 //!   `recipes/*.rhai` of `ABOUT.kind` `system` or `library` that names this OS
 //!   in `ABOUT.systems`) as base files at [`RELEASE_RECIPES`]; system groups
 //!   change only with a release, and the installed Recipe reads them there;
+//!   each recipe's pins file (`NAME.pins`) goes beside it;
 //! - [`record_base`]: Recipe's `record-base` on the finished tree, its very
 //!   last change before the EROFS image: the receipt entry `base` and
 //!   `usr/lib/levitate/release.json`. That file cannot name the digests of
@@ -25,8 +26,9 @@
 //! - `boot.tar.zst`: exactly `vmlinuz` and `initramfs.img` (the installed
 //!   initramfs), the two regular files `recab update` and `recupdate apply`
 //!   take;
-//! - `recipes.tar.zst`: the same group recipes as [`RELEASE_RECIPES`] (taken
-//!   from the tree, so they are the same bytes), flat at its top level;
+//! - `recipes.tar.zst`: the same group recipes and pins files as
+//!   [`RELEASE_RECIPES`] (taken from the tree, so they are the same bytes),
+//!   flat at its top level;
 //! - `release.json`: the unsigned manifest (schema 1) with the archives'
 //!   `url`, `sha256` and `size` left empty; `cargo xtask release publish`
 //!   fills them, signs it and publishes.
@@ -101,11 +103,19 @@ pub(crate) fn add_release_recipes(variant: &Variant, rootfs: &Path) -> Result<()
     fs::create_dir_all(&dest).with_context(|| format!("creating {}", dest.display()))?;
     fs::set_permissions(&dest, fs::Permissions::from_mode(0o755))?;
     for name in &names {
-        let file = dest.join(format!("{name}.rhai"));
-        fs::copy(recipes_dir(variant).join(format!("{name}.rhai")), &file)
-            .with_context(|| format!("copying recipes/{name}.rhai into {}", dest.display()))?;
-        fs::set_permissions(&file, fs::Permissions::from_mode(0o644))?;
-        chown_root(&file)?;
+        // The recipe and, beside it, its pins file (`NAME.pins`), which is
+        // part of the recipe's identity and travels with it.
+        for file_name in [format!("{name}.rhai"), format!("{name}.pins")] {
+            let source = recipes_dir(variant).join(&file_name);
+            if file_name.ends_with(".pins") && !source.is_file() {
+                continue;
+            }
+            let file = dest.join(&file_name);
+            fs::copy(&source, &file)
+                .with_context(|| format!("copying recipes/{file_name} into {}", dest.display()))?;
+            fs::set_permissions(&file, fs::Permissions::from_mode(0o644))?;
+            chown_root(&file)?;
+        }
     }
     chown_root(&dest)?;
     crate::tprintln!(

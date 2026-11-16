@@ -126,16 +126,22 @@ pub fn pin(variant: &Variant) -> Result<KernelPin> {
 /// What the variant's kernel output directory holds, by the kernel recipes'
 /// own bundle rule. Reads files only: no Recipe run, no privileges.
 pub fn status(variant: &Variant) -> Result<KernelStatus> {
+    check_bundle(variant, &kernel_dir(&variant.repo_root, &variant.id))
+}
+
+/// The builder's own check of the kernel bundle behind `current` (the kernel
+/// image and the modules inside it), by `bundle_mismatch` in the kernel
+/// metadata. The bundle is the kernel recipes' one output.
+fn check_bundle(variant: &Variant, current: &Path) -> Result<KernelStatus> {
     let metadata = Metadata::load(&variant.repo_root)?;
     let (spec, pin) = metadata.spec(variant)?;
-    let current = kernel_dir(&variant.repo_root, &variant.id);
-    if std::fs::symlink_metadata(&current).is_err() {
+    if std::fs::symlink_metadata(current).is_err() {
         return Ok(KernelStatus::Missing(format!(
             "{} does not exist",
             current.display()
         )));
     }
-    let root = bundle_root(&current)?;
+    let root = bundle_root(current)?;
     let root = root
         .to_str()
         .context("the kernel output path is not UTF-8")?
@@ -174,54 +180,49 @@ pub fn install(variant: &Variant, source: &Source, force: bool) -> Result<String
     if matches!(source, Source::Prebuilt) && published.is_file() {
         inputs.push(("kernel_archive", &published));
     }
-    let mut args: Vec<String> = Vec::new();
+    // GitHub redirects release downloads to its asset host.
     let recipe = match source {
-        Source::Prebuilt => {
-            if force {
-                args.extend(["--force-acquire".into(), "--force-install".into()]);
-            }
-            // GitHub redirects release downloads to its asset host.
-            "linux-prebuilt.rhai"
-        }
-        Source::Compile => {
-            if force {
-                args.extend(["--force-build".into(), "--force-install".into()]);
-            }
-            "linux.rhai"
-        }
+        Source::Prebuilt => "linux-prebuilt.rhai",
+        Source::Compile => "linux.rhai",
     };
-    let ctx = run(variant, "install", recipe, &inputs, &args)?;
-    crate::recipe::linux::select_kernel_bundle(&ctx, &current)?;
-    Ok(ctx.metadata_string("kernel_version")?.to_owned())
+    let result = run(variant, recipe, &inputs, force)?;
+    crate::recipe::linux::select_kernel_bundle(&result, &current)?;
+    // The release is the builder's own pin; the bundle must hold that kernel.
+    match check_bundle(variant, &current)? {
+        KernelStatus::Ready(release) => Ok(release),
+        KernelStatus::Missing(why) | KernelStatus::Mismatch(why) => {
+            bail!("the {} kernel bundle is not the pinned kernel: {why}", variant.id)
+        }
+    }
 }
 
-/// Ask the prebuilt kernel recipe whether `kernel_output_dir` holds the
-/// variant's kernel (the release build's check: it never builds a kernel).
+/// Check that `kernel_output_dir` holds the variant's kernel (the release
+/// build's check: it never builds a kernel). The builder reads the bundle
+/// itself; no Recipe run.
 pub fn check_kernel_installed(variant: &Variant, kernel_output_dir: &Path) -> Result<()> {
-    let kconfig = merged_kconfig(variant)?;
-    let target = bundle_root(kernel_output_dir)?;
-    let inputs: Vec<(&str, &Path)> = vec![("kconfig", &kconfig), ("target", &target)];
-    run(variant, "isinstalled", "linux-prebuilt.rhai", &inputs, &[])
-        .with_context(|| format!("the {} kernel is not installed", variant.id))?;
-    Ok(())
+    match check_bundle(variant, kernel_output_dir)? {
+        KernelStatus::Ready(_) => Ok(()),
+        KernelStatus::Missing(why) | KernelStatus::Mismatch(why) => {
+            bail!("the {} kernel is not installed: {why}", variant.id)
+        }
+    }
 }
 
 fn run(
     variant: &Variant,
-    phase: &'static str,
     recipe: &str,
     inputs: &[(&str, &Path)],
-    args: &[String],
+    redo: bool,
 ) -> Result<RecipeResult> {
     let repo_root = &variant.repo_root;
     let mut invocation = Invocation::new(
         repo_root,
-        phase,
+        "install",
         repo_root.join(RECIPES).join(recipe),
         recipe_work_dir(repo_root, &variant.id)?,
     )
     .define("KERNEL_TARGET", &variant.id)
-    .args(args);
+    .redo(redo);
     for (name, path) in inputs {
         invocation = invocation.input(name, path);
     }

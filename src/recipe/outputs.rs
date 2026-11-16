@@ -1,16 +1,20 @@
-//! A recipe run's ctx and its named outputs. Publication remains coordinator-owned.
+//! The result of a finished Recipe run (specification 8.6) and its named
+//! outputs. Publication remains coordinator-owned.
 //!
-//! Recipe writes every value: an output path or metadata string is used exactly as
-//! reported, and one that is empty or has surrounding whitespace is rejected.
+//! Recipe writes every value: an output path used exactly as reported, and
+//! one that is empty or has surrounding whitespace is rejected.
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
-/// The ctx a recipe run reported.
+/// The `schema_version` of a finished-run result this builder reads.
+const SCHEMA_VERSION: u64 = 1;
+
+/// The result a recipe run printed and wrote to `--json-output`.
 #[derive(Debug)]
 pub struct RecipeResult {
-    ctx: Value,
+    json: Value,
 }
 
 fn exact(value: &Value) -> Option<&str> {
@@ -20,40 +24,49 @@ fn exact(value: &Value) -> Option<&str> {
 }
 
 impl RecipeResult {
-    /// A ctx from Recipe's `--json-output`; it must be a JSON object.
+    /// A result from Recipe's `--json-output`: a JSON object of schema 1 with
+    /// an `outputs` object (empty for a run that published nothing).
     pub fn from_json(bytes: &[u8]) -> Result<Self> {
-        let ctx: Value =
+        let json: Value =
             serde_json::from_slice(bytes).context("parsing the recipe JSON result")?;
-        if !ctx.is_object() {
-            bail!("the recipe result must be a ctx JSON object");
+        if !json.is_object() {
+            bail!("the recipe result must be a JSON object");
         }
-        Ok(Self { ctx })
+        if let Some(failure) = json.get("failure") {
+            bail!("the recipe reported a failure: {failure}");
+        }
+        match json.get("schema_version").and_then(Value::as_u64) {
+            Some(SCHEMA_VERSION) => {}
+            other => bail!(
+                "the recipe result has schema_version {other:?}; this builder reads {SCHEMA_VERSION}"
+            ),
+        }
+        if !json.get("outputs").is_some_and(Value::is_object) {
+            bail!("the recipe result must have an outputs object");
+        }
+        Ok(Self { json })
     }
 
-    /// The whole ctx, as Recipe reported it.
-    pub(crate) fn ctx(&self) -> &Value {
-        &self.ctx
+    /// The whole result, as Recipe reported it.
+    pub(crate) fn json(&self) -> &Value {
+        &self.json
     }
 
     fn outputs(&self) -> Result<&serde_json::Map<String, Value>> {
-        self.ctx
+        self.json
             .get("outputs")
             .and_then(Value::as_object)
-            .context("recipe must report a ctx.outputs object with named products")
+            .context("the recipe result must have an outputs object with named products")
     }
 
     fn declared_path(&self, name: &str) -> Result<PathBuf> {
-        let path = self
-            .outputs()?
-            .get(name)
-            .and_then(exact)
-            .with_context(|| {
-                format!("recipe must report ctx.outputs.{name} as a nonempty path string")
-            })?;
+        let path = self.outputs()?.get(name).and_then(exact).with_context(|| {
+            format!("the recipe must report outputs.{name} as a nonempty path string")
+        })?;
         let path = PathBuf::from(path);
         if !path.is_absolute() {
             bail!(
-                "ctx.outputs.{name} must be an absolute published path: '{}'",
+                "outputs.{name} must be an absolute published path: '{}'",
                 path.display()
             );
         }
@@ -63,10 +76,10 @@ impl RecipeResult {
     pub fn file(&self, name: &str) -> Result<PathBuf> {
         let path = self.declared_path(name)?;
         let metadata = std::fs::metadata(&path).with_context(|| {
-            format!("ctx.outputs.{name} file is unavailable at '{}'", path.display())
+            format!("outputs.{name} file is unavailable at '{}'", path.display())
         })?;
         if !metadata.is_file() {
-            bail!("ctx.outputs.{name} must identify a file: '{}'", path.display());
+            bail!("outputs.{name} must identify a file: '{}'", path.display());
         }
         Ok(path)
     }
@@ -75,23 +88,17 @@ impl RecipeResult {
         let path = self.declared_path(name)?;
         let metadata = std::fs::metadata(&path).with_context(|| {
             format!(
-                "ctx.outputs.{name} directory is unavailable at '{}'",
+                "outputs.{name} directory is unavailable at '{}'",
                 path.display()
             )
         })?;
         if !metadata.is_dir() {
             bail!(
-                "ctx.outputs.{name} must identify a directory: '{}'",
+                "outputs.{name} must identify a directory: '{}'",
                 path.display()
             );
         }
         Ok(path)
-    }
-
-    pub fn metadata_string(&self, name: &str) -> Result<&str> {
-        self.ctx.get(name).and_then(exact).with_context(|| {
-            format!("recipe must report ctx.{name} as a nonempty metadata string")
-        })
     }
 }
 

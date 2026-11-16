@@ -19,7 +19,8 @@
 //!   base tree) and merges their system trees into the overlay; their own
 //!   configuration enables NetworkManager.
 //!
-//! Rust reads the recipes' declarations (`let deps`, the pins) and lays out
+//! Rust reads the recipes' declarations (`let deps`, `SOURCES`) and their pins
+//! files (`NAME.pins`, which travel with the recipes) and lays out
 //! the inputs; the recipes own acquiring, checking and building.
 
 use anyhow::{bail, Context, Result};
@@ -45,7 +46,13 @@ fn recipe_file(repo: &Path, name: &str) -> PathBuf {
     recipes_dir(repo).join(format!("{name}.rhai"))
 }
 
-/// The names in a recipe's literal `let deps = [...]` line (none without one).
+/// The pins file beside a group recipe (`NAME.pins`), when it has one.
+fn pins_file(repo: &Path, name: &str) -> PathBuf {
+    recipes_dir(repo).join(format!("{name}.pins"))
+}
+
+/// The names in a recipe's literal `let deps = [...]` line (none without one;
+/// `build_deps` are only there while a recipe builds and are not read).
 fn deps_of(text: &str) -> Vec<String> {
     text.lines()
         .map(str::trim)
@@ -89,42 +96,66 @@ fn is_digest(token: &str) -> bool {
     token.len() == 64 && token.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
-/// Every `[.., URL, .., SHA-256, ..]` pin a recipe's text holds for `libc`:
-/// a quoted `https://` URL followed by the next quoted 64-digit digest, also
-/// across lines. Pins inside a `// BEGIN GENERATED PINS <libc>` block, or under
-/// a `glibc:`/`musl:` key, count only for that C library; others for every one.
-fn pins_of(text: &str, libc: &str) -> Vec<(String, String)> {
+/// The `[LIBC FORMAT]` sections of a pins file (specification 2.7) apply to
+/// `libc` when `LIBC` is that C library or `any`.
+fn pins_file_of(text: &str, libc: &str) -> Vec<(String, String)> {
     let mut pins = Vec::new();
-    let mut section: Option<String> = None;
-    let mut url: Option<String> = None;
+    let mut applies = false;
     for line in text.lines() {
-        let trimmed = line.trim();
-        if let Some(name) = trimmed.strip_prefix("// BEGIN GENERATED PINS ") {
-            section = Some(name.trim().to_string());
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') || line.starts_with("version ") {
             continue;
         }
-        if trimmed.starts_with("// END GENERATED PINS") || trimmed == "};" {
-            section = None;
+        if let Some(section) = line.strip_prefix('[').and_then(|l| l.strip_suffix(']')) {
+            let section_libc = section.split_whitespace().next().unwrap_or("");
+            applies = section_libc == libc || section_libc == "any";
             continue;
         }
-        if trimmed.starts_with("//") {
+        if !applies {
             continue;
         }
-        for key in ["glibc:", "musl:"] {
-            if trimmed.starts_with(key) {
-                section = Some(key.trim_end_matches(':').to_string());
-            }
+        // NAME SHA256 BYTES VAR URL LICENCE
+        let mut fields = line.split(' ');
+        let (Some(_), Some(sha), Some(_), Some(_), Some(url)) =
+            (fields.next(), fields.next(), fields.next(), fields.next(), fields.next())
+        else {
+            continue;
+        };
+        if is_digest(sha) {
+            pins.push((sha.to_ascii_lowercase(), url.to_string()));
         }
-        for token in trimmed.split('"').skip(1).step_by(2) {
-            if token.starts_with("https://") {
-                url = Some(token.to_string());
-            } else if is_digest(token) {
-                if let Some(found) = url.take() {
-                    if section.as_deref().is_none_or(|s| s == libc) {
-                        pins.push((token.to_ascii_lowercase(), found));
-                    }
-                }
-            }
+    }
+    pins
+}
+
+/// `key: "value"` as the text of a recipe's declaration holds it.
+fn quoted_field<'a>(block: &'a str, key: &str) -> Option<&'a str> {
+    let at = block.find(&format!("{key}:"))?;
+    let rest = block[at + key.len() + 1..].trim_start().strip_prefix('"')?;
+    rest.split('"').next()
+}
+
+/// The `url`/`sha256` pairs of the recipe's own `SOURCES` for `libc`: every
+/// `#{ ... }` block with an `https://` `url` and a 64-digit `sha256`; a block
+/// with a `libc` field counts only for that C library.
+fn sources_of(text: &str, libc: &str) -> Vec<(String, String)> {
+    let text: String = text
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("//"))
+        .flat_map(|line| [line, "\n"])
+        .collect();
+    let mut pins = Vec::new();
+    for block in text.split("#{").skip(1) {
+        let block = block.split('}').next().unwrap_or("");
+        let (Some(url), Some(sha)) = (quoted_field(block, "url"), quoted_field(block, "sha256"))
+        else {
+            continue;
+        };
+        if url.starts_with("https://")
+            && is_digest(sha)
+            && quoted_field(block, "libc").is_none_or(|only| only == libc)
+        {
+            pins.push((sha.to_ascii_lowercase(), url.to_string()));
         }
     }
     pins
@@ -163,9 +194,18 @@ pub(crate) fn write_medium(variant: &Variant, overlay: &Path) -> Result<()> {
     for name in &all {
         let file = recipe_file(repo, name);
         let text = fs::read_to_string(&file).with_context(|| format!("reading {}", file.display()))?;
-        pins.extend(pins_of(&text, libc));
+        pins.extend(sources_of(&text, libc));
         fs::write(recipes.join(format!("{name}.rhai")), &text)
             .with_context(|| format!("copying recipes/{name}.rhai"))?;
+        // The pins file travels with its recipe onto the medium.
+        let pins_path = pins_file(repo, name);
+        if pins_path.is_file() {
+            let text = fs::read_to_string(&pins_path)
+                .with_context(|| format!("reading {}", pins_path.display()))?;
+            pins.extend(pins_file_of(&text, libc));
+            fs::write(recipes.join(format!("{name}.pins")), &text)
+                .with_context(|| format!("copying recipes/{name}.pins"))?;
+        }
     }
     let pins_file = inputs.join("pins");
     let text: String = pins.iter().map(|(sha, url)| format!("{sha} {url}\n")).collect();

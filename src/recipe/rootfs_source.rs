@@ -125,7 +125,7 @@ fn preseed(
     let view = store_view(repo_root, &digests)?;
     let ctx = Invocation::new(repo_root, "install", &recipe_path, &build_dir)
         .input("store", view.path())
-        .force_acquire(refresh)
+        .redo(refresh)
         .run()
         .with_context(|| format!("preseeding rootfs source via '{}'", recipe_path.display()))?;
     drop(view);

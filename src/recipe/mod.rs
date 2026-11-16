@@ -260,8 +260,9 @@ fn build(repo: &Path) -> Result<PathBuf> {
     Ok(path)
 }
 
-/// One run of a recipe phase (`install`, `isinstalled`, ...) in its work directory;
+/// One run of a recipe command (`install`, `cleanup`) in its work directory;
 /// imports resolve from `<repo>/distro/builder/os-recipes`.
+#[derive(Clone)]
 pub struct Invocation<'a> {
     repo: &'a Path,
     phase: &'static str,
@@ -280,6 +281,9 @@ pub struct Invocation<'a> {
     /// Environment the builder sets for this run (after removing ambient
     /// `RECIPE_*`/`GINUX_*` variables).
     env: Vec<(OsString, OsString)>,
+    /// Clean the program up (`recipe cleanup`) before the run, so every step
+    /// runs again, and never reuse a done stamp.
+    redo: bool,
 }
 
 impl<'a> Invocation<'a> {
@@ -302,6 +306,7 @@ impl<'a> Invocation<'a> {
             log: None,
             recipes_path: None,
             env: Vec::new(),
+            redo: false,
         }
     }
 
@@ -374,25 +379,22 @@ impl<'a> Invocation<'a> {
         self.flag("--input", value)
     }
 
-    /// Acquire the sources again, even when Recipe holds them already.
-    pub fn force_acquire(mut self, force: bool) -> Self {
-        if force {
-            self.args.push("--force-acquire".into());
-        }
-        self
-    }
-
-    /// Other Recipe flags, passed as they are (the kernel's `--force-build`).
-    pub fn args<I, S>(mut self, args: I) -> Self
-    where
-        I: IntoIterator<Item = S>,
-        S: Into<OsString>,
-    {
-        self.args.extend(args.into_iter().map(Into::into));
+    /// Run every step again, even when Recipe holds downloads or a result
+    /// already: `recipe cleanup NAME` first, then the run (specification 6.3,
+    /// decision 20). Producer runs otherwise follow Recipe's disk rules
+    /// (decision 23); the builder keeps its own stamps and passes no `--keep`.
+    pub fn redo(mut self, redo: bool) -> Self {
+        self.redo = redo;
         self
     }
 
     pub fn run(self) -> Result<RecipeResult> {
+        if self.redo {
+            let mut cleanup = self.clone();
+            cleanup.phase = "cleanup";
+            cleanup.redo = false;
+            cleanup.run()?;
+        }
         let recipe = &self.recipe;
         let work = &self.work;
         let recipe_name = recipe
@@ -428,16 +430,20 @@ impl<'a> Invocation<'a> {
                 run_dir.join(recipe)
             }
         };
-        let stamp = stamp::Stamp::for_run(
-            self.repo,
-            self.phase,
-            &recipe_file,
-            work,
-            &self.args,
-            &root_reference,
-            self.worker.as_deref(),
-        )
-        .with_context(|| format!("computing the done stamp of {}", recipe.display()))?;
+        let stamp = if self.redo {
+            None
+        } else {
+            stamp::Stamp::for_run(
+                self.repo,
+                self.phase,
+                &recipe_file,
+                work,
+                &self.args,
+                &root_reference,
+                self.worker.as_deref(),
+            )
+            .with_context(|| format!("computing the done stamp of {}", recipe.display()))?
+        };
         if let Some(result) = stamp.as_ref().and_then(stamp::Stamp::reuse) {
             let step = self.concurrent.is_none().then(|| {
                 crate::timeline::Step::begin(

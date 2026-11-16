@@ -1053,6 +1053,11 @@ fn recipe_closure(repo: &Path, recipe: &Path, found: &mut BTreeMap<String, Strin
     } else {
         file_digest(recipe)?
     };
+    // The pins file beside a recipe (`NAME.pins`) is part of its identity.
+    let pins = recipe.with_extension("pins");
+    if pins.is_file() {
+        found.insert(pins.strip_prefix(repo).unwrap_or(&pins).display().to_string(), file_digest(&pins)?);
+    }
     found.insert(label, digest);
     let dir = recipe.parent().context("a recipe has a directory")?;
     let os_recipes = repo.join("distro/builder/os-recipes");

@@ -19,9 +19,8 @@
 //! its digest, and a multi-GB tree costs a `stat` per file, not a re-read.
 //!
 //! Never used in exact mode (a release reuses only what byte-identical tools
-//! made), for forced runs (`--force-acquire`, `--force-build`) or
-//! for phases other than `install` (a check can depend on state its outputs do
-//! not show).
+//! made), for redone runs (`Invocation::redo`, which cleans the program up
+//! first) or for phases other than `install`.
 
 use anyhow::{Context, Result};
 use serde_json::Value;
@@ -35,10 +34,9 @@ use std::path::{Path, PathBuf};
 use super::RecipeResult;
 
 /// Bump when the key or the stamp's meaning changes in a way no field shows.
-const FORMAT: &str = "1";
+const FORMAT: &str = "2";
 const DIRECTORY: &str = ".builder-stamps";
 const SMALL_FILE: u64 = 1 << 20;
-const FORCING: &[&str] = &["--force-acquire", "--force-build"];
 
 pub(crate) struct Stamp {
     path: PathBuf,
@@ -82,9 +80,6 @@ impl Stamp {
         let mut args = args.iter();
         while let Some(arg) = args.next() {
             let arg = arg.to_string_lossy();
-            if FORCING.contains(&arg.as_ref()) {
-                return Ok(None);
-            }
             if arg == "--input" {
                 let value = args
                     .next()
@@ -120,22 +115,22 @@ impl Stamp {
         if stamp.get("key")?.as_str()? != self.key {
             return None;
         }
-        let ctx = stamp.get("result")?;
+        let result = stamp.get("result")?;
         let recorded = stamp.get("outputs")?.as_str()?;
-        if outputs_digest(ctx).ok()? != recorded {
+        if outputs_digest(result).ok()? != recorded {
             return None;
         }
-        RecipeResult::from_json(&serde_json::to_vec(ctx).ok()?).ok()
+        RecipeResult::from_json(&serde_json::to_vec(result).ok()?).ok()
     }
 
     /// Records a successful run's result and the digest of its outputs.
     pub(crate) fn save(&self, result: &RecipeResult) -> Result<()> {
-        let ctx = result.ctx();
+        let json = result.json();
         let record = serde_json::json!({
             "format": FORMAT,
             "key": self.key,
-            "outputs": outputs_digest(ctx)?,
-            "result": ctx,
+            "outputs": outputs_digest(json)?,
+            "result": json,
             "saved_at": distro_contract::runs::now_rfc3339(),
         });
         // Write and rename, without fsync: a stamp lost in a crash only means
@@ -149,10 +144,10 @@ impl Stamp {
     }
 }
 
-/// A digest of every output path a result names (`ctx.outputs`), in name order.
-fn outputs_digest(ctx: &Value) -> Result<String> {
+/// A digest of every output path a result names (`outputs`), in name order.
+fn outputs_digest(result: &Value) -> Result<String> {
     let mut hash = Sha256::new();
-    if let Some(outputs) = ctx.get("outputs").and_then(Value::as_object) {
+    if let Some(outputs) = result.get("outputs").and_then(Value::as_object) {
         let mut names: Vec<&String> = outputs.keys().collect();
         names.sort();
         for name in names {

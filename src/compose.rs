@@ -46,7 +46,8 @@ pub(crate) const RPM_UNPACK_RECIPE: &str = "distro/builder/os-recipes/fedora-rpm
 /// `unpacked.json`); part of every unpack key.
 pub(crate) const UNPACK_FORMAT: u32 = 1;
 /// The version of composition and of the composed tree's layout; part of
-/// every compose key.
+/// every compose key, and of every prebuilt compiled in a composed apps-build
+/// root (`prebuilt::build_root_fields`, with [`UNPACK_FORMAT`]).
 pub(crate) const COMPOSE_FORMAT: u32 = 1;
 /// At most this many package bytes (compressed) and packages go to one
 /// unpack shard: a Ginux domain keeps its files in memory, and the unpack
@@ -906,6 +907,7 @@ pub(crate) const APK_BASE_TREE_RECIPE: &str = "distro/builder/os-recipes/alpine-
 
 /// The packages the Fedora apps-build root takes: no firmware or microcode
 /// (`wanted` in `fedora-rpm-apps-build-root.rhai`, which checks the list).
+/// A change here changes that root: bump `desktop_apps::APPS_BUILD_ROOT_FORMAT`.
 pub(crate) fn apps_build_wanted(row: &LockRow) -> bool {
     !row.name.contains("firmware") && !row.name.contains("microcode")
 }

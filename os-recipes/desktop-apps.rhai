@@ -1,8 +1,10 @@
 const RECIPE_API = 1;
-// Compiles the desktop apps (tools/gui/: recipe-gui, recab-gui, disk-gui) and
-// publishes the tree they install: the programs in usr/bin, the three apps'
-// menu entries and their polkit actions.
-//   --input source=<the tools/gui/ folder>
+// Compiles the desktop apps (tools/gui/: recipe-gui, recab-gui, disk-gui,
+// updater-gui) and publishes the tree they install: the programs in usr/bin,
+// stripped, the four apps' menu entries and icons, and the polkit actions of
+// recipe, recab and updater. The story code (--shots) is left out
+// (-DLEVITATE_STORIES=OFF).
+//   --input source=<the files of tools/gui/ the builder selects>
 // This recipe does not run in Recipe's usual root. The builder runs it in the
 // variant's apps-build root (the `*-apps-build-root.rhai` recipe's tree, as a
 // root image), so `cmake` and the compiler it finds are the distro's own and
@@ -15,10 +17,10 @@ const NEEDS = #{
     timeout_secs: 7200,
 };
 const PACKAGE = #{ name: "desktop-apps" };
-const PROGRAMS = ["recipe-gui", "recab-gui", "disk-gui"];
+const PROGRAMS = ["recipe-gui", "recab-gui", "disk-gui", "updater-gui"];
 
 fn work() { join_path(WORK, "cmake") }
-// Where the one build of all three puts each program: in the folder of its
+// Where the one build of all four puts each program: in the folder of its
 // first name part.
 fn built(program) {
     let folder = program.split("-")[0];
@@ -31,7 +33,8 @@ fn tools_env() { #{ HOME: WORK, LC_ALL: "C" } }
 fn cmake_configure(dir) {
     try {
         exec_checked("cmake", ["-S", INPUTS.source, "-B", dir, "-G", "Unix Makefiles",
-            "-DCMAKE_BUILD_TYPE=Release", "-DCMAKE_INSTALL_PREFIX=/usr"], #{ env: tools_env() });
+            "-DCMAKE_BUILD_TYPE=Release", "-DCMAKE_INSTALL_PREFIX=/usr", "-DLEVITATE_STORIES=OFF"],
+            #{ env: tools_env() });
     } catch (err) {
         report_tools();
         throw err;
@@ -62,9 +65,9 @@ fn report_tools() {
 fn installed_files() {
     let files = [];
     for program in PROGRAMS { files.push(["usr/bin/" + program, 0o755]); }
-    for name in ["recipe", "recab", "disk"] { files.push(["usr/share/applications/org.levitateos." + name + ".desktop", 0o644]); }
-    for name in ["recipe", "recab", "disk"] { files.push(["usr/share/icons/hicolor/scalable/apps/org.levitateos." + name + ".svg", 0o644]); }
-    for name in ["recipe", "recab"] { files.push(["usr/share/polkit-1/actions/org.levitateos." + name + ".policy", 0o644]); }
+    for name in ["recipe", "recab", "disk", "updater"] { files.push(["usr/share/applications/org.levitateos." + name + ".desktop", 0o644]); }
+    for name in ["recipe", "recab", "disk", "updater"] { files.push(["usr/share/icons/hicolor/scalable/apps/org.levitateos." + name + ".svg", 0o644]); }
+    for name in ["recipe", "recab", "updater"] { files.push(["usr/share/polkit-1/actions/org.levitateos." + name + ".policy", 0o644]); }
     files
 }
 
@@ -90,8 +93,9 @@ fn build(src, out) {
 
     let env = tools_env();
     env.DESTDIR = out;
-    progress(0, 0, "installing into the tree (cmake --install)");
-    exec_checked("cmake", ["--install", dir], #{ env: env });
+    // --strip: the programs ship without symbols (nothing reads them).
+    progress(0, 0, "installing into the tree (cmake --install --strip)");
+    exec_checked("cmake", ["--install", dir, "--strip"], #{ env: env });
     for file in installed_files() {
         if !is_file(join_path(out, file[0])) { throw "installing wrote no /" + file[0]; }
         target_mode(out, file[0], file[1]);

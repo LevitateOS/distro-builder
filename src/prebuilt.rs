@@ -248,6 +248,48 @@ pub fn dir_digest(root: &Path) -> Result<String> {
     Ok(hex(&hash.finalize()))
 }
 
+/// Gives every directory below `root` mode 0755 and every regular file 0755 when any
+/// execute bit is set, else 0644 (links are left alone): a prepared source is keyed with
+/// its modes ([`dir_digest`]), and directories made and files copied under a umask, or
+/// checked out under one, would otherwise key differently on another machine.
+pub(crate) fn normalize_modes(root: &Path) -> Result<()> {
+    for entry in walkdir::WalkDir::new(root).follow_links(false).min_depth(1) {
+        let entry = entry?;
+        let metadata = entry.path().symlink_metadata()?;
+        let mode = if metadata.is_dir() {
+            0o755
+        } else if metadata.is_file() {
+            if metadata.permissions().mode() & 0o111 != 0 { 0o755 } else { 0o644 }
+        } else {
+            continue;
+        };
+        if metadata.permissions().mode() & 0o7777 != mode {
+            fs::set_permissions(entry.path(), fs::Permissions::from_mode(mode))
+                .with_context(|| format!("setting the mode of '{}'", entry.path().display()))?;
+        }
+    }
+    Ok(())
+}
+
+/// Prints one line on stderr when the environment's `GINUX_ROOT` replaces the pinned
+/// compiler image: every key then names that image (it is the one a compile would use)
+/// and will not match a published part.
+pub fn warn_ambient_compiler_image(repo: &Path) {
+    let Some(ambient) = std::env::var_os("GINUX_ROOT") else { return };
+    let ambient = ambient.to_string_lossy();
+    match crate::recipe::pinned_compiler_image_reference(repo) {
+        Ok(pinned) if pinned == ambient => {}
+        Ok(pinned) => eprintln!(
+            "[prebuilt] warning: GINUX_ROOT={ambient} replaces the pinned compiler image {pinned}: \
+             these keys are for that image and will not match published parts (unset GINUX_ROOT)"
+        ),
+        Err(error) => eprintln!(
+            "[prebuilt] warning: GINUX_ROOT={ambient} replaces the compiler image in every key \
+             (the pin is unreadable: {error:#}); these keys will not match published parts"
+        ),
+    }
+}
+
 /// The commit of each git checkout the `dirs` (relative to `repo`) are in, keyed by the
 /// checkout's directory; a checkout with uncommitted changes gets `+dirty`.
 pub fn source_commits<I: IntoIterator<Item = PathBuf>>(repo: &Path, dirs: I) -> BTreeMap<String, String> {
@@ -1087,50 +1129,13 @@ fn closure_digest(files: &BTreeMap<String, String>) -> String {
     hex(&hash.finalize())
 }
 
-/// A digest of `tools/gui/`: every file git tracks or would add (untracked and not ignored), by
-/// path, exact mode and worktree content (a link's target), so local edits change it. A
-/// tracked file deleted in the worktree is left out. Everything under `tools/gui/` counts, the
-/// `fixtures/` stand-ins too, though the compile's source copy leaves them out: a change
-/// there misses once, which is harmless.
+/// A digest of the desktop apps' source: [`dir_digest`] of the very snapshot the compile
+/// gets (`desktop_apps::source_snapshot`, the files `desktop_apps::source_files` selects),
+/// so the key covers exactly what the build reads.
 fn gui_digest(repo: &Path) -> Result<String> {
-    // tools/gui/ is a submodule (LevitateOS/desktop-apps): git lists its files from
-    // inside it; paths are named under tools/gui/, so the 2026-11 move there changed the key.
-    let listing = Cmd::new("git")
-        .arg("-C")
-        .arg(repo.join("tools/gui"))
-        .args(["ls-files", "-z", "--cached", "--others", "--exclude-standard"])
-        .error_msg("listing the files of tools/gui/ with git")
-        .run()?;
-    let paths: BTreeSet<String> = listing
-        .stdout
-        .split('\0')
-        .filter(|path| !path.is_empty())
-        .map(|path| format!("tools/gui/{path}"))
-        .collect();
-    if paths.is_empty() {
-        bail!("git lists no files under tools/gui/ in '{}'", repo.display());
-    }
-    let mut hash = Sha256::new();
-    for path in paths {
-        let full = repo.join(&path);
-        let metadata = match fs::symlink_metadata(&full) {
-            Ok(metadata) => metadata,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(error) => return Err(error).with_context(|| format!("reading '{}'", full.display())),
-        };
-        let mode = metadata.permissions().mode() & 0o7777;
-        let (kind, content) = if metadata.file_type().is_symlink() {
-            ("l", hex(fs::read_link(&full)?.as_os_str().as_encoded_bytes()))
-        } else if metadata.is_dir() {
-            ("d", String::new())
-        } else if metadata.is_file() {
-            ("f", file_digest(&full)?)
-        } else {
-            bail!("unsupported entry '{}' under tools/gui/", full.display());
-        };
-        hash.update(format!("{kind}\0{path}\0{mode:o}\0{content}\n"));
-    }
-    Ok(hex(&hash.finalize()))
+    let scratch = tempfile::Builder::new().prefix("gui-key-").tempdir()?;
+    let snapshot = crate::desktop_apps::source_snapshot(repo, scratch.path())?;
+    dir_digest(snapshot.path())
 }
 
 /// The lock files (`sources/*-lock.rhai`) a recipe closure contains, as one digest.
@@ -1152,13 +1157,14 @@ pub(crate) fn behaviour() -> String {
     )
 }
 
-/// The key of the desktop apps tree for `variant`: the `tools/gui/` tree, the base and apps-build
-/// locks (the root the apps compile in is made from both), the apps-build root recipe, both
-/// preseed recipes and `desktop-apps.rhai` with everything they import, the compiler image,
-/// Recipe's declared behaviour versions, and the distro and its libc.
+/// The key of the desktop apps tree for `variant`: the files of `tools/gui/` the compile gets,
+/// the apps-build root it compiles in ([`build_root_fields`]), `desktop-apps.rhai` with
+/// everything it imports, the compiler image, Recipe's declared behaviour versions, and the
+/// distro and its libc.
 ///
-/// Not covered: the builder's own Rust that composes the root (`compose.rs`) and runs the
-/// compile (`desktop_apps.rs`), which the other prebuilts leave out too.
+/// The builder's Rust that makes the root enters by version numbers
+/// ([`build_root_fields`]); the Rust that runs the compile (`desktop_apps.rs`) is not
+/// covered, which the other prebuilts leave out too.
 pub fn desktop_apps_key(repo: &Path, variant: &distro_contract::Variant) -> Result<Key> {
     let mut fields = vec![
         ("family", "desktop-apps".into()),
@@ -1183,8 +1189,12 @@ fn recipe_digest(repo: &Path, recipe: &Path) -> Result<String> {
 }
 
 /// The key fields of the apps-build root a tree is compiled in: the base and apps-build locks
-/// (the root is made from both), both preseed recipes and the root recipe, each with what it
-/// imports.
+/// (the root is made from both, whole), both preseed recipes and the root recipe, each with
+/// what it imports, and how the builder makes the root image
+/// (`desktop_apps::APPS_BUILD_ROOT_FORMAT`). On an RPM variant the root is composed from
+/// the unpack store, so the unpack recipe (`compose::RPM_UNPACK_RECIPE`, with what it
+/// imports) and the unpack store's and composition's versions (`compose::UNPACK_FORMAT`,
+/// `compose::COMPOSE_FORMAT`) are in too.
 fn build_root_fields(repo: &Path, variant: &distro_contract::Variant) -> Result<Vec<(&'static str, String)>> {
     use crate::pipeline::source::{apps_build_preseed_recipe, apps_build_root_recipe, preseed_recipe};
     let closure = |recipe: &Path| -> Result<BTreeMap<String, String>> {
@@ -1195,13 +1205,24 @@ fn build_root_fields(repo: &Path, variant: &distro_contract::Variant) -> Result<
     let base_preseed = closure(&preseed_recipe(variant, distro_contract::profile::Flavour::Base))?;
     let build_preseed = closure(&apps_build_preseed_recipe(variant))?;
     let root = closure(&apps_build_root_recipe(variant))?;
-    Ok(vec![
+    let mut fields = vec![
         ("base_lock", lock_digest(&base_preseed)),
         ("apps_build_lock", lock_digest(&build_preseed)),
         ("base_preseed_recipe", closure_digest(&base_preseed)),
         ("apps_build_preseed_recipe", closure_digest(&build_preseed)),
         ("apps_build_root_recipe", closure_digest(&root)),
-    ])
+        ("apps_build_root_format", crate::desktop_apps::APPS_BUILD_ROOT_FORMAT.to_string()),
+    ];
+    if variant.contract.profile.packages == distro_profile::PackageBackend::Rpm {
+        fields.extend([
+            ("rpm_unpack_recipe", recipe_digest(repo, &repo.join(crate::compose::RPM_UNPACK_RECIPE))?),
+            (
+                "unpack_compose_format",
+                format!("unpack={} compose={}", crate::compose::UNPACK_FORMAT, crate::compose::COMPOSE_FORMAT),
+            ),
+        ]);
+    }
+    Ok(fields)
 }
 
 /// The key of the display server tree for `variant` (`desktop.display_server_recipe_script`):
@@ -1227,14 +1248,15 @@ pub fn display_server_key(repo: &Path, variant: &distro_contract::Variant) -> Re
 }
 
 /// The key of the login screen tree for `variant`: the prepared offline source closure of
-/// `tools/reclogin` (its sources, `dist/` and `assets/`, the inherited workspace fields, the
+/// `tools/reclogin` (its sources, the `dist/` and `assets/` files this OS and init install,
+/// the inherited workspace fields, the
 /// pruned `Cargo.lock` and the vendored crates), the recipe that compiles it with what it
 /// imports, the per-OS facts it is given (`login_screen::defines`), the apps-build root it
 /// compiles in ([`build_root_fields`]: both locks, which pin the Rust toolchain and the
 /// libraries it links, and the root's recipes), the compiler image, Recipe's declared
 /// behaviour versions, and the distro and its libc.
 pub fn login_screen_key(repo: &Path, variant: &distro_contract::Variant) -> Result<Key> {
-    let source = crate::login_screen::prepare_source(repo)?;
+    let source = crate::login_screen::prepare_source(repo, variant)?;
     let defines: Vec<String> =
         crate::login_screen::defines(variant).iter().map(|(name, value)| format!("{name}={value}")).collect();
     let mut fields = vec![

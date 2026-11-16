@@ -191,6 +191,14 @@ pub(crate) fn compile_in_build_root(
     invocation.root(reference, image).worker(worker).run()?.directory("rootfs")
 }
 
+/// The version of how the builder makes the apps-build root image ([`build_root`]):
+/// which lock rows an RPM root takes (`compose::apps_build_wanted`), how they are
+/// unpacked and composed (`compose::unpack`, `compose::compose`, `compose::input_view`)
+/// and the tar flags of the image. It is in the key of every part compiled in that root
+/// (`prebuilt::build_root_fields`). Bump it whenever a change there can change the root
+/// those parts see; a bump republishes them all.
+pub(crate) const APPS_BUILD_ROOT_FORMAT: u32 = 1;
+
 /// The variant's apps-build root as a root image: its reference
 /// (`oci:NAME@sha256:DIGEST`) and the tar.
 fn build_root(variant: &Variant) -> Result<(String, PathBuf)> {
@@ -235,6 +243,7 @@ fn build_root(variant: &Variant) -> Result<(String, PathBuf)> {
 
     // One tar of the tree, the same bytes for the same tree: Recipe checks
     // the digest in the reference against the tar before it runs anything.
+    // A change to these flags changes the root: bump APPS_BUILD_ROOT_FORMAT.
     let image = work.join("rootfs.tar");
     let partial = work.join("rootfs.tar.part");
     Cmd::new("tar")
@@ -266,32 +275,76 @@ fn sha256_of(path: &Path) -> Result<String> {
     Ok(hasher.finalize().iter().map(|byte| format!("{byte:02x}")).collect())
 }
 
-/// A plain copy of `tools/gui/` for the recipe: the build files, the sources and
-/// the data files, without the stand-ins (`fixtures/`), which only a
-/// checkout uses.
-fn source_snapshot(repo: &Path, work: &Path) -> Result<tempfile::TempDir> {
+/// The files of `tools/gui/` (relative to it) the compile reads, as the CMake files name
+/// them: every `CMakeLists.txt`, and of the files git knows of (tracked, or new and not
+/// ignored) everything under `kit/` and `icons/` (sources and installed icons) and under
+/// each app's `src/` and `data/` (an app is a folder with a `CMakeLists.txt`; `data/`
+/// holds the installed menu entries and polkit actions), Markdown files excepted. The
+/// stand-ins (`fixtures/`) and READMEs only a checkout uses stay out. The story sources
+/// (`*/src/shots.cpp`, `kit/helpstory.*`) are in although `-DLEVITATE_STORIES=OFF`
+/// leaves them uncompiled: which files an option drops is CMake's to say.
+pub(crate) fn source_files(repo: &Path) -> Result<Vec<PathBuf>> {
     let root = repo.join("tools/gui");
     if !root.join("CMakeLists.txt").is_file() {
         bail!("'{}' has no CMakeLists.txt: the desktop apps' source is missing", root.display());
     }
+    // tools/gui/ is a submodule (LevitateOS/desktop-apps): git lists its files from inside it.
+    let listing = Cmd::new("git")
+        .arg("-C")
+        .arg(&root)
+        .args(["ls-files", "-z", "--cached", "--others", "--exclude-standard"])
+        .error_msg("listing the files of tools/gui/ with git")
+        .run()?;
+    let listed: Vec<PathBuf> = listing
+        .stdout
+        .split('\0')
+        .filter(|path| !path.is_empty())
+        .map(PathBuf::from)
+        // A tracked file deleted in the worktree is not part of the source.
+        .filter(|path| fs::symlink_metadata(root.join(path)).is_ok())
+        .collect();
+    let apps: std::collections::BTreeSet<&Path> = listed
+        .iter()
+        .filter(|path| path.file_name().is_some_and(|name| name == "CMakeLists.txt"))
+        .filter_map(|path| path.parent())
+        .filter(|parent| parent.components().count() == 1)
+        .collect();
+    let files: Vec<PathBuf> = listed
+        .iter()
+        .filter(|path| {
+            if path.file_name().is_some_and(|name| name == "CMakeLists.txt") {
+                return true;
+            }
+            if path.extension().is_some_and(|extension| extension == "md") {
+                return false;
+            }
+            let parts: Vec<_> = path.components().map(|c| c.as_os_str()).collect();
+            match parts.as_slice() {
+                [top, _, ..] if *top == "kit" || *top == "icons" => true,
+                [app, folder, _, ..] => (*folder == "src" || *folder == "data") && apps.contains(Path::new(app)),
+                _ => false,
+            }
+        })
+        .cloned()
+        .collect();
+    Ok(files)
+}
+
+/// A plain copy of the desktop apps' source for the recipe: exactly
+/// [`source_files`], with modes made machine-independent
+/// (`prebuilt::normalize_modes`). The key hashes this same copy (`prebuilt::gui_digest`).
+pub(crate) fn source_snapshot(repo: &Path, work: &Path) -> Result<tempfile::TempDir> {
+    let root = repo.join("tools/gui");
     let snapshot = tempfile::Builder::new().prefix("gui-source-").tempdir_in(work)?;
-    for entry in walkdir::WalkDir::new(&root)
-        .follow_links(false)
-        .sort_by_file_name()
-        .into_iter()
-        // tools/gui/ is a submodule: its `.git` link is the checkout's, not source.
-        .filter_entry(|entry| entry.file_name() != "fixtures" && entry.file_name() != ".git")
-    {
-        let entry = entry?;
-        let target = snapshot.path().join(entry.path().strip_prefix(&root)?);
-        if entry.file_type().is_dir() {
-            fs::create_dir_all(&target)?;
-        } else if entry.file_type().is_file() {
-            fs::copy(entry.path(), &target)
-                .with_context(|| format!("copying '{}'", entry.path().display()))?;
-        } else {
-            bail!("unsupported entry in the desktop apps' source: '{}'", entry.path().display());
+    for file in source_files(repo)? {
+        let source = root.join(&file);
+        let target = snapshot.path().join(&file);
+        fs::create_dir_all(target.parent().context("a source file has a parent")?)?;
+        if !fs::symlink_metadata(&source)?.file_type().is_file() {
+            bail!("unsupported entry in the desktop apps' source: '{}'", source.display());
         }
+        fs::copy(&source, &target).with_context(|| format!("copying '{}'", source.display()))?;
     }
+    crate::prebuilt::normalize_modes(snapshot.path())?;
     Ok(snapshot)
 }

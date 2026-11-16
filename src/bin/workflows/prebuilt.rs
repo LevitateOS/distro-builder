@@ -8,6 +8,7 @@ fn family(name: &str) -> Result<Family> {
 
 /// `prebuilt key`: prints the key, for CI to compute the same one.
 pub(crate) fn key_cmd(repo: &Path, family_name: &str, name: &str, distro: Option<&str>) -> Result<()> {
+    prebuilt::warn_ambient_compiler_image(repo);
     let key = prebuilt::key_for(repo, family(family_name)?, name, distro)?;
     println!("{}", key.hex);
     Ok(())
@@ -15,6 +16,7 @@ pub(crate) fn key_cmd(repo: &Path, family_name: &str, name: &str, distro: Option
 
 /// `prebuilt publish`: uploads the local cache entry of the current key.
 pub(crate) fn publish_cmd(repo: &Path, family_name: &str, name: &str, distro: Option<&str>) -> Result<()> {
+    prebuilt::warn_ambient_compiler_image(repo);
     let family = family(family_name)?;
     let key = prebuilt::key_for(repo, family, name, distro)?;
     prebuilt::publish(repo, family, name, &key)
@@ -27,6 +29,7 @@ pub(crate) fn publish_runtime_cmd(repo: &Path) -> Result<()> {
 
 /// `prebuilt list`: every part CI publishes, one `<family> <name> [--distro <id>]` per line.
 pub(crate) fn list_cmd(repo: &Path) -> Result<()> {
+    prebuilt::warn_ambient_compiler_image(repo);
     for part in prebuilt::list(repo)? {
         match part.distro {
             Some(distro) => println!("{} {} --distro {distro}", part.family.name(), part.name),
@@ -39,6 +42,7 @@ pub(crate) fn list_cmd(repo: &Path) -> Result<()> {
 /// `prebuilt build`: compiles the part into the local cache and prints its key, then the
 /// cache directory.
 pub(crate) fn build_cmd(repo: &Path, family_name: &str, name: &str, distro: Option<&str>) -> Result<()> {
+    prebuilt::warn_ambient_compiler_image(repo);
     let (key, dir) = prebuilt::build(repo, family(family_name)?, name, distro)?;
     println!("{}", key.hex);
     println!("{}", dir.display());

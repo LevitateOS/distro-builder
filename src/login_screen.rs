@@ -12,7 +12,8 @@
 //! (`recipes/login-screen.rhai`), which pins the published release of each OS.
 //!
 //! The source goes in as an offline closure (`tools::prepare_crate_source`): the
-//! crate's files (its `dist/` and `assets/` included), a one-member workspace that
+//! crate's compile sources and the `dist/` and `assets/` files the recipe lays out
+//! for this OS and init (nothing of the other OS or init), a one-member workspace that
 //! inherits the root's package fields and workspace dependencies, the root
 //! `Cargo.lock` pruned to the crate, and every crates.io dependency vendored. The
 //! recipe (`os-recipes/reclogin.rhai`) compiles it with `cargo build --locked
@@ -33,15 +34,61 @@ pub(crate) const RECIPE: &str = "distro/builder/os-recipes/reclogin.rhai";
 /// is made of.
 pub(crate) fn build_cache(variant: &Variant) -> Result<()> {
     crate::desktop_apps::acquire_build_locks(variant)?;
-    let source = prepare_source(&variant.repo_root)?;
+    let source = prepare_source(&variant.repo_root, variant)?;
     let tree = compile_tree(variant, source.path())?;
     crate::prebuilt::store_login_screen(&variant.repo_root, variant, &tree)?;
     Ok(())
 }
 
-/// The offline source closure of the crate (see the module docs).
-pub(crate) fn prepare_source(repo: &Path) -> Result<tempfile::TempDir> {
-    crate::recipe::tools::prepare_crate_source(repo, Path::new(CRATE_DIR))
+/// The offline source closure of the crate for `variant` (see the module docs):
+/// its compile sources and only the crate files `reclogin.rhai` lays out for
+/// this OS and init ([`installed_sources`]).
+pub(crate) fn prepare_source(repo: &Path, variant: &Variant) -> Result<tempfile::TempDir> {
+    let os_id = &variant.contract.identity.os_id;
+    let init = variant.contract.profile.init.as_str();
+    crate::recipe::tools::prepare_crate_source(repo, Path::new(CRATE_DIR), &installed_sources(os_id, init))
+}
+
+/// The crate files (relative to `tools/reclogin`) `os-recipes/reclogin.rhai`'s
+/// `installed_files()` copies into the tree for `os_id` and `init`: exactly the
+/// third column of its non-program rows. Keep the two lists the same: a file this
+/// list misses fails the compile ("tools/reclogin has no ..."), a file it keeps
+/// that the recipe no longer reads only rebuilds the part.
+fn installed_sources(os_id: &str, init: &str) -> Vec<String> {
+    let mut files: Vec<String> = [
+        format!("dist/pam/reclogin.{os_id}"),
+        format!("dist/pam/reclogin-autologin.{os_id}"),
+        "dist/reclogin.conf".into(),
+        "dist/sysusers/reclogin.conf".into(),
+        format!("assets/{os_id}/brand.json"),
+        format!("assets/{os_id}/background.png"),
+        format!("dist/pam/reclogin-guest.{os_id}"),
+        "dist/guest/50-reclogin-guest.limits.conf".into(),
+        "dist/guest/50-reclogin-guest.sshd.conf".into(),
+        "dist/guest/50-reclogin-guest.rules".into(),
+        "dist/guest/reclogin-guest-notice".into(),
+        "dist/guest/guest-home/.config/autostart/reclogin-guest-notice.desktop".into(),
+    ]
+    .into();
+    for font in [
+        "Newsreader.ttf",
+        "Newsreader-Italic.ttf",
+        "NewsreaderDisplay.ttf",
+        "NewsreaderDisplay-Italic.ttf",
+        "InstrumentSans.ttf",
+        "OFL-Newsreader.txt",
+        "OFL-InstrumentSans.txt",
+    ] {
+        files.push(format!("assets/fonts/{font}"));
+    }
+    if init == "systemd" {
+        files.push("dist/systemd/reclogin.service".into());
+        files.push("dist/guest/user@60600.service.d/50-reclogin-guest.conf".into());
+    } else {
+        files.push("dist/openrc/reclogin".into());
+        files.push("dist/openrc/reclogind-run".into());
+    }
+    files
 }
 
 /// The facts the recipe takes per OS: which brand and PAM file (`OS_ID`, the

@@ -96,6 +96,12 @@ pub(crate) fn compiler_image_reference(repo: &Path) -> Result<String> {
     if let Some(root) = std::env::var_os("GINUX_ROOT") {
         return Ok(root.to_string_lossy().into_owned());
     }
+    pinned_compiler_image_reference(repo)
+}
+
+/// The pinned compiler image's reference, `oci:recipe-compiler@sha256:<image_sha256>`
+/// from `product-ci.json`, whatever the environment says.
+pub(crate) fn pinned_compiler_image_reference(repo: &Path) -> Result<String> {
     let pin_file = repo.join(COMPILER_IMAGE_PIN);
     let pin: serde_json::Value = serde_json::from_slice(
         &std::fs::read(&pin_file).with_context(|| format!("reading '{}'", pin_file.display()))?,

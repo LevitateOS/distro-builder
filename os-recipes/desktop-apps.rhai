@@ -1,3 +1,4 @@
+const RECIPE_API = 1;
 // Compiles the desktop apps (tools/gui/: recipe-gui, recab-gui, disk-gui) and
 // publishes the tree they install: the programs in usr/bin, the three apps'
 // menu entries and their polkit actions.
@@ -6,68 +7,45 @@
 // variant's apps-build root (the `*-apps-build-root.rhai` recipe's tree, as a
 // root image), so `cmake` and the compiler it finds are the distro's own and
 // the programs link the C library, C++ runtime and Qt the desktop system
-// ships. JOBS is how many compilers run at once (default 1).
-const RECIPE_API = 2;
+// ships. JOBS is how many compilers run at once.
 const NEEDS = #{
     inputs: #{ source: "directory" },
     outputs: #{ rootfs: "directory" },
     memory_mib: 8192,
     timeout_secs: 7200,
 };
-let ctx = #{
-    name: "desktop-apps",
-    programs: ["recipe-gui", "recab-gui", "disk-gui"],
-    jobs: if is_def_var("JOBS") { JOBS } else { "1" },
-};
+const PACKAGE = #{ name: "desktop-apps" };
+const PROGRAMS = ["recipe-gui", "recab-gui", "disk-gui"];
 
-fn source(ctx) { join_path(ctx.runtime.paths.inputs, "source") }
-fn work(ctx) { join_path(ctx.runtime.paths.build, "cmake") }
-fn tree(ctx) { join_path(ctx.runtime.paths.output, "rootfs") }
+fn work() { join_path(WORK, "cmake") }
 // Where the one build of all three puts each program: in the folder of its
 // first name part.
-fn built(ctx, program) {
+fn built(program) {
     let folder = program.split("-")[0];
-    join_path(work(ctx), folder + "/" + program)
+    join_path(work(), folder + "/" + program)
 }
-fn tools_env(ctx) { #{ HOME: ctx.runtime.paths.build, LC_ALL: "C" } }
-
-fn is_acquired(ctx) {
-    if is_file(join_path(source(ctx), "CMakeLists.txt")) { return ready(ctx); }
-    needs_work(ctx, "the desktop apps' source input is missing")
-}
-
-fn acquire(ctx) {
-    if is_file(join_path(source(ctx), "CMakeLists.txt")) { return ctx; }
-    throw "Import the tools/gui/ folder with --input source=PATH";
-}
-
-fn is_built(ctx) {
-    for program in ctx.programs {
-        if !is_file(built(ctx, program)) { return needs_work(ctx, program + " needs compilation"); }
-    }
-    ready(ctx)
-}
+fn tools_env() { #{ HOME: WORK, LC_ALL: "C" } }
 
 // Configure; when CMake cannot find its build tools, say what this root's
 // PATH and tools look like before failing, since CMake only reports "not set".
-fn configure(ctx, dir) {
+fn cmake_configure(dir) {
     try {
-        exec_checked("cmake", ["-S", source(ctx), "-B", dir, "-G", "Unix Makefiles",
-            "-DCMAKE_BUILD_TYPE=Release", "-DCMAKE_INSTALL_PREFIX=/usr"], #{ env: tools_env(ctx) });
+        exec_checked("cmake", ["-S", INPUTS.source, "-B", dir, "-G", "Unix Makefiles",
+            "-DCMAKE_BUILD_TYPE=Release", "-DCMAKE_INSTALL_PREFIX=/usr"], #{ env: tools_env() });
     } catch (err) {
-        report_tools(ctx);
+        report_tools();
         throw err;
     }
 }
 
-fn report_tools(ctx) {
+fn report_tools() {
     let probe = "echo \"PATH=$PATH\"; for t in make gmake cc gcc c++ g++; do " +
         "printf '%s: ' \"$t\"; command -v \"$t\" || echo missing; done; " +
         "ls -l /usr/bin/make /usr/bin/gcc /usr/bin/g++ /usr/bin/cc 2>&1; " +
         "for t in /usr/bin/make /usr/bin/gcc /usr/bin/g++; do " +
         "test -x \"$t\" && echo \"$t: executable\" || echo \"$t: not executable\"; done; " +
         "/usr/bin/make --version 2>&1 | head -1";
-    try { log("tools in this root:\n" + exec_output("sh", ["-c", probe], #{ env: tools_env(ctx) })); }
+    try { log("tools in this root:\n" + exec_output("sh", ["-c", probe], #{ env: tools_env() })); }
     catch (err) { log("could not inspect this root's tools: " + err); }
     // CMake's own account of where it looked for the build program, and why
     // each candidate was refused.
@@ -75,66 +53,53 @@ fn report_tools(ctx) {
         "grep -v '^$' | tail -60";
     try {
         log("cmake's search for the build program:\n" + exec_output("sh",
-            ["-c", trace, "trace", source(ctx), join_path(ctx.runtime.paths.build, "cmake-trace")],
-            #{ env: tools_env(ctx) }));
+            ["-c", trace, "trace", INPUTS.source, join_path(WORK, "cmake-trace")],
+            #{ env: tools_env() }));
     } catch (err) { log("could not trace cmake's search: " + err); }
 }
 
-fn build(ctx) {
-    if !is_file("/usr/bin/cmake") {
-        throw "this root has no cmake: the desktop apps are compiled in the variant's apps-build root, not in Recipe's usual one";
-    }
-    let dir = work(ctx);
-    if is_dir(dir) { rm(dir); }
-    progress(0, 0, "configuring (cmake)");
-    configure(ctx, dir);
-    progress(0, ctx.programs.len(), "compiling the apps (cmake --build)");
-    exec_checked("cmake", ["--build", dir, "--parallel", ctx.jobs], #{ env: tools_env(ctx) });
-    let found = 0;
-    for program in ctx.programs {
-        if !is_file(built(ctx, program)) { throw "the build wrote no " + program; }
-        found += 1;
-        progress(found, ctx.programs.len(), "programs built");
-    }
-    ctx
-}
-
 // What installing puts into the tree, with the mode each file gets.
-fn installed_files(ctx) {
+fn installed_files() {
     let files = [];
-    for program in ctx.programs { files.push(["usr/bin/" + program, 0o755]); }
+    for program in PROGRAMS { files.push(["usr/bin/" + program, 0o755]); }
     for name in ["recipe", "recab", "disk"] { files.push(["usr/share/applications/org.levitateos." + name + ".desktop", 0o644]); }
     for name in ["recipe", "recab", "disk"] { files.push(["usr/share/icons/hicolor/scalable/apps/org.levitateos." + name + ".svg", 0o644]); }
     for name in ["recipe", "recab"] { files.push(["usr/share/polkit-1/actions/org.levitateos." + name + ".policy", 0o644]); }
     files
 }
 
-fn is_installed(ctx) {
-    for file in installed_files(ctx) {
-        if !is_file(join_path(tree(ctx), file[0])) { return needs_work(ctx, "/" + file[0] + " is not installed"); }
+fn build(src, out) {
+    if !is_file(join_path(INPUTS.source, "CMakeLists.txt")) {
+        throw "Import the tools/gui/ folder with --input source=PATH";
     }
-    ctx.outputs = #{ rootfs: tree(ctx) };
-    ready(ctx)
-}
+    if !is_file("/usr/bin/cmake") {
+        throw "this root has no cmake: the desktop apps are compiled in the variant's apps-build root, not in Recipe's usual one";
+    }
+    let dir = work();
+    if is_dir(dir) { rm(dir); }
+    progress(0, 0, "configuring (cmake)");
+    cmake_configure(dir);
+    progress(0, PROGRAMS.len(), "compiling the apps (cmake --build)");
+    exec_checked("cmake", ["--build", dir, "--parallel", JOBS.to_string()], #{ env: tools_env() });
+    let found = 0;
+    for program in PROGRAMS {
+        if !is_file(built(program)) { throw "the build wrote no " + program; }
+        found += 1;
+        progress(found, PROGRAMS.len(), "programs built");
+    }
 
-fn install(ctx) {
-    let root = tree(ctx);
-    if is_dir(root) { rm(root); }
-    mkdir(root);
-    let env = tools_env(ctx);
-    env.DESTDIR = root;
+    let env = tools_env();
+    env.DESTDIR = out;
     progress(0, 0, "installing into the tree (cmake --install)");
-    exec_checked("cmake", ["--install", work(ctx)], #{ env: env });
-    for file in installed_files(ctx) {
-        if !is_file(join_path(root, file[0])) { throw "installing wrote no /" + file[0]; }
-        target_mode(root, file[0], file[1]);
+    exec_checked("cmake", ["--install", dir], #{ env: env });
+    for file in installed_files() {
+        if !is_file(join_path(out, file[0])) { throw "installing wrote no /" + file[0]; }
+        target_mode(out, file[0], file[1]);
     }
-    ctx.outputs = #{ rootfs: root };
-    ctx
 }
 
-fn remove(ctx) {
-    if is_dir(tree(ctx)) { rm(tree(ctx)); }
-    ctx.outputs = #{};
-    ctx
+fn verify(out) {
+    for file in installed_files() {
+        if !is_file(join_path(out, file[0])) { throw "/" + file[0] + " is not installed"; }
+    }
 }

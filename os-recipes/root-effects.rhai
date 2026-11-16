@@ -1,3 +1,4 @@
+const RECIPE_API = 1;
 // The root effects recipe of LevitateOS and AcornOS. The base ships it as
 // /usr/lib/recipe/effects.rhai (installed-system.rhai, `root_effects`), and
 // Recipe runs it after every system change to a root, with that root as the
@@ -15,11 +16,13 @@
 // directory of links into the root, and only the files it generates are
 // kept. The `system` output holds those generated files and nothing else;
 // Recipe records it as the reserved package system-effects, replacing that
-// package's files at each run.
+// package's files at each run, and finishes it as a system tree.
 //
 // ldconfig is not among them: systemd's ldconfig.service makes
 // /etc/ld.so.cache at the first boot, and musl has no cache.
-const RECIPE_API = 3;
+//
+// The caches follow the root, which changed: they are made again at every
+// run (RERUN).
 const NEEDS = #{
     inputs: #{ root: "directory" },
     outputs: #{ system: "directory" },
@@ -27,15 +30,8 @@ const NEEDS = #{
     storage_max_objects: 262144,
     timeout_secs: 3600,
 };
-
-let ctx = #{
-    name: "root-effects",
-    version: "1",
-    description: "The whole-root caches of a LevitateOS or AcornOS root",
-    root: join_path(RUNTIME.paths.inputs, "root"),
-    system: join_path(RUNTIME.paths.output, "system"),
-    scratch: join_path(RUNTIME.paths.build, "scratch"),
-};
+const PACKAGE = #{ name: "root-effects", version: "1", description: "The whole-root caches of a LevitateOS or AcornOS root" };
+const RERUN = true;
 
 // The root's C library, by its dynamic loader: [loader, library directories,
 // the library directory the caches live under].
@@ -59,30 +55,33 @@ fn entries(dir) {
     names
 }
 
+// `job` is this run's #{ root, system, scratch }: the root input, the output
+// tree and the scratch folder under WORK.
+
 // The first of the root's programs `names` (under usr/bin) it has, or "".
-fn program(ctx, names) {
+fn program(job, names) {
     for name in names {
         let path = "usr/bin/" + name;
-        if is_file(join_path(ctx.root, path)) { return path; }
+        if is_file(join_path(job.root, path)) { return path; }
     }
     ""
 }
 
 // Runs the root's `program` (relative to the root) with `args` through the
 // root's loader and libraries, and returns what it prints.
-fn run(ctx, program, args) {
-    let libc = libc_of(ctx.root);
+fn run(job, program, args) {
+    let libc = libc_of(job.root);
     let path = "";
-    for dir in libc[1] { path += (if path == "" { "" } else { ":" }) + join_path(ctx.root, dir); }
+    for dir in libc[1] { path += (if path == "" { "" } else { ":" }) + join_path(job.root, dir); }
     log("  " + basename(program));
-    exec_output(join_path(ctx.root, libc[0]), ["--library-path", path, join_path(ctx.root, program)] + args)
+    exec_output(join_path(job.root, libc[0]), ["--library-path", path, join_path(job.root, program)] + args)
 }
 
 // A scratch directory `name` holding a link to every entry of the root's
 // directory `dir` (absolute): a tool that writes its cache beside its input
 // writes it here.
-fn farm(ctx, name, dir) {
-    let farm = join_path(ctx.scratch, name);
+fn farm(job, name, dir) {
+    let farm = join_path(job.scratch, name);
     if exists(farm) { rm(farm); }
     mkdir(farm);
     for entry in entries(dir) { ln_force(join_path(dir, entry), join_path(farm, entry)); }
@@ -90,72 +89,72 @@ fn farm(ctx, name, dir) {
 }
 
 // `from` (a generated file) at `path` in the output tree.
-fn keep(ctx, from, path) {
+fn keep(job, from, path) {
     if !is_file(from) { throw "the cache tool made no " + basename(from); }
-    let dest = join_path(ctx.system, path);
+    let dest = join_path(job.system, path);
     mkdir(dirname(dest));
     if exists(dest) { rm(dest); }
     copy_file(from, dest);
-    target_mode(ctx.system, path, 0o644);
+    target_mode(job.system, path, 0o644);
 }
 
 // `text` at `path` in the output tree.
-fn keep_text(ctx, path, text) {
-    let dest = join_path(ctx.system, path);
+fn keep_text(job, path, text) {
+    let dest = join_path(job.system, path);
     mkdir(dirname(dest));
     if exists(dest) { rm(dest); }
     write_file(dest, text);
-    target_mode(ctx.system, path, 0o644);
+    target_mode(job.system, path, 0o644);
 }
 
-fn gsettings_schemas(ctx) {
+fn gsettings_schemas(job) {
     let schemas = "usr/share/glib-2.0/schemas";
-    let tool = program(ctx, ["glib-compile-schemas"]);
-    if tool == "" || !is_dir(join_path(ctx.root, schemas)) { return; }
-    let out = join_path(ctx.scratch, "schemas");
+    let tool = program(job, ["glib-compile-schemas"]);
+    if tool == "" || !is_dir(join_path(job.root, schemas)) { return; }
+    let out = join_path(job.scratch, "schemas");
     mkdir(out);
-    run(ctx, tool, ["--targetdir=" + out, join_path(ctx.root, schemas)]);
-    keep(ctx, join_path(out, "gschemas.compiled"), schemas + "/gschemas.compiled");
+    run(job, tool, ["--targetdir=" + out, join_path(job.root, schemas)]);
+    keep(job, join_path(out, "gschemas.compiled"), schemas + "/gschemas.compiled");
 }
 
-fn gio_modules(ctx, lib) {
+fn gio_modules(job, lib) {
     let modules = lib + "/gio/modules";
-    let tool = program(ctx, ["gio-querymodules-64", "gio-querymodules"]);
-    if tool == "" || !is_dir(join_path(ctx.root, modules)) { return; }
-    let farm = farm(ctx, "gio-modules", join_path(ctx.root, modules));
-    run(ctx, tool, [farm]);
-    keep(ctx, join_path(farm, "giomodule.cache"), modules + "/giomodule.cache");
+    let tool = program(job, ["gio-querymodules-64", "gio-querymodules"]);
+    if tool == "" || !is_dir(join_path(job.root, modules)) { return; }
+    let farm = farm(job, "gio-modules", join_path(job.root, modules));
+    run(job, tool, [farm]);
+    keep(job, join_path(farm, "giomodule.cache"), modules + "/giomodule.cache");
 }
 
 // A program that prints its cache from the modules it is given, which it
 // names by their paths: written without the root's prefix.
-fn module_cache(ctx, names, modules, cache) {
-    let tool = program(ctx, names);
+fn module_cache(job, names, modules, cache) {
+    let tool = program(job, names);
     if tool == "" { return; }
     let files = [];
-    for entry in entries(join_path(ctx.root, modules)) {
-        if entry.ends_with(".so") { files.push(join_path(join_path(ctx.root, modules), entry)); }
+    for entry in entries(join_path(job.root, modules)) {
+        if entry.ends_with(".so") { files.push(join_path(join_path(job.root, modules), entry)); }
     }
     if files.is_empty() { return; }
-    let text = run(ctx, tool, files);
-    keep_text(ctx, cache, replace(text, ctx.root, ""));
+    let text = run(job, tool, files);
+    keep_text(job, cache, replace(text, job.root, ""));
 }
 
-fn mime_database(ctx) {
+fn mime_database(job) {
     let mime = "usr/share/mime";
-    let tool = program(ctx, ["update-mime-database"]);
-    if tool == "" || !is_dir(join_path(ctx.root, mime + "/packages")) { return; }
-    let work = join_path(ctx.scratch, "mime");
+    let tool = program(job, ["update-mime-database"]);
+    if tool == "" || !is_dir(join_path(job.root, mime + "/packages")) { return; }
+    let work = join_path(job.scratch, "mime");
     if exists(work) { rm(work); }
     mkdir(work);
-    ln_force(join_path(ctx.root, mime + "/packages"), join_path(work, "packages"));
-    run(ctx, tool, [work]);
+    ln_force(join_path(job.root, mime + "/packages"), join_path(work, "packages"));
+    run(job, tool, [work]);
     // Everything it wrote: the caches and the per-type files, not the
     // packages' own sources.
     for entry in entries(work) {
         if entry == "packages" { continue; }
         let from = join_path(work, entry);
-        let dest = join_path(ctx.system, mime + "/" + entry);
+        let dest = join_path(job.system, mime + "/" + entry);
         mkdir(dirname(dest));
         if exists(dest) { rm(dest); }
         shell("cp -R '" + from + "' '" + dest + "'");
@@ -170,107 +169,74 @@ fn mime_database(ctx) {
 // kept and each user's own cache is made on first use. Also the X server's
 // core font indexes (fonts.scale and fonts.dir, as mkfontdir writes them)
 // for each folder of bitmap fonts.
-fn fonts(ctx) {
-    let fonts = join_path(ctx.root, "usr/share/fonts");
+fn fonts(job) {
+    let fonts = join_path(job.root, "usr/share/fonts");
     if !is_dir(fonts) { return; }
-    let tool = program(ctx, ["fc-cache-64", "fc-cache"]);
+    let tool = program(job, ["fc-cache-64", "fc-cache"]);
     if tool != "" {
-        let sysroot = join_path(ctx.scratch, "fontconfig-root");
+        let sysroot = join_path(job.scratch, "fontconfig-root");
         if exists(sysroot) { rm(sysroot); }
         for dir in ["etc", "usr/share", "usr/lib/fontconfig/cache", "var/cache/fontconfig"] { mkdir(join_path(sysroot, dir)); }
         for link in ["etc/fonts", "usr/share/fonts", "usr/share/fontconfig"] {
-            if exists(join_path(ctx.root, link)) { ln_force(join_path(ctx.root, link), join_path(sysroot, link)); }
+            if exists(join_path(job.root, link)) { ln_force(join_path(job.root, link), join_path(sysroot, link)); }
         }
-        run(ctx, tool, ["--sysroot=" + sysroot, "--system-only"]);
+        run(job, tool, ["--sysroot=" + sysroot, "--system-only"]);
         let caches = join_path(sysroot, "usr/lib/fontconfig/cache");
         for entry in entries(caches) {
-            keep(ctx, join_path(caches, entry), "usr/lib/fontconfig/cache/" + entry);
+            keep(job, join_path(caches, entry), "usr/lib/fontconfig/cache/" + entry);
         }
     }
-    let index = program(ctx, ["mkfontscale"]);
+    let index = program(job, ["mkfontscale"]);
     if index == "" { return; }
     for dir in entries(fonts) {
         let path = join_path(fonts, dir);
         if dir == "encodings" || !entries(path).some(|name| name.ends_with(".pcf.gz")) { continue; }
-        let out = join_path(ctx.scratch, "fonts/" + dir);
+        let out = join_path(job.scratch, "fonts/" + dir);
         if exists(out) { rm(out); }
         mkdir(out);
-        run(ctx, index, ["-o", join_path(out, "fonts.scale"), path]);
-        run(ctx, index, ["-b", "-s", "-l", "-o", join_path(out, "fonts.dir"), path]);
-        keep(ctx, join_path(out, "fonts.scale"), "usr/share/fonts/" + dir + "/fonts.scale");
-        keep(ctx, join_path(out, "fonts.dir"), "usr/share/fonts/" + dir + "/fonts.dir");
+        run(job, index, ["-o", join_path(out, "fonts.scale"), path]);
+        run(job, index, ["-b", "-s", "-l", "-o", join_path(out, "fonts.dir"), path]);
+        keep(job, join_path(out, "fonts.scale"), "usr/share/fonts/" + dir + "/fonts.scale");
+        keep(job, join_path(out, "fonts.dir"), "usr/share/fonts/" + dir + "/fonts.dir");
     }
 }
 
-fn icon_caches(ctx) {
-    let icons = join_path(ctx.root, "usr/share/icons");
-    let tool = program(ctx, ["gtk-update-icon-cache"]);
+fn icon_caches(job) {
+    let icons = join_path(job.root, "usr/share/icons");
+    let tool = program(job, ["gtk-update-icon-cache"]);
     if tool == "" { return; }
     for theme in entries(icons) {
         let dir = join_path(icons, theme);
         if !is_file(join_path(dir, "index.theme")) { continue; }
-        let farm = farm(ctx, "icons-" + theme, dir);
-        run(ctx, tool, ["-q", "-t", "-f", farm]);
-        keep(ctx, join_path(farm, "icon-theme.cache"), "usr/share/icons/" + theme + "/icon-theme.cache");
+        let farm = farm(job, "icons-" + theme, dir);
+        run(job, tool, ["-q", "-t", "-f", farm]);
+        keep(job, join_path(farm, "icon-theme.cache"), "usr/share/icons/" + theme + "/icon-theme.cache");
     }
 }
 
-fn desktop_database(ctx) {
+fn desktop_database(job) {
     let applications = "usr/share/applications";
-    let tool = program(ctx, ["update-desktop-database"]);
-    if tool == "" || !is_dir(join_path(ctx.root, applications)) { return; }
-    let farm = farm(ctx, "applications", join_path(ctx.root, applications));
-    run(ctx, tool, ["-q", farm]);
-    keep(ctx, join_path(farm, "mimeinfo.cache"), applications + "/mimeinfo.cache");
+    let tool = program(job, ["update-desktop-database"]);
+    if tool == "" || !is_dir(join_path(job.root, applications)) { return; }
+    let farm = farm(job, "applications", join_path(job.root, applications));
+    run(job, tool, ["-q", farm]);
+    keep(job, join_path(farm, "mimeinfo.cache"), applications + "/mimeinfo.cache");
 }
 
-fn is_acquired(ctx) {
-    if !is_dir(ctx.root) { return needs_work(ctx, "the root input is missing"); }
-    ready(ctx)
-}
-
-fn acquire(ctx) {
-    if !is_dir(ctx.root) { throw "the root input is missing"; }
-    ctx
-}
-
-// The caches follow the root, which changed: they are made again at every run.
-fn is_built(ctx) { needs_work(ctx, "rebuild the root's caches") }
-
-fn build(ctx) {
-    let lib = libc_of(ctx.root)[2];
-    for dir in [ctx.system, ctx.scratch] { if exists(dir) { rm(dir); } }
-    mkdir(ctx.system);
-    mkdir(ctx.scratch);
+fn build(src, out) {
+    let job = #{ root: INPUTS.root, system: out, scratch: join_path(WORK, "scratch") };
+    let lib = libc_of(job.root)[2];
+    if exists(job.scratch) { rm(job.scratch); }
+    mkdir(job.scratch);
     log("Rebuilding the root's caches...");
-    gsettings_schemas(ctx);
-    gio_modules(ctx, lib);
-    module_cache(ctx, ["gdk-pixbuf-query-loaders-64", "gdk-pixbuf-query-loaders"],
+    gsettings_schemas(job);
+    gio_modules(job, lib);
+    module_cache(job, ["gdk-pixbuf-query-loaders-64", "gdk-pixbuf-query-loaders"],
         lib + "/gdk-pixbuf-2.0/2.10.0/loaders", lib + "/gdk-pixbuf-2.0/2.10.0/loaders.cache");
-    module_cache(ctx, ["gtk-query-immodules-3.0-64", "gtk-query-immodules-3.0"],
+    module_cache(job, ["gtk-query-immodules-3.0-64", "gtk-query-immodules-3.0"],
         lib + "/gtk-3.0/3.0.0/immodules", lib + "/gtk-3.0/3.0.0/immodules.cache");
-    mime_database(ctx);
-    fonts(ctx);
-    icon_caches(ctx);
-    desktop_database(ctx);
-    rm(ctx.scratch);
-    target_finalize(ctx.system);
-    ctx
-}
-
-fn is_installed(ctx) {
-    if !is_dir(ctx.system) { return needs_work(ctx, "the caches are not made"); }
-    ctx.outputs.system = ctx.system;
-    ready(ctx)
-}
-
-fn install(ctx) {
-    ctx.outputs.system = ctx.system;
-    ctx
-}
-
-fn remove(ctx) {
-    if exists(ctx.system) { rm(ctx.system); }
-    ctx.outputs = #{};
-    ctx
+    mime_database(job);
+    fonts(job);
+    icon_caches(job);
+    desktop_database(job);
 }

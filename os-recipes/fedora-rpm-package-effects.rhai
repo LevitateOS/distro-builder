@@ -1,28 +1,25 @@
 //! extends: package-effects.rhai
+const RECIPE_API = 1;
 // The RPM backend of the package-effects step: the composed tree of the
 // base lock's Fedora RPMs, whose install scripts never ran, so
 // `package_effects` does what they would have done, from the packages' own
 // data where they ship it. The system recipe (`fedora-rpm-source-rootfs.rhai`)
 // configures the tree this publishes.
-const RECIPE_API = 2;
 const NEEDS = #{ inputs: #{ composed: "directory" }, outputs: #{ tree: "file" }, memory_mib: 8192, storage_max_objects: 262144, timeout_secs: 14400 };
+const PACKAGE = #{ name: "fedora-rpm-package-effects", description: "The locked Fedora 45 RPM set with its packages' effects" };
 import "sources/levitate-rpm-lock.rhai" as lock;
 import "system-files.rhai" as system;
-let ctx = #{
-    name: "fedora-rpm-package-effects",
-    description: "The locked Fedora " + lock::release() + " RPM set with its packages' effects",
-};
 
-fn verify_inputs(ctx) {
-    verify_composed(ctx, lock::packages());
+fn verify_inputs() {
+    verify_composed(lock::packages());
 }
 
-fn unpack(ctx, root) {
+fn unpack(root) {
     log("Copying the composed Fedora " + lock::release() + " RPM set into the tree...");
-    copy_composed(ctx, root);
+    copy_composed(root);
 }
 
-fn package_effects(ctx, root) {
+fn package_effects(root) {
     progress(0, 0, "package effects");
     // `filesystem` lists /usr/sbin as a ghost that its script makes a link to
     // bin; the merged-/usr links at the root are in its payload.
@@ -108,7 +105,7 @@ fn ca_trust(root) {
     }
     // A scratch directory the unprivileged uid can write, and the user
     // module config that points p11-kit at the tree.
-    let work = join_path(dirname(root), "ca-trust.work");
+    let work = join_path(WORK, "ca-trust.work");
     if exists(work) { rm(work); }
     mkdir(work);
     chmod(work, 0o777);

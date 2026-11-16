@@ -1,4 +1,5 @@
 //! extends: package-effects.rhai
+const RECIPE_API = 1;
 // The APK backend of the package-effects step. The composed input is the
 // base tree (`alpine-apk-base-tree.rhai`: the base lock's APKs installed by
 // the locked apk.static, without their scripts, and captured). The packages'
@@ -7,39 +8,35 @@
 // this publishes. The desktop lock (what the group recipes in recipes/ pin
 // beyond the base) is read only for the commands it ships, which BusyBox
 // leaves to them.
-const RECIPE_API = 2;
 const NEEDS = #{ inputs: #{ composed: "directory", apks: "directory" }, outputs: #{ tree: "file" }, memory_mib: 8192, storage_max_objects: 262144, timeout_secs: 14400 };
+const PACKAGE = #{ name: "alpine-apk-package-effects", description: "The locked Alpine v3.24 APK set with its packages' effects" };
 import "sources/acorn-apk-lock.rhai" as lock;
 import "sources/acorn-apk-desktop-lock.rhai" as desktop_lock;
 import "system-files.rhai" as system;
-let ctx = #{
-    name: "alpine-apk-package-effects",
-    description: "The locked Alpine " + lock::release() + " APK set with its packages' effects",
-    apk_tools: lock::apk_tools(),
-};
 
-fn apk_file(ctx, row) { join_path(join_path(ctx.runtime.paths.inputs, "apks"), basename(row[2])) }
+fn apk_file(row) { join_path(INPUTS.apks, basename(row[2])) }
 
-fn verify_inputs(ctx) {
-    let files = [[apk_file(ctx, ctx.apk_tools), ctx.apk_tools]];
-    for row in lock::packages() { files.push([apk_file(ctx, row), row]); }
+fn verify_inputs() {
+    let apk_tools = lock::apk_tools();
+    let files = [[apk_file(apk_tools), apk_tools]];
+    for row in lock::packages() { files.push([apk_file(row), row]); }
     for entry in files {
         let file = entry[0];
         if !is_file(file) { throw "the apk inputs lack " + basename(file) + "; run the rootfs source preseed"; }
         verify_sha256(file, entry[1][3]);
     }
     // The composed input is the base tree: the base lock alone.
-    verify_composed(ctx, lock::packages());
+    verify_composed(lock::packages());
 }
 
-fn unpack(ctx, root) {
-    copy_composed(ctx, root);
+fn unpack(root) {
+    copy_composed(root);
 }
 
-fn package_effects(ctx, root) {
+fn package_effects(root) {
     progress(0, 0, "package effects: busybox applets");
     busybox_applets(root, desktop_lock::commands());
-    script_accounts(ctx, root);
+    script_accounts(root);
 }
 
 // ---------------------------------------------------------------------------
@@ -52,10 +49,10 @@ fn package_effects(ctx, root) {
 // silently.
 // ---------------------------------------------------------------------------
 
-fn script_accounts(ctx, root) {
+fn script_accounts(root) {
     let archive = join_path(root, "lib/apk/db/scripts.tar.gz");
     if !is_file(archive) { throw "apk left no scripts archive at /lib/apk/db/scripts.tar.gz"; }
-    let dir = join_path(ctx.runtime.paths.build, "apk-scripts");
+    let dir = join_path(WORK, "apk-scripts");
     if is_dir(dir) { rm(dir); }
     mkdir(dir);
     extract_with_format(archive, dir, "tar.gz");

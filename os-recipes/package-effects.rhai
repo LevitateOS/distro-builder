@@ -1,12 +1,14 @@
-// The package-effects step: the lifecycle both package backends share for
-// the first half of making a system tree. A backend recipe starts with
-// `//! extends: package-effects.rhai` and supplies three hooks:
+const RECIPE_API = 1;
+// The package-effects step: the build both package backends share for the
+// first half of making a system tree. A backend recipe starts with
+// `//! extends: package-effects.rhai`, declares its NEEDS (with the `tree`
+// output, a file) and supplies three functions:
 //
-//   verify_inputs(ctx)          check its inputs against the locks it imports
-//   unpack(ctx, root)           put the locked packages' files into `root`:
-//                               the composed tree (`copy_composed`), plus
-//                               whatever the backend layers on it
-//   package_effects(ctx, root)  do what the packages' scripts would have done
+//   verify_inputs()          check its inputs against the locks it imports
+//   unpack(root)             put the locked packages' files into `root`:
+//                            the composed tree (`copy_composed`), plus
+//                            whatever the backend layers on it
+//   package_effects(root)    do what the packages' scripts would have done
 //
 // Inputs every backend takes: `composed`, the tree the builder composed from
 // the locked packages (`tree.tar`, the tree with its target metadata manifest,
@@ -20,24 +22,17 @@
 // step), which the system recipe (`rootfs-producer.rhai`) copies and
 // configures. This step imports neither the installed-system policy nor
 // any configuration input, so a configuration change never reruns it.
-const RECIPE_API = 2;
 const NEEDS = #{};
 import "system-files.rhai" as files;
 
-fn root_of(ctx) { join_path(ctx.runtime.paths.output, "tree") }
-fn archive_of(ctx) { join_path(ctx.runtime.paths.output, "tree.tar") }
-fn stamp_of(ctx) { join_path(ctx.runtime.paths.output, "tree.built") }
-
-fn composed_file(ctx, name) {
-    join_path(join_path(ctx.runtime.paths.inputs, "composed"), name)
-}
+fn composed_file(name) { join_path(INPUTS.composed, name) }
 
 // Refuses a composed tree that is not made of exactly the lock rows `rows`
 // ([name, id, URL, SHA256]), in that order.
-fn verify_composed(ctx, rows) {
-    if !is_file(composed_file(ctx, "tree.tar")) { throw "the composed input lacks tree.tar"; }
+fn verify_composed(rows) {
+    if !is_file(composed_file("tree.tar")) { throw "the composed input lacks tree.tar"; }
     let lines = [];
-    for line in read_file(composed_file(ctx, "packages.txt")).split("\n") {
+    for line in read_file(composed_file("packages.txt")).split("\n") {
         let line = trim(line);
         if line != "" { lines.push(line); }
     }
@@ -54,36 +49,21 @@ fn verify_composed(ctx, rows) {
 
 // The composed tree, its files, links, staging modes and target metadata
 // manifest, into the empty `root`.
-fn copy_composed(ctx, root) {
+fn copy_composed(root) {
     progress(0, 0, "copying the composed tree");
-    target_unpack_tree(composed_file(ctx, "tree.tar"), root);
+    target_unpack_tree(composed_file("tree.tar"), root);
 }
 
-fn is_acquired(ctx) {
-    verify_inputs(ctx);
-    ready(ctx)
-}
-
-fn acquire(ctx) {
-    verify_inputs(ctx);
-    ctx
-}
-
-fn is_built(ctx) {
-    if !is_file(stamp_of(ctx)) { return needs_work(ctx, "the package tree is not built"); }
-    if !is_file(archive_of(ctx)) { return needs_work(ctx, "the package tree is not archived"); }
-    ready(ctx)
-}
-
-fn build(ctx) {
-    let root = root_of(ctx);
-    for file in [stamp_of(ctx), archive_of(ctx)] { if is_file(file) { rm(file); } }
+fn build(src, out) {
+    verify_inputs();
+    // The tree is build material; only its archive is the output.
+    let root = join_path(WORK, "tree");
     if is_dir(root) { rm(root); }
     mkdir(root);
     progress(0, 0, "unpacking packages");
-    unpack(ctx, root);
+    unpack(root);
     progress(0, 0, "package effects");
-    package_effects(ctx, root);
+    package_effects(root);
     progress(0, 0, "finalizing the tree");
     // Resolve the packages' file owners against their accounts and make the
     // staging tree writable before cleanup; package modes stay in metadata.
@@ -99,34 +79,5 @@ fn build(ctx) {
     progress(0, 0, "archiving the tree");
     // The archive takes the tree's place (target_pack_tree removes it), so
     // only the archive is published and the domain never holds two trees.
-    target_pack_tree(root, archive_of(ctx));
-    write_file(stamp_of(ctx), "built\n");
-    ctx
-}
-
-fn with_outputs(ctx) { ctx.outputs = #{ tree: archive_of(ctx) }; ctx }
-
-fn is_installed(ctx) {
-    let status = is_built(ctx);
-    if status.status != "ready" { return status; }
-    ready(with_outputs(status.ctx))
-}
-
-fn install(ctx) {
-    let status = is_built(ctx);
-    if status.status != "ready" { throw status.reason; }
-    with_outputs(status.ctx)
-}
-
-fn cleanup(ctx, reason) {
-    if reason == "manual" && is_file(stamp_of(ctx)) { rm(stamp_of(ctx)); }
-    ctx
-}
-
-fn remove(ctx) {
-    let root = root_of(ctx);
-    if is_dir(root) { rm(root); }
-    for file in [stamp_of(ctx), archive_of(ctx)] { if is_file(file) { rm(file); } }
-    ctx.outputs = #{};
-    ctx
+    target_pack_tree(root, out);
 }

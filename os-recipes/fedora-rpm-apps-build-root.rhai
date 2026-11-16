@@ -1,3 +1,4 @@
+const RECIPE_API = 1;
 // The root the desktop apps (tools/gui/) and the login screen (reclogin.rhai)
 // are compiled in on a Fedora variant: the base lock's RPMs and the apps-build
 // lock's, without firmware and without
@@ -8,43 +9,35 @@
 // so the apps are compiled by the distro's own compiler against the distro's
 // own C++ runtime and Qt, the ones the desktop system ships. The tree is
 // never part of an image.
-const RECIPE_API = 2;
 const NEEDS = #{ inputs: #{ composed: "directory" }, outputs: #{ root: "directory" }, memory_mib: 8192, storage_max_objects: 262144, timeout_secs: 7200 };
+const PACKAGE = #{ name: "fedora-rpm-apps-build-root", description: "The Fedora 45 root the desktop apps are compiled in" };
 import "sources/levitate-rpm-lock.rhai" as lock;
 import "sources/levitate-rpm-apps-build-lock.rhai" as build_lock;
-let ctx = #{
-    name: "fedora-rpm-apps-build-root",
-    description: "The Fedora " + lock::release() + " root the desktop apps are compiled in",
-    // [input, lock rows]
-    sets: [["rpms", lock::packages()], ["apps_build_rpms", build_lock::packages()]],
-};
-
-fn root_of(ctx) { join_path(ctx.runtime.paths.output, "root") }
-fn stamp_of(ctx) { join_path(ctx.runtime.paths.output, "root.built") }
 
 // A compiler needs no firmware; it is most of the base lock's bytes, and the
 // root is copied for every run in it. The builder composes only these
 // packages (`apps_build_wanted` in src/compose.rs); verify_inputs checks it.
 fn wanted(name) { !name.contains("firmware") && !name.contains("microcode") }
 
-// The lock rows the root is made of, in order.
-fn root_rows(ctx) {
+// The lock rows the root is made of, in order: the base lock's, then the
+// apps-build lock's.
+fn root_rows() {
     let rows = [];
-    for set in ctx.sets { for rpm in set[1] { if wanted(rpm[0]) { rows.push(rpm); } } }
+    for rpms in [lock::packages(), build_lock::packages()] { for rpm in rpms { if wanted(rpm[0]) { rows.push(rpm); } } }
     rows
 }
 
-fn composed_file(ctx, name) { join_path(join_path(ctx.runtime.paths.inputs, "composed"), name) }
+fn composed_file(name) { join_path(INPUTS.composed, name) }
 
 // Refuses a composed tree that is not made of exactly these packages, in this order.
-fn verify_inputs(ctx) {
-    if !is_file(composed_file(ctx, "tree.tar")) { throw "the composed input lacks tree.tar"; }
+fn verify_inputs() {
+    if !is_file(composed_file("tree.tar")) { throw "the composed input lacks tree.tar"; }
     let lines = [];
-    for line in read_file(composed_file(ctx, "packages.txt")).split("\n") {
+    for line in read_file(composed_file("packages.txt")).split("\n") {
         let line = trim(line);
         if line != "" { lines.push(line); }
     }
-    let expected = root_rows(ctx);
+    let expected = root_rows();
     if lines.len() != expected.len() {
         throw "the composed root is made of " + lines.len() + " packages, the locks name " + expected.len();
     }
@@ -68,46 +61,20 @@ fn missing(root) {
     ""
 }
 
-fn is_acquired(ctx) { verify_inputs(ctx); ready(ctx) }
-fn acquire(ctx) { verify_inputs(ctx); ctx }
-
-fn is_built(ctx) {
-    if !is_file(stamp_of(ctx)) { return needs_work(ctx, "the root is not unpacked"); }
-    let gap = missing(root_of(ctx));
-    if gap != "" { return needs_work(ctx, "the root lacks " + gap); }
-    ready(ctx)
-}
-
-fn build(ctx) {
-    let root = root_of(ctx);
-    if exists(stamp_of(ctx)) { rm(stamp_of(ctx)); }
-    if is_dir(root) { rm(root); }
-    mkdir(root);
+fn build(src, out) {
+    verify_inputs();
     log("Copying the composed Fedora " + lock::release() + " compiler root...");
     progress(0, 0, "copying the composed root");
-    target_unpack_tree(composed_file(ctx, "tree.tar"), root);
+    target_unpack_tree(composed_file("tree.tar"), out);
     // binutils' install script chooses the linker through `alternatives`;
     // no script ran, so name the default one here.
-    if !exists(join_path(root, "usr/bin/ld")) {
-        if !is_file(join_path(root, "usr/bin/ld.bfd")) { throw "the root has no linker (/usr/bin/ld.bfd)"; }
-        ln_force("ld.bfd", join_path(root, "usr/bin/ld"));
+    if !exists(join_path(out, "usr/bin/ld")) {
+        if !is_file(join_path(out, "usr/bin/ld.bfd")) { throw "the root has no linker (/usr/bin/ld.bfd)"; }
+        ln_force("ld.bfd", join_path(out, "usr/bin/ld"));
     }
-    let gap = missing(root);
+}
+
+fn verify(out) {
+    let gap = missing(out);
     if gap != "" { throw "the unpacked root lacks " + gap + ": add the package that has it to desktop.apps_build_packages and lock again"; }
-    write_file(stamp_of(ctx), lock::locked_on() + " " + build_lock::locked_on() + "\n");
-    ctx
-}
-
-fn with_outputs(ctx) { ctx.outputs = #{ root: root_of(ctx) }; ctx }
-fn is_installed(ctx) {
-    if !is_file(stamp_of(ctx)) { return needs_work(ctx, "the root is not unpacked"); }
-    ready(with_outputs(ctx))
-}
-fn install(ctx) { with_outputs(ctx) }
-
-fn remove(ctx) {
-    if exists(stamp_of(ctx)) { rm(stamp_of(ctx)); }
-    if is_dir(root_of(ctx)) { rm(root_of(ctx)); }
-    ctx.outputs = #{};
-    ctx
 }

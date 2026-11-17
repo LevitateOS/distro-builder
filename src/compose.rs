@@ -141,20 +141,21 @@ pub(crate) fn package_files(repo: &Path, rows: &[LockRow], preseed_dirs: &[PathB
         .collect()
 }
 
-/// What the unpack recipe's results depend on besides the package: its
-/// sources (the recipe and its imports, by content), as one line.
+/// What the unpack recipe's results depend on besides the package: every
+/// file it is compiled from (the recipe, its pins, its base and the modules
+/// they import), by content, as one line. A module edit must make a new key,
+/// so this is `Declaration::content`, not `source_digests` (which leaves the
+/// imported modules out).
 pub(crate) fn recipe_identity(repo: &Path, recipe: &Path) -> Result<String> {
     let os_recipes = repo.join("distro/builder/os-recipes");
     let declaration = levitate_recipe::needs::declaration(recipe, Some(&os_recipes))
         .with_context(|| format!("reading the declaration of '{}'", recipe.display()))?;
-    let base = os_recipes.canonicalize().unwrap_or(os_recipes);
-    Ok(declaration
-        .source_digests
+    let content = declaration
+        .content()
+        .with_context(|| format!("hashing the sources of '{}'", recipe.display()))?;
+    Ok(content
         .iter()
-        .map(|(path, digest)| {
-            let name = path.strip_prefix(&base).unwrap_or(path);
-            format!("{}={digest}", name.display())
-        })
+        .map(|(name, digest)| format!("{name}={digest}"))
         .collect::<Vec<_>>()
         .join(";"))
 }

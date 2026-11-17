@@ -126,7 +126,11 @@ fn gio_modules(job, lib) {
     if tool == "" || !is_dir(join_path(job.root, modules)) { return; }
     let farm = farm(job, "gio-modules", join_path(job.root, modules));
     run(job, tool, [farm]);
-    keep(job, join_path(farm, "giomodule.cache"), modules + "/giomodule.cache");
+    // With no module that registers anything, gio-querymodules writes no
+    // cache (and removes an old one): nothing to keep.
+    let cache = join_path(farm, "giomodule.cache");
+    if !is_file(cache) { return; }
+    keep(job, cache, modules + "/giomodule.cache");
 }
 
 // A program that prints its cache from the modules it is given, which it

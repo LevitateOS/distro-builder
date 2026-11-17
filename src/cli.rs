@@ -50,6 +50,15 @@ pub enum Command {
         name: String,
         distro: Option<String>,
     },
+    /// Take a tool package the way an image build does and print its key, its cache
+    /// directory and one line saying where it came from: the local cache, a download of
+    /// `tools-<key16>`, or a compile (`PrebuiltBuild` always compiles). Like every
+    /// Recipe invocation it runs where Build does.
+    PrebuiltGet {
+        family: String,
+        name: String,
+        distro: Option<String>,
+    },
     /// Print every prebuilt part the builder knows, one `<family> <name> [--distro <id>]`
     /// per line.
     PrebuiltList,
@@ -97,6 +106,7 @@ pub fn usage() -> String {
          prebuilt key <tools|tui|desktop-apps|display-server|login-screen> <name> [--distro <id>]    print the key of a prebuilt (a tool package; install-tui, which needs --distro; or desktop-apps/display-server/login-screen <distro>)\n  \
          prebuilt list                                      print every prebuilt part (<family> <name> [--distro <id>]), one per line\n  \
          prebuilt build <tools|tui|desktop-apps|display-server|login-screen> <name> [--distro <id>]  compile that part into the local cache (no download, no ISO; needs root) and print its key and cache directory\n  \
+         prebuilt get tools <name>                          take a tool package like an image build does (local cache, else download of tools-<key16>, else compile) and print its key, cache directory and where it came from\n  \
          prebuilt publish <tools|tui|desktop-apps|display-server|login-screen> <name> [--distro <id>]  upload the local cache entry of that key to the prebuilt repository's release with gh\n  \
          prebuilt publish-runtime                           compress the Recipe runtime image and upload it to the release recipe-runtime-<digest16> with gh",
         releases = ProductId::list(ProductId::iso_products()),
@@ -138,6 +148,11 @@ impl Command {
                 name,
                 distro,
             }
+            | Self::PrebuiltGet {
+                family,
+                name,
+                distro,
+            }
             | Self::PrebuiltPublish {
                 family,
                 name,
@@ -146,6 +161,7 @@ impl Command {
                 let verb = match self {
                     Self::PrebuiltKey { .. } => "key",
                     Self::PrebuiltBuild { .. } => "build",
+                    Self::PrebuiltGet { .. } => "get",
                     _ => "publish",
                 };
                 push(&[&"prebuilt", &verb, family, name]);
@@ -237,7 +253,7 @@ pub fn parse(args: &[String]) -> Result<(PathBuf, Command), Usage> {
         }
         ["prebuilt", "list"] => Command::PrebuiltList,
         ["prebuilt", "publish-runtime"] => Command::PrebuiltPublishRuntime,
-        ["prebuilt", verb @ ("key" | "build" | "publish"), family, name, flags @ ..] => {
+        ["prebuilt", verb @ ("key" | "build" | "get" | "publish"), family, name, flags @ ..] => {
             if crate::prebuilt::Family::parse(family).is_none() {
                 return usage(format!(
                     "unsupported prebuilt family '{family}'; expected one of: {}",
@@ -262,6 +278,7 @@ pub fn parse(args: &[String]) -> Result<(PathBuf, Command), Usage> {
             match *verb {
                 "key" => Command::PrebuiltKey { family, name, distro: selected },
                 "build" => Command::PrebuiltBuild { family, name, distro: selected },
+                "get" => Command::PrebuiltGet { family, name, distro: selected },
                 _ => Command::PrebuiltPublish { family, name, distro: selected },
             }
         }

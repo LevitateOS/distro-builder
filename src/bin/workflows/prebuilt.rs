@@ -48,3 +48,16 @@ pub(crate) fn build_cmd(repo: &Path, family_name: &str, name: &str, distro: Opti
     println!("{}", dir.display());
     Ok(())
 }
+
+/// `prebuilt get`: the local cache, else a download, else a compile; prints the key, the
+/// cache directory, then one line saying which.
+pub(crate) fn get_cmd(repo: &Path, family_name: &str, name: &str, distro: Option<&str>) -> Result<()> {
+    prebuilt::warn_ambient_compiler_image(repo);
+    anyhow::ensure!(distro.is_none(), "prebuilt get takes no --distro: a tool package does not depend on one");
+    let family = family(family_name)?;
+    let (key, dir, origin) = prebuilt::get(repo, family, name)?;
+    println!("{}", key.hex);
+    println!("{}", dir.display());
+    println!("{}", origin.describe(family, &key));
+    Ok(())
+}

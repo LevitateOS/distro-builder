@@ -337,6 +337,10 @@ program says which: `[prebuilt] recab: local|downloaded|compiled <key16>`.
   image, Recipe's declared versions, the distro and its libc. `prebuilt build login-screen <distro>`
   (elevated) fills the cache; no image carries the tree: the `login-screen` group recipe
   (`recipes/login-screen.rhai`) pins its published release.
+- `distro-builder prebuilt get tools <package>` (also `cargo xtask prebuilt get`) takes a tool package the way an
+  image build does and prints its key, the cache directory and one line saying where it came from: `from the local
+  cache`, `downloaded tools-<key16>` or `compiled here`. `prebuilt build` always compiles; `get` compiles only when
+  the cache and the release both miss (`cargo xtask release recipe` uses it for the Recipe program).
 - `distro-builder prebuilt publish <tools|tui|desktop-apps|display-server|login-screen> <name> [--distro <id>]` (also `cargo xtask
   prebuilt publish ...`, run as the user) uploads the cache entry of the current key with
   `gh`: it creates the release if missing, never replaces an asset with different bytes, and

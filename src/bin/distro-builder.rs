@@ -108,6 +108,9 @@ fn run(repo: &Path, command: Command) -> Result<()> {
         Command::PrebuiltBuild { family, name, distro } => {
             prebuilt::build_cmd(repo, &family, &name, distro.as_deref())
         }
+        Command::PrebuiltGet { family, name, distro } => {
+            prebuilt::get_cmd(repo, &family, &name, distro.as_deref())
+        }
         Command::PrebuiltPublish { family, name, distro } => {
             prebuilt::publish_cmd(repo, &family, &name, distro.as_deref())
         }

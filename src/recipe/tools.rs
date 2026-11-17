@@ -818,6 +818,12 @@ fn collect_local_dependencies(
 /// the prebuilt cache or a download when one matches this exact source (`crate::prebuilt`),
 /// and are compiled only otherwise.
 pub(crate) fn compile_crate(repo: &Path, package: &str) -> Result<PathBuf> {
+    Ok(compile_crate_with_origin(repo, package)?.0)
+}
+
+/// [`compile_crate`], also saying whether the programs came from the local cache, a
+/// download or this compile.
+pub(crate) fn compile_crate_with_origin(repo: &Path, package: &str) -> Result<(PathBuf, crate::prebuilt::Origin)> {
     use crate::prebuilt::{self, Family};
     let (_, relative, binaries) = tool(package)?;
     let crates = repo.join(".artifacts/work/recipe-tools/crates");
@@ -870,7 +876,7 @@ pub(crate) fn compile_crate(repo: &Path, package: &str) -> Result<PathBuf> {
         .context("a program has a directory")?
         .to_path_buf();
     drop(lock);
-    Ok(bins)
+    Ok((bins, obtained.origin))
 }
 
 /// The key of `package`'s prebuilt programs: its prepared source closure, the compile

@@ -20,7 +20,8 @@
 //! no cache. `--no-prebuilt` skips steps 1 and 2 but still fills the cache.
 //! `distro-builder prebuilt key|publish` compute a key and upload a cache entry;
 //! `prebuilt list|build` name every part and compile one into the cache, which is
-//! what CI runs before it publishes.
+//! what CI runs before it publishes. `prebuilt get` takes a tool package through steps
+//! 1 to 3 (what an image build does) and says which step supplied it.
 //!
 //! The desktop apps family is a whole tree (programs, menu entries, polkit actions and
 //! Recipe's target metadata), one entry per distro, `desktop-apps/<key>/{prebuilt.json,tree/}`.
@@ -663,9 +664,21 @@ fn fetch(repo: &Path, family: Family, name: &str, key: &Key, payload: &Payload) 
     outcome
 }
 
+/// Where the programs of an [`Obtained`] came from.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Origin {
+    /// The local cache already held the key.
+    Local,
+    /// Downloaded from the prebuilt repository's release `<family>-<key16>`.
+    Downloaded,
+    /// Compiled in this call.
+    Compiled,
+}
+
 /// The programs of one prebuilt, wherever they are.
 pub struct Obtained {
     files: BTreeMap<String, PathBuf>,
+    pub origin: Origin,
 }
 
 impl Obtained {
@@ -703,7 +716,7 @@ fn obtain_inner(
     sources: impl FnOnce() -> BTreeMap<String, String>,
     compile: impl FnOnce() -> Result<Vec<(String, PathBuf)>>,
 ) -> Result<Obtained> {
-    let collect = |files: Vec<(String, PathBuf)>| Obtained { files: files.into_iter().collect() };
+    let collect = |files: Vec<(String, PathBuf)>| Obtained { files: files.into_iter().collect(), origin: Origin::Compiled };
     if crate::recipe::exact_identity() {
         crate::tprintln!("[prebuilt] {name}: compiling (exact build: nothing prebuilt is used)");
         return Ok(collect(compile()?));
@@ -712,20 +725,21 @@ fn obtain_inner(
     step.key(key.short());
     let short = key.short().to_string();
     let payload = Payload::Files(expected.iter().map(|file| file.to_string()).collect());
-    let from_dir = |dir: PathBuf| Obtained {
+    let from_dir = |dir: PathBuf, origin: Origin| Obtained {
         files: expected.iter().map(|file| (file.to_string(), dir.join(file))).collect(),
+        origin,
     };
     if NO_PREBUILT.load(Ordering::SeqCst) {
         crate::tprintln!("[prebuilt] {name}: compiling {short} (--no-prebuilt)");
     } else {
         if let Some(dir) = lookup(repo, family, name, &key, &payload) {
             crate::tprintln!("[prebuilt] {name}: local {short}");
-            return Ok(from_dir(dir));
+            return Ok(from_dir(dir, Origin::Local));
         }
         match fetch(repo, family, name, &key, &payload) {
             Ok(dir) => {
                 crate::tprintln!("[prebuilt] {name}: downloaded {short}");
-                return Ok(from_dir(dir));
+                return Ok(from_dir(dir, Origin::Downloaded));
             }
             Err(error) => {
                 crate::tprintln!("[prebuilt] {name}: no prebuilt for {short}, compiling");
@@ -738,7 +752,7 @@ fn obtain_inner(
     let dir = store(repo, family, name, &key, sources(), Content::Files(&compiled), "local", None)
         .with_context(|| format!("caching the compiled {name}"))?;
     crate::tprintln!("[prebuilt] {name}: compiled {short}");
-    Ok(from_dir(dir))
+    Ok(from_dir(dir, Origin::Compiled))
 }
 
 /// The key of `family`'s `name` on the checkout at `repo`. `distro` selects the libc
@@ -860,6 +874,42 @@ pub fn build(repo: &Path, family: Family, name: &str, distro: Option<&str>) -> R
         )
     })?;
     Ok((key, dir))
+}
+
+/// Gets the tool package `name` through the path an image build uses: the local cache
+/// when it holds the current key, else a download of the release `tools-<key16>`
+/// (verified against its `prebuilt.json`), else a compile. Returns the key, the cache
+/// directory and where the programs came from. Unlike [`build`], a hit is not recompiled.
+pub fn get(repo: &Path, family: Family, name: &str) -> Result<(Key, PathBuf, Origin)> {
+    if crate::recipe::exact_identity() {
+        bail!("an exact (signed) build never uses the prebuilt cache; unset the signing key");
+    }
+    if family != Family::Tools {
+        bail!("prebuilt get takes a tool package (family tools), not {}", family.name());
+    }
+    let (dir, origin) = crate::recipe::tools::compile_crate_with_origin(repo, name)?;
+    let key = key_for(repo, family, name, None)?;
+    let expected = entry_dir(repo, family, &key);
+    if dir != expected {
+        bail!(
+            "tools {name} is at {}, not in the cache entry {} for key {} (the source changed meanwhile?)",
+            dir.display(),
+            expected.display(),
+            key.short()
+        );
+    }
+    Ok((key, dir, origin))
+}
+
+impl Origin {
+    /// The one line `prebuilt get` prints.
+    pub fn describe(self, family: Family, key: &Key) -> String {
+        match self {
+            Origin::Local => "from the local cache".to_string(),
+            Origin::Downloaded => format!("downloaded {}", release_tag(family, key)),
+            Origin::Compiled => "compiled here".to_string(),
+        }
+    }
 }
 
 /// Uploads the verified cache entry of `key` to the release `<family>-<key16>` of the

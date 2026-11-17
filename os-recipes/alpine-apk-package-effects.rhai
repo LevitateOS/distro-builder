@@ -13,6 +13,7 @@ const PACKAGE = #{ name: "alpine-apk-package-effects", description: "The locked 
 import "sources/acorn-apk-lock.rhai" as lock;
 import "sources/acorn-apk-desktop-lock.rhai" as desktop_lock;
 import "system-files.rhai" as system;
+import "audit-rules.rhai" as audit;
 
 fn apk_file(row) { join_path(INPUTS.apks, basename(row[2])) }
 
@@ -38,6 +39,17 @@ fn package_effects(root) {
     busybox_applets(root, desktop_lock::commands());
     script_accounts(root);
     drop_stock_guest(root);
+    progress(0, 0, "package effects: audit rules");
+    audit_rules(root);
+}
+
+// Alpine has no augenrules, and its OpenRC script loads /etc/audit/audit.rules
+// when that file exists. The tree therefore ships it generated from rules.d
+// the same way as LevitateOS, giving the same "audit off" default. On
+// AcornOS rules.d is not recompiled at boot.
+fn audit_rules(root) {
+    if !is_file(join_path(root, "usr/sbin/auditctl")) || !is_file(join_path(root, "etc/init.d/auditd")) { return; }
+    audit::audit_rules_file(root);
 }
 
 // Alpine's base layout (alpine-baselayout-data) ships a user `guest` (uid

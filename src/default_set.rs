@@ -14,9 +14,10 @@
 //!   store that the desktop lock's preseed fills (`os-recipes/release-medium.rhai`
 //!   assembles the tree).
 //! - [`add_live_network`], on every live medium: the `network` group and its
-//!   deps, so the live session has NetworkManager. The builder runs those
-//!   group recipes for the variant's system (`RECIPE_HOST_LIBC_ROOT`, the
-//!   base tree) and merges their system trees into the overlay; their own
+//!   deps, so the live session has NetworkManager. The builder produces that
+//!   group for the variant's system (`RECIPE_HOST_LIBC_ROOT`, the base tree)
+//!   and writes its system trees into the overlay with owners and accounts
+//!   resolved by Recipe's system functions, as an install would; their own
 //!   configuration enables NetworkManager.
 //!
 //! Rust reads the recipes' declarations (`let deps`, `SOURCES`) and their pins
@@ -240,20 +241,103 @@ pub(crate) fn write_medium(variant: &Variant, overlay: &Path) -> Result<()> {
         .with_context(|| format!("adding the default set to the overlay {}", overlay.display()))
 }
 
+/// The account files, as Recipe's system route names them.
+const ACCOUNT_FILES: [(&str, u32); 4] =
+    [("etc/passwd", 0o644), ("etc/group", 0o644), ("etc/shadow", 0o600), ("etc/gshadow", 0o600)];
+
 /// Puts the `network` group and its deps, built for the system `rootfs`, into
-/// the live `overlay`.
+/// the live `overlay` the way `recipe --system --root` writes them into an
+/// installed root: one producer run of `network` (each recipe of its closure
+/// produced once, as the system route's producer does), its `system_producers`
+/// read with Recipe's own `system::payloads`, and owner names and declared
+/// accounts resolved with Recipe's `system::resolve_owners` against the live
+/// system's account files (the overlay's where the live session already
+/// replaced one, the base's otherwise). The trees go into the overlay with the
+/// resolved ids; the account files go into it only when accounts were created.
+/// Each group's `configure` (NetworkManager enabled) ran in its producer and
+/// is in its tree. Not done here, on purpose: the receipt (the live session is
+/// not an installed root; recsetup installs the default set into the target
+/// with its own receipt) and the root's effects recipe (its caches are made
+/// for the whole installed root; NetworkManager and nmcli need none of them,
+/// and glibc finds the groups' libraries in the default folders without the
+/// library cache).
 pub(crate) fn add_live_network(variant: &Variant, rootfs: &Path, overlay: &Path) -> Result<()> {
+    use levitate_recipe::{system, target};
     let repo = &variant.repo_root;
     let work = crate::recipe::recipe_work_dir(repo, &variant.id)?.join("live-groups");
-    for name in closure(repo, &[LIVE_NETWORK.to_string()])? {
-        let tree = Invocation::new(repo, "install", recipe_file(repo, &name), work.join(&name))
+    let produce = |redo: bool| {
+        Invocation::new(repo, "install", recipe_file(repo, LIVE_NETWORK), work.join(LIVE_NETWORK))
             .recipes_path(recipes_dir(repo))
             .env(levitate_recipe::clibrary::ROOT_ENV, rootfs)
+            // The system route's producer context: the result lists every
+            // tree of the closure (`system_producers`).
+            .define("RECIPE_SYSTEM_CONTEXT", "root")
+            .redo(redo)
             .run()
-            .with_context(|| format!("building the {name} group for the {} live medium", variant.id))?
-            .directory("system")?;
-        levitate_recipe::target::merge_tree(&tree, overlay)
+            .with_context(|| format!("building the {LIVE_NETWORK} group for the {} live medium", variant.id))
+    };
+    let mut result = produce(false)?;
+    // A reused result names its dependencies' trees too; one gone since is made again.
+    let gone = result.json()["system_producers"].as_array().into_iter().flatten().any(|producer| {
+        producer["outputs"]["system"].as_str().is_none_or(|path| !Path::new(path).is_dir())
+    });
+    if gone {
+        result = produce(true)?;
+    }
+    fs::create_dir_all(&work).with_context(|| format!("creating {}", work.display()))?;
+    let mut payloads = system::payloads(result.json(), "root")
+        .with_context(|| format!("reading the {LIVE_NETWORK} group's system trees"))?;
+
+    // The live system's account files, where Recipe resolves owners and makes accounts.
+    let view = tempfile::tempdir_in(&work).with_context(|| format!("creating a folder under {}", work.display()))?;
+    fs::create_dir_all(view.path().join("etc"))?;
+    let mut before = Vec::new();
+    for (name, _) in ACCOUNT_FILES {
+        let from = [overlay.join(name), rootfs.join(name)].into_iter().find(|p| p.is_file());
+        let text = match from {
+            Some(path) => fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?,
+            None => String::new(),
+        };
+        if !text.is_empty() {
+            fs::write(view.path().join(name), &text)?;
+        }
+        before.push(text);
+    }
+    let accounts = system::resolve_owners(view.path(), &mut payloads)
+        .with_context(|| format!("resolving the {LIVE_NETWORK} group's owners and accounts for the live medium"))?;
+
+    for payload in &payloads {
+        let name = &payload.package.name;
+        target::merge_tree(&payload.root, overlay)
             .with_context(|| format!("adding the {name} group to the live overlay {}", overlay.display()))?;
+        let mut manifest = target::load(overlay)?;
+        for (path, resolved) in payload.package.files.iter().chain(&payload.seeds) {
+            if let Some(entry) = manifest.entries.get_mut(path) {
+                entry.uid = resolved.uid;
+                entry.gid = resolved.gid;
+                entry.user = None;
+                entry.group = None;
+            }
+        }
+        target::save(overlay, &manifest)?;
+    }
+
+    if let Some(after) = accounts {
+        let base = target::load(rootfs)?;
+        let files = tempfile::tempdir_in(&work)?;
+        let texts = [&after.passwd, &after.group, &after.shadow, &after.gshadow];
+        for ((name, default_mode), (text, old)) in ACCOUNT_FILES.iter().zip(texts.into_iter().zip(&before)) {
+            if text == old {
+                continue;
+            }
+            let path = files.path().join(name);
+            fs::create_dir_all(path.parent().context("an account file has a folder")?)?;
+            fs::write(&path, text).with_context(|| format!("writing {}", path.display()))?;
+            let mode = base.entries.get(*name).map_or(*default_mode, |entry| entry.mode);
+            target::set_mode(files.path(), Path::new(name), mode)?;
+        }
+        target::merge_tree(files.path(), overlay)
+            .with_context(|| format!("adding the live accounts to the overlay {}", overlay.display()))?;
     }
     Ok(())
 }

@@ -37,6 +37,41 @@ fn package_effects(root) {
     progress(0, 0, "package effects: busybox applets");
     busybox_applets(root, desktop_lock::commands());
     script_accounts(root);
+    drop_stock_guest(root);
+}
+
+// Alpine's base layout (alpine-baselayout-data) ships a user `guest` (uid
+// 405, group users, home /dev/null) that nothing in the base uses: no file is
+// owned by it and no group lists it. The login screen's own `guest` account
+// (recipes/login-screen.rhai ACCOUNTS: uid and gid 60600, home
+// /run/reclogin/guest, as reclogind requires) is only made where no account of
+// that name exists, so the stock one goes from the account files.
+fn drop_stock_guest(root) {
+    for file in [["etc/passwd", 0o644], ["etc/shadow", 0o640], ["etc/group", 0o644], ["etc/gshadow", 0o600]] {
+        let path = join_path(root, file[0]);
+        if !is_file(path) { continue; }
+        let text = "";
+        for line in read_file(path).split("\n") {
+            if line == "" || line.starts_with("guest:") { continue; }
+            let fields = line.split(":");
+            // A group file's last field lists members; guest leaves every list.
+            if file[0] == "etc/group" || file[0] == "etc/gshadow" {
+                let last = fields.len() - 1;
+                if last >= 3 && fields[last] != "" {
+                    let kept = "";
+                    for member in fields[last].split(",") {
+                        if member == "guest" { continue; }
+                        kept += if kept == "" { member } else { "," + member };
+                    }
+                    fields[last] = kept;
+                    line = fields[0];
+                    for i in 1..fields.len() { line += ":" + fields[i]; }
+                }
+            }
+            text += line + "\n";
+        }
+        system::put(root, file[0], text, file[1]);
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -173,8 +173,10 @@ fn install_recupdate(root) {
     mkdir(join_path(root, "usr/share/levitate/release-keys"));
     target_mode(root, "usr/share/levitate/release-keys", 0o755);
     if DEFINES.INIT == "systemd" {
-        ln_force("/usr/lib/systemd/system/recupdate-notice.timer",
-            join_path(root, "etc/systemd/system/timers.target.wants/recupdate-notice.timer"));
+        // This tree starts empty: ln_force makes no parent folders.
+        let wants = join_path(root, "etc/systemd/system/timers.target.wants/recupdate-notice.timer");
+        mkdir(dirname(wants));
+        ln_force("/usr/lib/systemd/system/recupdate-notice.timer", wants);
     }
 }
 

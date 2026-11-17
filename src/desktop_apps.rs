@@ -122,26 +122,19 @@ fn obtain_tree(variant: &Variant) -> Result<PathBuf> {
 }
 
 /// `prebuilt build desktop-apps`: compiles the apps into the local cache, with no download
-/// and no ISO. The package locks it reads are acquired first, as an ISO build does.
+/// and no ISO. The package locks it reads are acquired by [`build_root`], as on an ISO build.
 pub(crate) fn build_cache(variant: &Variant) -> Result<()> {
-    acquire_build_locks(variant)?;
+    refuse_exact_cache_fill(variant)?;
     let tree = compile_tree(variant)?;
     crate::prebuilt::store_desktop_apps(&variant.repo_root, variant, &tree)?;
     Ok(())
 }
 
-/// Acquires the package locks the apps-build root is made from (the base lock and the
-/// apps-build lock), as an ISO build does, for a `prebuilt build` of a tree compiled in it.
-pub(crate) fn acquire_build_locks(variant: &Variant) -> Result<()> {
-    use crate::recipe::rootfs_source::{preseed_apps_build, preseed_rootfs_source};
-    let (repo, id) = (&variant.repo_root, &variant.id);
+/// A `prebuilt build` fills the local cache, which an exact (signed) build never does.
+pub(crate) fn refuse_exact_cache_fill(variant: &Variant) -> Result<()> {
     if crate::recipe::exact_identity() {
-        bail!("an exact (signed) build never fills the prebuilt cache; unset the signing key");
+        bail!("an exact (signed) build never fills the prebuilt cache of '{}'; unset the signing key", variant.id);
     }
-    preseed_rootfs_source(repo, id, &preseed_recipe(variant, Flavour::Base), Flavour::Base, false)
-        .with_context(|| format!("acquiring the base package lock for '{id}'"))?;
-    preseed_apps_build(repo, id, &apps_build_preseed_recipe(variant), false)
-        .with_context(|| format!("acquiring the apps-build package lock for '{id}'"))?;
     Ok(())
 }
 
@@ -213,8 +206,12 @@ fn build_root(variant: &Variant) -> Result<(String, PathBuf)> {
         .needs
         .inputs;
     let mut invocation = Invocation::new(repo, "install", &recipe, work.join("recipe"));
-    let base = rootfs_source::preseed_inputs(repo, &variant.id, &preseed_recipe(variant, Flavour::Base), Flavour::Base)?;
-    let apps_build = rootfs_source::apps_build_inputs(repo, &variant.id, &apps_build_preseed_recipe(variant))?;
+    // Both locks are acquired here, before they are read: a record left by
+    // an older run never stands in for them (an unchanged preseed is reused).
+    let base = rootfs_source::preseed_rootfs_source(repo, &variant.id, &preseed_recipe(variant, Flavour::Base), Flavour::Base, false)
+        .with_context(|| format!("acquiring the base package lock for '{}'", variant.id))?;
+    let apps_build = rootfs_source::preseed_apps_build(repo, &variant.id, &apps_build_preseed_recipe(variant), false)
+        .with_context(|| format!("acquiring the apps-build package lock for '{}'", variant.id))?;
     // On an RPM variant the root is composed from the unpack store: the base
     // packages are unpacked once for every tree that has them.
     let mut _view = None;

@@ -25,12 +25,12 @@ pub(crate) fn recipe(variant: &Variant) -> Option<PathBuf> {
 }
 
 /// `prebuilt build display-server <distro>`: compiles the display server into the local
-/// cache, with no download and no ISO, after acquiring the locks its build root is made of.
+/// cache, with no download and no ISO; its build root acquires the locks it is made of.
 pub(crate) fn build_cache(variant: &Variant) -> Result<()> {
     if recipe(variant).is_none() {
         bail!("{} compiles no display server (no desktop.display_server_recipe_script)", variant.id);
     }
-    crate::desktop_apps::acquire_build_locks(variant)?;
+    crate::desktop_apps::refuse_exact_cache_fill(variant)?;
     let tree = compile_tree(variant)?;
     crate::prebuilt::store_display_server(&variant.repo_root, variant, &tree)?;
     Ok(())

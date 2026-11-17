@@ -30,10 +30,10 @@ pub(crate) const CRATE_DIR: &str = "tools/reclogin";
 pub(crate) const RECIPE: &str = "distro/builder/os-recipes/reclogin.rhai";
 
 /// `prebuilt build login-screen <distro>`: compiles reclogin for `variant` into the
-/// local cache, with no download and no ISO, after acquiring the locks its build root
-/// is made of.
+/// local cache, with no download and no ISO; its build root acquires the locks it is
+/// made of.
 pub(crate) fn build_cache(variant: &Variant) -> Result<()> {
-    crate::desktop_apps::acquire_build_locks(variant)?;
+    crate::desktop_apps::refuse_exact_cache_fill(variant)?;
     let source = prepare_source(&variant.repo_root, variant)?;
     let tree = compile_tree(variant, source.path())?;
     crate::prebuilt::store_login_screen(&variant.repo_root, variant, &tree)?;

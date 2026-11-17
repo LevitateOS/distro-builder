@@ -183,12 +183,6 @@ pub(crate) fn preseed_inputs(
     recorded_inputs(repo, distro, recipe, preseed_record(flavour), &flavour.to_string())
 }
 
-/// The recorded outputs of the apps-build lock's preseed (`recipe`), which
-/// the apps-build root recipe takes as inputs.
-pub(crate) fn apps_build_inputs(repo: &Path, distro: &str, recipe: &Path) -> Result<BTreeMap<String, PathBuf>> {
-    recorded_inputs(repo, distro, recipe, APPS_BUILD_RECORD, "apps-build")
-}
-
 fn recorded_inputs(
     repo: &Path,
     distro: &str,

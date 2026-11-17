@@ -3,11 +3,12 @@
 //!
 //! In the system part (every image):
 //!
-//! - [`add_release_recipes`]: the release's group recipes (every
-//!   `recipes/*.rhai` of `ABOUT.kind` `system` or `library` that names this OS
-//!   in `ABOUT.systems`) as base files at [`RELEASE_RECIPES`]; system groups
-//!   change only with a release, and the installed Recipe reads them there;
-//!   each recipe's pins file (`NAME.pins`) goes beside it;
+//! - [`add_release_recipes`]: the release's recipes ([`group_recipes`]: this
+//!   OS's package groups of any kind, its other `system` and `library`
+//!   recipes, and their dependencies) as base files at [`RELEASE_RECIPES`];
+//!   they change only with a release, and the installed Recipe reads them
+//!   there as the release's; each recipe's pins file (`NAME.pins`) and the
+//!   modules it imports go beside it;
 //! - [`record_base`]: Recipe's `record-base` on the finished tree, its very
 //!   last change before the EROFS image: the receipt entry `base` and
 //!   `usr/lib/levitate/release.json`. That file cannot name the digests of
@@ -55,42 +56,67 @@ fn recipes_dir(variant: &Variant) -> PathBuf {
     variant.repo_root.join("recipes")
 }
 
-/// The names of the release's group recipes for `variant`, sorted: every
-/// `recipes/*.rhai` whose literal `ABOUT` has `kind` `system` or `library`
-/// and names the variant's os-release `ID` in `systems`.
+/// The names of the release's recipes for `variant`, sorted: of the
+/// `recipes/*.rhai` for this OS (`ABOUT.systems` names the variant's
+/// os-release `ID`, and `ABOUT.libc`, when given, its C library), every
+/// package group (a `PACKAGES` map with this C library's key: pinned by
+/// `cargo xtask base groups` against the same package snapshot as the base,
+/// whatever its `kind`) and every recipe of `kind` `system` or `library`
+/// without `PACKAGES`; then the runtime dependency closure (`deps`) of all of
+/// them. All of it is read by the engine (`needs::declaration`).
 pub(crate) fn group_recipes(variant: &Variant) -> Result<Vec<String>> {
+    use levitate_recipe::declarations::Packages;
     let dir = recipes_dir(variant);
     let os = &variant.contract.identity.os_id;
-    let mut names = Vec::new();
+    let libc = match variant.contract.profile.libc {
+        distro_contract::profile::Libc::Glibc => "glibc",
+        distro_contract::profile::Libc::Musl => "musl",
+    };
+    let mut pending = Vec::new();
     for entry in fs::read_dir(&dir).with_context(|| format!("reading {}", dir.display()))? {
         let path = entry?.path();
-        let Some(name) = path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .and_then(|n| n.strip_suffix(".rhai"))
-            .map(str::to_owned)
-        else {
+        if path.extension().is_none_or(|e| e != "rhai") {
             continue;
-        };
+        }
         // A module (`os-facts.rhai`, `look.rhai`) is imported by recipes and
         // is no recipe: the engine's own rule (the one `recipe index` uses).
         if !path.is_file() || levitate_recipe::catalog::is_module(&path) {
             continue;
         }
-        let entry = levitate_recipe::catalog::entry(&path, Some(&dir))
-            .with_context(|| format!("reading the ABOUT of recipes/{name}.rhai"))?;
-        let about = &entry["about"];
-        let kind = about["kind"].as_str().unwrap_or_default();
-        let ours = about["systems"]
-            .as_array()
-            .is_some_and(|systems| systems.iter().any(|s| s.as_str() == Some(os)));
-        if matches!(kind, "system" | "library") && ours {
-            names.push(name);
+        let declaration = levitate_recipe::needs::declaration(&path, Some(&dir))
+            .with_context(|| format!("reading {}", path.display()))?;
+        let declared = &declaration.declared;
+        let about = declared.about.clone().unwrap_or_default();
+        let listed = |key: &str, value: &str| about[key].as_array().is_some_and(|l| l.iter().any(|s| s.as_str() == Some(value)));
+        if !listed("systems", os) || (about["libc"].is_array() && !listed("libc", libc)) {
+            continue;
+        }
+        let wanted = match &declared.packages {
+            Some(Packages::ByLibc { keys, .. }) => keys.contains(libc),
+            Some(Packages::Any(_)) => false,
+            None => matches!(about["kind"].as_str(), Some("system" | "library")),
+        };
+        if wanted {
+            pending.push(path);
         }
     }
-    names.sort();
-    ensure!(!names.is_empty(), "no recipe in {} is a system group of {os}", dir.display());
-    Ok(names)
+    ensure!(!pending.is_empty(), "no recipe in {} is a system group of {os}", dir.display());
+    // The runtime dependency closure, by the engine's reading of `deps`.
+    let mut names = std::collections::BTreeSet::new();
+    while let Some(path) = pending.pop() {
+        let name = path
+            .file_stem()
+            .and_then(|n| n.to_str())
+            .with_context(|| format!("{} has no UTF-8 name", path.display()))?
+            .to_owned();
+        if !names.insert(name) {
+            continue;
+        }
+        let declaration = levitate_recipe::needs::declaration(&path, Some(&dir))
+            .with_context(|| format!("reading {}", path.display()))?;
+        pending.extend(declaration.dependencies.iter().filter(|d| !d.build_only).map(|d| d.recipe.clone()));
+    }
+    Ok(names.into_iter().collect())
 }
 
 /// Every file of `recipes/` that the recipe `name` is compiled from, by the

@@ -246,13 +246,13 @@ fn os_release_field(field) {
 }
 
 // The system's identity and distro profile (the REC_* fields the install
-// tools read), from the contract: the builder's `os_release` input. A packaged
-// /etc/os-release keeps its packaged form and mode (Fedora's is a symlink to
-// usr/lib/os-release, which then holds this text).
+// tools read), from the contract: the builder's `os_release` input. The text
+// goes to usr/lib/os-release and etc/os-release links to it, as os-release(5)
+// lays out. LevitateOS has no packaged os-release (system-release is
+// provided_elsewhere); AcornOS's packaged one has this same shape.
 fn identity(root) {
-    let text = read_file(INPUTS.os_release);
-    let path = join_path(root, "etc/os-release");
-    if exists(path) { write_file(path, text); } else { put(root, "etc/os-release", text, 0o644); }
+    put(root, "usr/lib/os-release", read_file(INPUTS.os_release), 0o644);
+    link(root, "etc/os-release", "../usr/lib/os-release");
 }
 
 // The OS's PRETTY_NAME from the builder's `os_release` input, for the login banner.

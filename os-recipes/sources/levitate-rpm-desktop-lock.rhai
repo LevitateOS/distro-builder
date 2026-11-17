@@ -5,7 +5,7 @@
 // command.
 
 fn release() { 45 }
-fn locked_on() { "2026-11-16" }
+fn locked_on() { "2026-11-17" }
 
 // [name, NEVRA, URL, SHA256]
 fn packages() {
@@ -37,7 +37,7 @@ fn packages() {
         ["aribb24", "aribb24-1.0.3^20160216git5e9be27-6.fc45.x86_64", "https://dl.fedoraproject.org/pub/fedora/linux/releases/45/Everything/x86_64/os/Packages/a/aribb24-1.0.3^20160216git5e9be27-6.fc45.x86_64.rpm", "9c1ba5d7d4b7d066d8318b4f42bc7303a1c2e6e6a02c7c5cbf5716d0be74f3b9"],
         ["ark", "ark-26.08.3-1.fc45.x86_64", "https://dl.fedoraproject.org/pub/fedora/linux/updates/45/Everything/x86_64/Packages/a/ark-26.08.3-1.fc45.x86_64.rpm", "f27dbaee5e60d86aad6717beb7b9478f8bd91037ad65bc27e27ab83244ac735c"],
         ["ark-libs", "ark-libs-26.08.3-1.fc45.x86_64", "https://dl.fedoraproject.org/pub/fedora/linux/updates/45/Everything/x86_64/Packages/a/ark-libs-26.08.3-1.fc45.x86_64.rpm", "83e60600c764446244736eb8a16e799ab6f1b7d3a3dc93864b61f6beed254f4d"],
-        ["assimp", "assimp-6.0.5-6.fc45.x86_64", "https://dl.fedoraproject.org/pub/fedora/linux/updates/45/Everything/x86_64/Packages/a/assimp-6.0.5-6.fc45.x86_64.rpm", "895ae9c515ea84968b27979700de7cbc6cbe74d40261efdade137be7d7f29285"],
+        ["assimp", "assimp-6.0.6-1.fc45.x86_64", "https://dl.fedoraproject.org/pub/fedora/linux/updates/45/Everything/x86_64/Packages/a/assimp-6.0.6-1.fc45.x86_64.rpm", "c763cec4a61c186f6b22b006942442826d32630550f9fe4abbc75f3c78558ce3"],
         ["at-spi2-atk", "at-spi2-atk-2.62.1-1.fc45.x86_64", "https://dl.fedoraproject.org/pub/fedora/linux/updates/45/Everything/x86_64/Packages/a/at-spi2-atk-2.62.1-1.fc45.x86_64.rpm", "aa4e59a6e26bd0ed648b5f57e94fbbd9dea82173584cad79cf74ca6b0d989ad7"],
         ["at-spi2-core", "at-spi2-core-2.62.1-1.fc45.x86_64", "https://dl.fedoraproject.org/pub/fedora/linux/updates/45/Everything/x86_64/Packages/a/at-spi2-core-2.62.1-1.fc45.x86_64.rpm", "3c55cf4902dc43c7e122a0875fae806f8409d74006e48337bdd20289be3439d9"],
         ["atk", "atk-2.62.1-1.fc45.x86_64", "https://dl.fedoraproject.org/pub/fedora/linux/updates/45/Everything/x86_64/Packages/a/atk-2.62.1-1.fc45.x86_64.rpm", "b242900b57d565c1b68bbd666f62453ca4086e90e6120d5fe2193cc5e527dfd9"],

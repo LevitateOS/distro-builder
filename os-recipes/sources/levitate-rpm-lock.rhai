@@ -5,7 +5,7 @@
 // command.
 
 fn release() { 45 }
-fn locked_on() { "2026-11-16" }
+fn locked_on() { "2026-11-17" }
 
 // [name, NEVRA, URL, SHA256]
 fn packages() {

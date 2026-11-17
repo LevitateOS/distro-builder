@@ -5,7 +5,7 @@
 // command.
 
 fn release() { 45 }
-fn locked_on() { "2026-11-16" }
+fn locked_on() { "2026-11-17" }
 
 // [name, NEVRA, URL, SHA256]
 fn packages() {
@@ -95,7 +95,7 @@ fn packages() {
         ["libxkbcommon-x11", "libxkbcommon-x11-1.13.1-4.fc45.x86_64", "https://dl.fedoraproject.org/pub/fedora/linux/releases/45/Everything/x86_64/os/Packages/l/libxkbcommon-x11-1.13.1-4.fc45.x86_64.rpm", "b18dce51b548ad9736b246aef3fddc66071731771adcdc569f7317d736c78ea0"],
         ["libxml2-devel", "libxml2-devel-2.15.4-1.fc45.x86_64", "https://dl.fedoraproject.org/pub/fedora/linux/releases/45/Everything/x86_64/os/Packages/l/libxml2-devel-2.15.4-1.fc45.x86_64.rpm", "ff9f7ea82537dfd36bda8da887ed3990c595ebda3cf05d06f9287017ca795afc"],
         ["libxshmfence", "libxshmfence-1.3.2-9.fc45.x86_64", "https://dl.fedoraproject.org/pub/fedora/linux/releases/45/Everything/x86_64/os/Packages/l/libxshmfence-1.3.2-9.fc45.x86_64.rpm", "31c2eb73ba93fe602eb9a90a8ff8f1278419c7f26d7d98b7d38a512f8b93f0a6"],
-        ["llhttp", "llhttp-9.4.2-2.fc45.x86_64", "https://dl.fedoraproject.org/pub/fedora/linux/releases/45/Everything/x86_64/os/Packages/l/llhttp-9.4.2-2.fc45.x86_64.rpm", "b06d62ec69fd1081a8433b40d661ce1b21fc09e63b4c89ed3a9815ac9eb88e11"],
+        ["llhttp", "llhttp-9.4.4-1.fc45.x86_64", "https://dl.fedoraproject.org/pub/fedora/linux/updates/45/Everything/x86_64/Packages/l/llhttp-9.4.4-1.fc45.x86_64.rpm", "5c225c5e94d2febdbd76a54e8786614dd44ec66c24a0ed96b9190dd5abc11f43"],
         ["llvm-filesystem", "llvm-filesystem-23.1.5-2.fc45.x86_64", "https://dl.fedoraproject.org/pub/fedora/linux/updates/45/Everything/x86_64/Packages/l/llvm-filesystem-23.1.5-2.fc45.x86_64.rpm", "5f343286f59b829994ce273f0e009fc38a6a332ae3c7ed4d5194e3752716186f"],
         ["llvm-libs", "llvm-libs-23.1.5-2.fc45.x86_64", "https://dl.fedoraproject.org/pub/fedora/linux/updates/45/Everything/x86_64/Packages/l/llvm-libs-23.1.5-2.fc45.x86_64.rpm", "352aacac2343474811146df7f7090c4334ec08ca72186987b46decd4aa7ccc81"],
         ["lm_sensors-libs", "lm_sensors-libs-3.6.0-25.fc45.x86_64", "https://dl.fedoraproject.org/pub/fedora/linux/releases/45/Everything/x86_64/os/Packages/l/lm_sensors-libs-3.6.0-25.fc45.x86_64.rpm", "a4f6ce4dbb0285a234d3830a6f6d7e442b1b701f410c096bc8045d902314d21b"],

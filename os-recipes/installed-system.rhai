@@ -42,7 +42,7 @@ fn check_init(init) {
 }
 
 // The OpenRC runlevel a service belongs in: sysinit mounts /dev, /dev/pts
-// and /dev/shm, then udev initializes devices for NetworkManager. The boot
+// and /dev/shm, then udev initializes devices for the services after it. The boot
 // runlevel sets up the system, and shutdown stops it cleanly.
 // Every other service goes in default.
 fn openrc_runlevel(service) {
@@ -77,7 +77,8 @@ fn enable(root, init, service) {
 }
 
 // The init system's own boot services. systemd brings up `lo` itself; OpenRC's
-// `loopback` does (NetworkManager leaves lo alone), so it owns loopback there.
+// `loopback` does (NetworkManager, when the `network` group is installed, leaves
+// lo alone), so it owns loopback there.
 fn base_services(init) {
     check_init(init);
     if init == "systemd" { [] }

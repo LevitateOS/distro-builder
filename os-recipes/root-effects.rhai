@@ -214,7 +214,11 @@ fn icon_caches(job) {
         if !is_file(join_path(dir, "index.theme")) { continue; }
         let farm = farm(job, "icons-" + theme, dir);
         run(job, tool, ["-q", "-t", "-f", farm]);
-        keep(job, join_path(farm, "icon-theme.cache"), "usr/share/icons/" + theme + "/icon-theme.cache");
+        // A theme with no icon files (a cursor-only theme such as `default`,
+        // which only names the theme it inherits) gets no cache from the tool.
+        let cache = join_path(farm, "icon-theme.cache");
+        if !is_file(cache) { continue; }
+        keep(job, cache, "usr/share/icons/" + theme + "/icon-theme.cache");
     }
 }
 

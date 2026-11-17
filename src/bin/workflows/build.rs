@@ -18,13 +18,14 @@ pub(crate) fn build_one(repo_root: &Path, distro_id: &str, product: ProductId) -
     run.save()?;
 
     distro_builder::timeline::start(&bundle.repo_root, distro_id, product.name(), &run.dir);
+    let mut used_parts = Vec::new();
     let build_result = (|| -> Result<()> {
         // Release builds never build a kernel.
         distro_builder::kernel::check_kernel_installed(&bundle, &kernel_output_dir).with_context(|| {
             format!("install it first: cargo xtask build kernel {distro_id} (--prebuilt downloads it)")
         })?;
         distro_builder::tprintln!("[release:iso:{product}:{distro_id}] kernel already installed");
-        distro_builder::release::assemble(&bundle, product, &run.dir, &kernel_output_dir)?;
+        used_parts = distro_builder::release::assemble(&bundle, product, &run.dir, &kernel_output_dir)?.parts;
 
         distro_builder::tprintln!(
             "[release:iso:{product}:{distro_id}] built at {}",
@@ -46,6 +47,10 @@ pub(crate) fn build_one(repo_root: &Path, distro_id: &str, product: ProductId) -
     match (build_result, recorded) {
         (Ok(()), Ok(_)) => {
             runs::prune(&bundle.repo_root, distro_id, &release_dir, runs::RELEASE_RETENTION)?;
+            // After the old runs went: a part only they linked goes too.
+            if let Err(error) = distro_builder::parts::prune(&bundle.repo_root, distro_id, &used_parts) {
+                distro_builder::tprintln!("[parts:{distro_id}] warning: old parts were not pruned: {error:#}");
+            }
             Ok(())
         }
         (Ok(()), Err(record)) => Err(record),

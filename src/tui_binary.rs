@@ -71,6 +71,7 @@ pub(crate) fn install(
             .input("source", source.path())
             .input("runtime_target", &target_input)
             .input("bun-toolchain::runtime_target", &target_input)
+            .discard_superseded()
             .run()
             .context("building the TUI layer through Recipe")?;
             Ok(vec![(PROGRAM.to_string(), result.file(PROGRAM)?)])

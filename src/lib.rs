@@ -8,7 +8,7 @@ pub mod install_ux;
 pub(crate) mod compose;
 pub(crate) mod guest;
 pub use pipeline::kernel;
-pub(crate) mod parts;
+pub mod parts;
 pub(crate) mod pipeline;
 pub mod product;
 pub mod release;

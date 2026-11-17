@@ -860,6 +860,7 @@ pub(crate) fn compile_crate_with_origin(repo: &Path, package: &str) -> Result<(P
             let result = super::Invocation::new(repo, "install", &recipe, crates.join(package))
                 .define("BINS", &binaries.join(","))
                 .input("source", source.path())
+                .discard_superseded()
                 .run()?;
             let bins = result.directory("bins")?;
             Ok(binaries
@@ -984,7 +985,7 @@ pub(crate) fn build_system_tool_tree(
             .input("runtime_image", &image)
             .input("runtime_reference", reference_file.path());
     }
-    let tree = invocation.run()?.directory("rootfs")?;
+    let tree = invocation.discard_superseded().run()?.directory("rootfs")?;
     drop(keys);
     Ok(tree)
 }

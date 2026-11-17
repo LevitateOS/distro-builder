@@ -100,15 +100,22 @@ const SYSTEMD_BOOT_EFI: &str = "usr/lib/systemd/boot/efi/systemd-bootx64.efi";
 /// The recipe that produces the release's busybox binary.
 const BUSYBOX_RECIPE: &str = "distro/builder/os-recipes/busybox-static.rhai";
 
+/// What [`assemble`] made: the ISO, and the directories of the parts it was
+/// combined from (for `parts::prune` to keep).
+pub struct Assembled {
+    pub iso: PathBuf,
+    pub parts: Vec<PathBuf>,
+}
+
 /// Builds `product`'s release ISO in `dir`, its release run's directory, with
-/// the kernel in `kernel` (`runs::kernel_dir`), and returns the ISO's path.
+/// the kernel in `kernel` (`runs::kernel_dir`).
 /// Every step's error names the step and the product.
 pub fn assemble(
     variant: &Variant,
     product: ProductId,
     dir: &Path,
     kernel: &Path,
-) -> Result<PathBuf> {
+) -> Result<Assembled> {
     if !product.is_iso() {
         bail!("{product} is prepared, not built into a release ISO");
     }
@@ -262,7 +269,10 @@ pub fn assemble(
     seq.finish();
 
     print_summary(dir)?;
-    Ok(iso)
+    Ok(Assembled {
+        iso,
+        parts: vec![system.dir.clone(), overlay.dir.clone()],
+    })
 }
 
 /// The kernel's release (`kernel.release`, one line).

@@ -181,7 +181,7 @@ pub(crate) fn compile_in_build_root(
     for (name, value) in defines {
         invocation = invocation.define(name, value);
     }
-    invocation.root(reference, image).worker(worker).run()?.directory("rootfs")
+    invocation.root(reference, image).worker(worker).discard_superseded().run()?.directory("rootfs")
 }
 
 /// The version of how the builder makes the apps-build root image ([`build_root`]):

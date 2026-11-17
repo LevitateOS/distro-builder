@@ -41,7 +41,7 @@ use distro_contract::{runs, ProductId, Variant};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::hash_map::Entry;
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::io::Read;
 use std::os::fd::AsRawFd;
@@ -493,6 +493,277 @@ fn ensure_part(
          build again once the checkout and the kernel stay unchanged",
         variant.id
     )
+}
+
+/// Removes the parts of `distro_id` that no run directory under its output
+/// directory (`runs::distro_output_dir`: every release product's runs and
+/// every scenario's) links to any more, except the parts in `keep` (the ones
+/// the calling build just used), and the unfinished builds (`.tmp-<key>-<pid>`)
+/// of builders that died. Every key is handled under its exclusive lock,
+/// taken without waiting: a part in use or being built (its lock held) is
+/// left alone, and while the lock is held no builder can link the part. Only
+/// then are the run directories read for what links a part: a symbolic link
+/// into its directory (`Part::link_tree`) or a hard link to one of its files
+/// (`Part::link_outputs`). Removal never follows a link and never leaves
+/// `.artifacts/parts/<distro>/<kind>/`. The lock files stay: a builder may
+/// hold one open, and a new file under the same name would not exclude it.
+/// One line per removed part, with the bytes its files held (files a run or
+/// the download store still links stay on disk). An error with one part is
+/// a warning; the others are still handled.
+pub fn prune(repo_root: &Path, distro_id: &str, keep: &[PathBuf]) -> Result<()> {
+    let parts = runs::parts_dir(repo_root, distro_id);
+    let root = match fs::canonicalize(&parts) {
+        Ok(root) => root,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error).with_context(|| format!("resolving {}", parts.display())),
+    };
+    let keep: BTreeSet<PathBuf> = keep.iter().filter_map(|dir| fs::canonicalize(dir).ok()).collect();
+    let label = format!("[parts:{distro_id}]");
+
+    // Every key of every kind with its part and unfinished builds, locked.
+    struct Locked {
+        kind_dir: PathBuf,
+        kind: String,
+        key: String,
+        part: Option<PathBuf>,
+        unfinished: Vec<PathBuf>,
+        _lock: fs::File,
+    }
+    let mut locked = Vec::new();
+    let mut in_use = 0usize;
+    for kind in fs::read_dir(&root).with_context(|| format!("listing {}", root.display()))? {
+        let kind = kind?;
+        let Some(kind_name) = kind.file_name().to_str().map(str::to_string) else {
+            continue;
+        };
+        if kind_name.starts_with('.') || !kind.file_type()?.is_dir() {
+            continue;
+        }
+        let kind_dir = fs::canonicalize(kind.path())?;
+        ensure!(kind_dir.parent() == Some(root.as_path()), "{} is not inside {}", kind_dir.display(), root.display());
+        let mut keys: BTreeMap<String, (Option<PathBuf>, Vec<PathBuf>)> = BTreeMap::new();
+        for entry in fs::read_dir(&kind_dir).with_context(|| format!("listing {}", kind_dir.display()))? {
+            let entry = entry?;
+            let Some(name) = entry.file_name().to_str().map(str::to_string) else {
+                continue;
+            };
+            if !entry.file_type()?.is_dir() {
+                continue;
+            }
+            if is_key(&name) {
+                keys.entry(name).or_default().0 = Some(entry.path());
+            } else if let Some(key) = name
+                .strip_prefix(".tmp-")
+                .and_then(|rest| rest.rsplit_once('-'))
+                .map(|(key, _pid)| key)
+                .filter(|key| is_key(key))
+            {
+                keys.entry(key.to_string()).or_default().1.push(entry.path());
+            }
+        }
+        for (key, (part, unfinished)) in keys {
+            if part.as_ref().is_some_and(|dir| keep.contains(dir)) {
+                continue;
+            }
+            let lock = fs::OpenOptions::new()
+                .create(true)
+                .truncate(false)
+                .write(true)
+                .open(kind_dir.join(format!(".{key}.lock")))
+                .with_context(|| format!("opening the lock of the {kind_name} part {}", &key[..16]))?;
+            if !try_lock_exclusive(&lock)? {
+                in_use += 1;
+                continue;
+            }
+            locked.push(Locked {
+                kind_dir: kind_dir.clone(),
+                kind: kind_name.clone(),
+                key,
+                part,
+                unfinished,
+                _lock: lock,
+            });
+        }
+    }
+    if locked.is_empty() {
+        return Ok(());
+    }
+
+    // What the runs link, read while no builder can link a locked part.
+    let referenced = run_references(&runs::distro_output_dir(repo_root, distro_id), &[&parts, &root])?;
+
+    let (mut removed, mut freed, mut kept) = (0usize, 0u64, keep.len() + in_use);
+    for item in &locked {
+        let short = &item.key[..16];
+        for dir in &item.unfinished {
+            // Under the key's exclusive lock no build of it runs (`ensure_part`).
+            match remove_inside(dir, &item.kind_dir) {
+                Ok(()) => crate::tprintln!("{label} removed the unfinished build {}", dir.display()),
+                Err(error) => crate::tprintln!("{label} warning: could not remove {}: {error:#}", dir.display()),
+            }
+        }
+        let Some(dir) = &item.part else {
+            continue;
+        };
+        if referenced.parts.contains(&(item.kind.clone(), item.key.clone())) {
+            kept += 1;
+            continue;
+        }
+        let outcome = (|| -> Result<Option<u64>> {
+            let mut seen = HashSet::new();
+            let mut bytes = 0u64;
+            for entry in walkdir::WalkDir::new(dir).follow_links(false) {
+                let entry = entry.with_context(|| format!("walking {}", dir.display()))?;
+                if !entry.file_type().is_file() {
+                    continue;
+                }
+                let meta = entry.metadata()?;
+                let inode = (meta.dev(), meta.ino());
+                if referenced.inodes.contains(&inode) {
+                    return Ok(None);
+                }
+                if seen.insert(inode) {
+                    bytes += meta.blocks() * 512;
+                }
+            }
+            remove_inside(dir, &item.kind_dir)?;
+            Ok(Some(bytes))
+        })();
+        match outcome {
+            Ok(Some(bytes)) => {
+                removed += 1;
+                freed += bytes;
+                crate::tprintln!("{label} removed the {} part {short} ({})", item.kind, gib(bytes));
+            }
+            Ok(None) => kept += 1,
+            Err(error) => {
+                kept += 1;
+                crate::tprintln!("{label} warning: could not remove the {} part {short}: {error:#}", item.kind);
+            }
+        }
+    }
+    if removed > 0 {
+        crate::tprintln!("{label} removed {removed} part(s) no run links ({}); kept {kept}", gib(freed));
+    }
+    Ok(())
+}
+
+/// What the run directories link into the parts.
+struct References {
+    /// `(kind, key)` of each part a symbolic link points into.
+    parts: BTreeSet<(String, String)>,
+    /// Every regular file with more than one link.
+    inodes: HashSet<(u64, u64)>,
+}
+
+/// Reads every run directory under `out` without following links: the parts
+/// (under any of `parts`, spellings of one directory) its symbolic links point
+/// into, and the files it shares by hard link. An entry that vanished while
+/// it was read (a run pruned meanwhile) links nothing; any other error fails.
+fn run_references(out: &Path, parts: &[&Path]) -> Result<References> {
+    let mut found = References {
+        parts: BTreeSet::new(),
+        inodes: HashSet::new(),
+    };
+    if fs::symlink_metadata(out).is_err() {
+        return Ok(found);
+    }
+    for entry in walkdir::WalkDir::new(out).follow_links(false) {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) if error.io_error().is_some_and(|io| io.kind() == std::io::ErrorKind::NotFound) => continue,
+            Err(error) => return Err(error).with_context(|| format!("reading {}", out.display())),
+        };
+        let file_type = entry.file_type();
+        if file_type.is_symlink() {
+            let Ok(target) = fs::read_link(entry.path()) else {
+                continue;
+            };
+            let target = match entry.path().parent() {
+                Some(parent) if target.is_relative() => parent.join(target),
+                _ => target,
+            };
+            let target = lexical(&target);
+            for prefix in parts {
+                if let Ok(rest) = target.strip_prefix(prefix) {
+                    let mut names = rest.components().filter_map(|part| match part {
+                        Component::Normal(name) => name.to_str().map(str::to_string),
+                        _ => None,
+                    });
+                    if let (Some(kind), Some(key)) = (names.next(), names.next()) {
+                        found.parts.insert((kind, key));
+                    }
+                }
+            }
+        } else if file_type.is_file() {
+            match entry.metadata() {
+                Ok(meta) if meta.nlink() > 1 => {
+                    found.inodes.insert((meta.dev(), meta.ino()));
+                }
+                Ok(_) => {}
+                Err(error) if error.io_error().is_some_and(|io| io.kind() == std::io::ErrorKind::NotFound) => {}
+                Err(error) => return Err(error).with_context(|| format!("reading {}", entry.path().display())),
+            }
+        }
+    }
+    Ok(found)
+}
+
+/// `path` with `.` and `..` resolved by name, never by reading the disk.
+fn lexical(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for part in path.components() {
+        match part {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                out.pop();
+            }
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+/// Whether `name` is a part key: 64 lowercase hex digits.
+fn is_key(name: &str) -> bool {
+    name.len() == 64 && name.bytes().all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+}
+
+/// Removes the directory `dir`, which must be a real directory (not a link)
+/// directly in `kind_dir` (a canonical kind directory), without following any
+/// link inside it.
+fn remove_inside(dir: &Path, kind_dir: &Path) -> Result<()> {
+    let meta = fs::symlink_metadata(dir).with_context(|| format!("reading {}", dir.display()))?;
+    ensure!(meta.file_type().is_dir(), "{} is not a directory", dir.display());
+    let real = fs::canonicalize(dir).with_context(|| format!("resolving {}", dir.display()))?;
+    ensure!(
+        real.parent() == Some(kind_dir) && real.file_name() == dir.file_name(),
+        "{} is not directly in {}",
+        real.display(),
+        kind_dir.display()
+    );
+    // remove_dir_all removes links inside the tree, never what they point to.
+    fs::remove_dir_all(&real).with_context(|| format!("removing {}", real.display()))
+}
+
+/// Takes `file`'s exclusive lock if no one holds it; false if someone does.
+fn try_lock_exclusive(file: &fs::File) -> Result<bool> {
+    loop {
+        // SAFETY: flock only reads the descriptor of the open lock file.
+        if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
+            return Ok(true);
+        }
+        let error = std::io::Error::last_os_error();
+        match error.raw_os_error() {
+            Some(libc::EWOULDBLOCK) => return Ok(false),
+            Some(libc::EINTR) => continue,
+            _ => return Err(error).context("locking a part"),
+        }
+    }
+}
+
+fn gib(bytes: u64) -> String {
+    format!("{:.1} GiB", bytes as f64 / (1u64 << 30) as f64)
 }
 
 /// The prefix of the build log's lines about the `kind` part of `distro_id`:

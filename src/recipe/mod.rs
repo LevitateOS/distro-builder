@@ -290,6 +290,8 @@ pub struct Invocation<'a> {
     /// Clean the program up (`recipe cleanup`) before the run, so every step
     /// runs again, and never reuse a done stamp.
     redo: bool,
+    /// Keep only this run's result of its stamp slot (`discard_superseded`).
+    discard_superseded: bool,
 }
 
 impl<'a> Invocation<'a> {
@@ -313,6 +315,7 @@ impl<'a> Invocation<'a> {
             recipes_path: None,
             env: Vec::new(),
             redo: false,
+            discard_superseded: false,
         }
     }
 
@@ -394,6 +397,20 @@ impl<'a> Invocation<'a> {
         self
     }
 
+    /// For a caller that reads the result only while the builder runs
+    /// (copies it, or passes it to a run that does): once this run's result
+    /// is saved or reused, the earlier results of its stamp slot (the same
+    /// recipe, work directory and flags, other input contents) are
+    /// discarded with their publications in Recipe's exports, which nothing
+    /// else would ever delete (`stamp`). Also in exact mode, which reuses no
+    /// stamp but records one so the next run can discard its publication.
+    /// Never for a result something keeps a path to beyond this process
+    /// (the kernel bundle `current` links to, the recorded preseed outputs).
+    pub fn discard_superseded(mut self) -> Self {
+        self.discard_superseded = true;
+        self
+    }
+
     pub fn run(self) -> Result<RecipeResult> {
         if self.redo {
             let mut cleanup = self.clone();
@@ -436,7 +453,7 @@ impl<'a> Invocation<'a> {
                 run_dir.join(recipe)
             }
         };
-        let stamp = if self.redo {
+        let stamp = if self.redo || (exact_identity() && !self.discard_superseded) {
             None
         } else {
             stamp::Stamp::for_run(
@@ -450,7 +467,12 @@ impl<'a> Invocation<'a> {
             )
             .with_context(|| format!("computing the done stamp of {}", recipe.display()))?
         };
-        if let Some(result) = stamp.as_ref().and_then(stamp::Stamp::reuse) {
+        let reused = stamp
+            .as_ref()
+            .filter(|_| !exact_identity())
+            .and_then(stamp::Stamp::reuse);
+        if let Some(result) = reused {
+            self.discard_superseded_by(stamp.as_ref(), &result, None);
             let step = self.concurrent.is_none().then(|| {
                 crate::timeline::Step::begin(
                     "recipe",
@@ -521,7 +543,7 @@ impl<'a> Invocation<'a> {
             .arg("--build-dir")
             .arg(work)
             .arg("--state-dir")
-            .arg(work.join("recipe-state"))
+            .arg(state_dir(work))
             .arg("--json-output")
             .arg(result.path())
             .arg("--recipes-path")
@@ -622,8 +644,10 @@ impl<'a> Invocation<'a> {
             std::fs::read(result.path()).context("reading this invocation's recipe JSON result")?;
         let result = RecipeResult::from_json(&bytes)?;
         if let Some(stamp) = &stamp {
-            if let Err(error) = stamp.save(&result) {
-                crate::teprintln!("  (no done stamp for {}: {error:#})", recipe.display());
+            let previous = self.discard_superseded.then(|| stamp.previous()).flatten();
+            match stamp.save(&result) {
+                Ok(()) => self.discard_superseded_by(Some(stamp), &result, previous),
+                Err(error) => crate::teprintln!("  (no done stamp for {}: {error:#})", recipe.display()),
             }
         }
         if let Some(file) = &progress {
@@ -634,6 +658,39 @@ impl<'a> Invocation<'a> {
         }
         Ok(result)
     }
+}
+
+impl Invocation<'_> {
+    /// With `discard_superseded`, discards the other results of `stamp`'s
+    /// slot (`stamp::Stamp::discard_superseded`); a failure is a warning,
+    /// never the run's.
+    fn discard_superseded_by(
+        &self,
+        stamp: Option<&stamp::Stamp>,
+        result: &RecipeResult,
+        previous: Option<(std::fs::File, serde_json::Value)>,
+    ) {
+        let Some(stamp) = stamp.filter(|_| self.discard_superseded) else {
+            return;
+        };
+        match stamp.discard_superseded(&state_dir(&self.work), result, previous) {
+            Ok(0) => {}
+            Ok(count) => crate::tprintln!(
+                "  recipe {} {}: discarded {count} superseded result(s) and their publications",
+                self.phase,
+                self.recipe.display()
+            ),
+            Err(error) => crate::teprintln!(
+                "  warning: the superseded results of {} were not discarded: {error:#}",
+                self.recipe.display()
+            ),
+        }
+    }
+}
+
+/// The Recipe state directory of a run in the work directory `work`.
+fn state_dir(work: &Path) -> PathBuf {
+    work.join("recipe-state")
 }
 
 /// Clears the recorded Recipe invocation when the run ends, however it ends.

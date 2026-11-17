@@ -164,16 +164,9 @@ fn installed_files() {
     files
 }
 
-// Links in the tree: [path, target]. On systemd the unit's Alias=, the link
-// `systemctl enable` makes; graphical.target wants display-manager.service.
-// OpenRC's runlevel link is the group recipe's to make.
-fn installed_links() {
-    if DEFINES.INIT == "systemd" {
-        [["etc/systemd/system/display-manager.service", "/usr/lib/systemd/system/reclogin.service"]]
-    } else {
-        []
-    }
-}
+// The tree holds files only, no links: Recipe refuses to unpack an archive
+// with an absolute symlink, and the group recipe (recipes/login-screen.rhai)
+// makes the display-manager link (systemd) and the runlevel link (OpenRC).
 
 fn build(src, out) {
     check_defines();
@@ -240,18 +233,10 @@ fn build(src, out) {
         chmod(dest, file[1]);
         target_mode(out, file[0], file[1]);
     }
-    for link in installed_links() {
-        let dest = join_path(out, link[0]);
-        mkdir(dirname(dest));
-        ln_force(link[1], dest);
-    }
 }
 
 fn verify(out) {
     for file in installed_files() {
         if !is_file(join_path(out, file[0])) { throw "/" + file[0] + " is not installed"; }
-    }
-    for link in installed_links() {
-        if !exists(join_path(out, link[0])) { throw "/" + link[0] + " is not installed"; }
     }
 }

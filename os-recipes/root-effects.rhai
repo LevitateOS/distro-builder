@@ -32,7 +32,8 @@ const NEEDS = #{
     storage_max_objects: 262144,
     timeout_secs: 3600,
 };
-const PACKAGE = #{ name: "root-effects", version: "1", description: "The whole-root caches of a LevitateOS or AcornOS root" };
+// No name here: the image installs this file as /usr/lib/recipe/effects.rhai, and Recipe takes the name from the file name.
+const PACKAGE = #{ version: "1", description: "The whole-root caches of a LevitateOS or AcornOS root" };
 const RERUN = true;
 
 // The root's C library, by its dynamic loader: [loader, library directories,

@@ -79,7 +79,7 @@ fn build(src, out) {
     for name in shell_output("ls '" + INPUTS.recipes + "'").split("\n") {
         let name = trim(name);
         if name == "" { continue; }
-        if !name.ends_with(".rhai") { throw "the recipes input holds " + name + ", not a recipe"; }
+        if !name.ends_with(".rhai") && !name.ends_with(".pins") { throw "the recipes input holds " + name + ", neither a recipe, a module nor a pins file"; }
         put_file(out, join_path(INPUTS.recipes, name), set + "/recipes/" + name);
     }
     for name in names {

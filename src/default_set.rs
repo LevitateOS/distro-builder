@@ -206,6 +206,15 @@ pub(crate) fn write_medium(variant: &Variant, overlay: &Path) -> Result<()> {
             fs::write(recipes.join(format!("{name}.pins")), &text)
                 .with_context(|| format!("copying recipes/{name}.pins"))?;
         }
+        // The modules it imports and the base it extends travel with it.
+        for source in crate::update_release::recipe_files(variant, name)? {
+            let file_name = source.file_name().context("a recipe file has a name")?;
+            let target = recipes.join(file_name);
+            if !target.exists() {
+                fs::copy(&source, &target)
+                    .with_context(|| format!("copying {} into the medium's recipes", source.display()))?;
+            }
+        }
     }
     let pins_file = inputs.join("pins");
     let text: String = pins.iter().map(|(sha, url)| format!("{sha} {url}\n")).collect();

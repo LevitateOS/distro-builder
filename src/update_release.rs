@@ -72,7 +72,9 @@ pub(crate) fn group_recipes(variant: &Variant) -> Result<Vec<String>> {
         else {
             continue;
         };
-        if !path.is_file() {
+        // A module (`os-facts.rhai`, `look.rhai`) is imported by recipes and
+        // is no recipe: the engine's own rule (the one `recipe index` uses).
+        if !path.is_file() || levitate_recipe::catalog::is_module(&path) {
             continue;
         }
         let entry = levitate_recipe::catalog::entry(&path, Some(&dir))
@@ -91,6 +93,30 @@ pub(crate) fn group_recipes(variant: &Variant) -> Result<Vec<String>> {
     Ok(names)
 }
 
+/// Every file of `recipes/` that the recipe `name` is compiled from, by the
+/// engine's own reading: the recipe, the base it extends, its pins file and
+/// the modules it imports (`os-facts.rhai`, `look.rhai`), canonical paths.
+pub(crate) fn recipe_files(variant: &Variant, name: &str) -> Result<Vec<PathBuf>> {
+    let dir = recipes_dir(variant);
+    let recipe = dir.join(format!("{name}.rhai"));
+    let declaration = levitate_recipe::needs::declaration(&recipe, Some(&dir))
+        .with_context(|| format!("reading recipes/{name}.rhai"))?;
+    let mut files: Vec<PathBuf> = declaration.source_digests.keys().cloned().collect();
+    files.extend(declaration.declared.modules.iter().cloned());
+    let folder = dir.canonicalize().with_context(|| format!("resolving {}", dir.display()))?;
+    for file in &files {
+        ensure!(
+            file.parent() == Some(folder.as_path()),
+            "recipes/{name}.rhai is compiled from {}, which is not in {}",
+            file.display(),
+            dir.display()
+        );
+    }
+    files.sort();
+    files.dedup();
+    Ok(files)
+}
+
 /// Puts the release's group recipes into the system tree `rootfs` at
 /// [`RELEASE_RECIPES`] (directory 0755, files 0644, owned by root), before
 /// `record-base`, so they are files of the entry `base`.
@@ -102,12 +128,15 @@ pub(crate) fn add_release_recipes(variant: &Variant, rootfs: &Path) -> Result<()
     }
     fs::create_dir_all(&dest).with_context(|| format!("creating {}", dest.display()))?;
     fs::set_permissions(&dest, fs::Permissions::from_mode(0o755))?;
+    let mut copied = std::collections::BTreeSet::new();
     for name in &names {
-        // The recipe and, beside it, its pins file (`NAME.pins`), which is
-        // part of the recipe's identity and travels with it.
-        for file_name in [format!("{name}.rhai"), format!("{name}.pins")] {
-            let source = recipes_dir(variant).join(&file_name);
-            if file_name.ends_with(".pins") && !source.is_file() {
+        for source in recipe_files(variant, name)? {
+            let file_name = source
+                .file_name()
+                .and_then(|n| n.to_str())
+                .with_context(|| format!("{} has no file name", source.display()))?
+                .to_owned();
+            if !copied.insert(file_name.clone()) {
                 continue;
             }
             let file = dest.join(&file_name);

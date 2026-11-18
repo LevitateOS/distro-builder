@@ -776,6 +776,14 @@ impl<'a> Invocation<'a> {
             .map_or_else(|| Err(std::io::ErrorKind::NotFound.into()), std::fs::canonicalize)
         {
             if store.join("sha256").is_dir() {
+                static SHARED: std::sync::Once = std::sync::Once::new();
+                SHARED.call_once(|| {
+                    if let Err(err) = rootfs_source::share_store(&store.join("sha256")) {
+                        crate::teprintln!(
+                            "warning: Recipe runs cannot read the whole download store: {err:#}"
+                        );
+                    }
+                });
                 note(format!("    RECIPE_CACHE_DIR={} (the download store)", store.display()));
                 cmd = cmd.env("RECIPE_CACHE_DIR", &store);
             }

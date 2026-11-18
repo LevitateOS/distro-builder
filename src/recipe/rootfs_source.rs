@@ -380,6 +380,25 @@ fn sha256_file(path: &Path) -> Result<String> {
     Ok(hasher.finalize().iter().map(|b| format!("{b:02x}")).collect())
 }
 
+/// Make every file in the store readable by everyone. Recipe runs read the
+/// store as their offline cache (`RECIPE_CACHE_DIR`) as an unprivileged
+/// identity of their own (Ginux's `nobody`, a host run's slot uid), so a file
+/// only its owner may read is no cache to them. The store holds public
+/// downloads only.
+pub(crate) fn share_store(store: &Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    for entry in std::fs::read_dir(store)? {
+        let entry = entry?;
+        let metadata = entry.metadata()?;
+        let mode = metadata.permissions().mode() & 0o7777;
+        if metadata.is_file() && mode & 0o444 != 0o444 {
+            std::fs::set_permissions(entry.path(), std::fs::Permissions::from_mode(mode | 0o444))
+                .with_context(|| format!("making '{}' readable", entry.path().display()))?;
+        }
+    }
+    Ok(())
+}
+
 /// Add every file of the preseed's output directories to the store under its
 /// digest, when the lock names that digest and the store lacks it.
 fn fill_store(
@@ -404,6 +423,9 @@ fn fill_store(
             }
             let mut temp = tempfile::Builder::new().prefix(".tmp-").tempfile_in(store)?;
             std::io::copy(&mut std::fs::File::open(&file)?, temp.as_file_mut())?;
+            // Readable by everyone: Recipe reads the store as its offline cache
+            // under unprivileged identities (`share_store`).
+            temp.as_file().set_permissions(std::os::unix::fs::PermissionsExt::from_mode(0o644))?;
             temp.as_file().sync_all()?;
             temp.persist(&target)?;
         }

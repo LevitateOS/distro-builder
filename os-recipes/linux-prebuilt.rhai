@@ -32,7 +32,7 @@ const ASSETS = #{
 
 // The asset of `target` for the pinned release: repo, sha256, name and URL.
 fn _asset(spec, target) {
-    if !ASSETS.contains(target) {
+    if ASSETS[target] == () {
         throw "no prebuilt kernel asset for KERNEL_TARGET '" + target + "' in linux-prebuilt.rhai; " +
             "publish one, or build the kernel from source with linux.rhai";
     }
@@ -83,7 +83,7 @@ fn build(src, out) {
     let unpacked = join_path(WORK, "prebuilt");
     rm(unpacked);
     mkdir(unpacked);
-    extract(tarball, unpacked);
+    extract_with_format(tarball, unpacked, "tar.xz");
     let mismatch = kernel::bundle_mismatch(unpacked, spec);
     if mismatch != "" { throw mismatch; }
     _check_config(unpacked);

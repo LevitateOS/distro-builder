@@ -123,6 +123,16 @@ pub fn pin(variant: &Variant) -> Result<KernelPin> {
     Ok(Metadata::load(&variant.repo_root)?.spec(variant)?.1)
 }
 
+/// The kernel.org URL of the source tarball the variant's pin names
+/// (`source_layout` in the kernel metadata), for the release's source list.
+pub fn source_tarball_url(variant: &Variant) -> Result<String> {
+    let layout: rhai::Map = Metadata::load(&variant.repo_root)?.call("source_layout", (variant.id.clone(),))?;
+    layout
+        .get("tarball_url")
+        .and_then(|v| v.clone().into_string().ok())
+        .with_context(|| format!("{METADATA} source_layout has no string 'tarball_url'"))
+}
+
 /// What the variant's kernel output directory holds, by the kernel recipes'
 /// own bundle rule. Reads files only: no Recipe run, no privileges.
 pub fn status(variant: &Variant) -> Result<KernelStatus> {

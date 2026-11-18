@@ -101,7 +101,7 @@ pub fn kernel_cmdline(init: InitSystem, role: BootRole) -> Vec<String> {
 const SYSTEMD_BOOT_EFI: &str = "usr/lib/systemd/boot/efi/systemd-bootx64.efi";
 
 /// The recipe that produces the release's busybox binary.
-const BUSYBOX_RECIPE: &str = "distro/builder/os-recipes/busybox-static.rhai";
+pub(crate) const BUSYBOX_RECIPE: &str = "distro/builder/os-recipes/busybox-static.rhai";
 
 /// What [`assemble`] made: the ISO, and the directories of the parts it was
 /// combined from (for `parts::prune` to keep).

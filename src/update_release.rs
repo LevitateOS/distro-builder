@@ -35,6 +35,9 @@
 //!   ISO does not carry (docs/release-engineering.md, section 11). The overlay
 //!   part writes them (`default_set::write_medium`) and the combiner links
 //!   them here; this module only names them in the manifest;
+//! - `SOURCES.txt`: the written offer and the source of every package and
+//!   component of the release ([`crate::source_offer`]); the manifest's
+//!   `sources` names it like an archive;
 //! - `release.json`: the unsigned manifest (schema 1) with the archives'
 //!   `url`, `sha256` and `size` left empty, and in `parts` one
 //!   `{name, category, url, sha256, size}` per category (`name` is the file's
@@ -314,6 +317,8 @@ pub(crate) fn write(variant: &Variant, rootfs: &Path, kernel: &Path, initramfs: 
         }
     }
 
+    crate::source_offer::write(variant, dir).context("writing the source list")?;
+
     let empty = || serde_json::json!({ "url": "", "sha256": "", "size": 0 });
     // The image's own record, so the manifest names the same release (and
     // date) as the base it carries, also when the system part was reused.
@@ -322,6 +327,7 @@ pub(crate) fn write(variant: &Variant, rootfs: &Path, kernel: &Path, initramfs: 
     object.insert("base".into(), empty());
     object.insert("boot".into(), empty());
     object.insert("iso".into(), empty());
+    object.insert("sources".into(), empty());
     object.insert("parts".into(), serde_json::Value::Array(parts));
     object.insert(
         "recipes".into(),

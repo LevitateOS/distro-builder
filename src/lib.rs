@@ -15,6 +15,7 @@ pub mod release;
 pub mod release_manifest;
 pub mod tui_apps;
 pub(crate) mod update_release;
+pub(crate) mod source_offer;
 pub(crate) mod tui_binary;
 pub(crate) mod default_set;
 pub(crate) mod desktop_apps;

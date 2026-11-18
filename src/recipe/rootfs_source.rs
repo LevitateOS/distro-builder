@@ -280,11 +280,9 @@ impl LockRow {
     }
 }
 
-/// The rows of `packages()` in the lock the preseed recipe `recipe` imports
-/// (`import "sources/<..>-lock.rhai"`), in lock order: the order the rootfs
-/// and root recipes install them in. The locks are generated, one row per
-/// line (`["name", "id", "URL", "SHA256"],`).
-pub(crate) fn lock_rows(recipe: &Path) -> Result<Vec<LockRow>> {
+/// The package lock the preseed recipe `recipe` imports
+/// (`import "sources/<..>-lock.rhai"`).
+pub(crate) fn lock_path(recipe: &Path) -> Result<std::path::PathBuf> {
     let text = std::fs::read_to_string(recipe)
         .with_context(|| format!("reading '{}'", recipe.display()))?;
     let dir = recipe.parent().context("preseed recipe has no directory")?;
@@ -297,7 +295,15 @@ pub(crate) fn lock_rows(recipe: &Path) -> Result<Vec<LockRow>> {
     let [lock] = locks.as_slice() else {
         bail!("'{}' imports {} package locks, not one", recipe.display(), locks.len());
     };
-    let path = dir.join(lock);
+    Ok(dir.join(lock))
+}
+
+/// The rows of `packages()` in the lock the preseed recipe `recipe` imports
+/// (`import "sources/<..>-lock.rhai"`), in lock order: the order the rootfs
+/// and root recipes install them in. The locks are generated, one row per
+/// line (`["name", "id", "URL", "SHA256"],`).
+pub(crate) fn lock_rows(recipe: &Path) -> Result<Vec<LockRow>> {
+    let path = lock_path(recipe)?;
     let text = std::fs::read_to_string(&path)
         .with_context(|| format!("reading lock '{}'", path.display()))?;
     let mut rows = Vec::new();

@@ -267,6 +267,14 @@ fn pretty_name() {
     throw "the os_release input has no PRETTY_NAME";
 }
 
+// What the image says about the licences of its software and where its source
+// is: the builder's `licenses` input (src/source_offer.rs), the same written
+// offer as the release's SOURCES.txt.
+fn licenses(root) {
+    for path in ["usr/share/doc", "usr/share/doc/levitate"] { directory(root, path, 0o755); }
+    put(root, "usr/share/doc/levitate/LICENSES.txt", read_file(INPUTS.licenses), 0o644);
+}
+
 // The setup program reads the distro profile from /etc/os-release, so it is
 // installed as the builder rendered it (its `system_setup` input).
 fn setup_program(root) {
@@ -398,6 +406,7 @@ fn branding(root) {
 fn apply(root, init) {
     check_init(init);
     identity(root);
+    licenses(root);
     put(root, "etc/issue", pretty_name() + " \\l\n", 0o644);
     // A package's own message of the day (Alpine's names its wiki and
     // setup-alpine) is not this system's.

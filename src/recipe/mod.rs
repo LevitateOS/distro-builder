@@ -766,6 +766,20 @@ impl<'a> Invocation<'a> {
                 cmd = cmd.env_remove(&key);
             }
         }
+        // Pinned downloads are read from the builder's download store before
+        // the network (Recipe's offline cache: `<dir>/sha256/<digest>`, read
+        // only to Recipe). A superseded upstream file, such as a replaced
+        // Fedora update build, then does not fail a run whose pin the store
+        // already holds. A caller's own `.env("RECIPE_CACHE_DIR", ..)` below wins.
+        if let Ok(store) = rootfs_source::store_dir(self.repo)
+            .parent()
+            .map_or_else(|| Err(std::io::ErrorKind::NotFound.into()), std::fs::canonicalize)
+        {
+            if store.join("sha256").is_dir() {
+                note(format!("    RECIPE_CACHE_DIR={} (the download store)", store.display()));
+                cmd = cmd.env("RECIPE_CACHE_DIR", &store);
+            }
+        }
         for (name, value) in &self.env {
             note(format!(
                 "    {}={}",

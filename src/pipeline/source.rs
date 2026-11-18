@@ -243,6 +243,7 @@ fn system_texts(variant: &Variant) -> Result<Vec<(&'static str, String)>> {
         ("system_setup", crate::guest::render(&crate::guest::SYSTEM_SETUP, &[])?),
         ("os_release", os_release(&variant.contract)),
         ("licenses", crate::source_offer::licenses_text(variant)?),
+        ("license_texts", crate::source_offer::license_texts(variant)?),
         ("capabilities", distro_contract::capabilities_text().to_string()),
         ("admin_rule_file", privilege.admin_rule_file().to_string()),
         ("admin_rule", privilege.admin_rule()),

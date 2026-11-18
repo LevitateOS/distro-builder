@@ -117,8 +117,11 @@ pub(crate) fn licenses_text(variant: &Variant) -> Result<String> {
             "The licence texts of the packages are in /usr/share/licenses, one folder for each package."
         }
         PackageBackend::Apk => {
-            "The packages carry the name of their licence in their metadata, not the licence text; \
-             the texts are on the page named below."
+            "Alpine's packages carry the name of their licence, not its text. The texts this system has are in \
+             /usr/share/licenses, one folder for each licence identifier the packages declare (for example \
+             GPL-2.0-or-later/LICENSE); /usr/share/licenses/MISSING.txt lists the identifiers whose text it \
+             does not have, each with the packages that declare it. A package that ships its own licence \
+             files installs them with the package."
         }
     };
     Ok(format!(
@@ -128,7 +131,7 @@ pub(crate) fn licenses_text(variant: &Variant) -> Result<String> {
          programs and from a Linux kernel it builds from pinned kernel.org source.\n\
          \n\
          The system contains third-party software, each program under its own licence. {texts}\n\
-         The licences of every program, with their texts: {licenses}\n\
+         The licences of the project and of the software in the release: {licenses}\n\
          The project's own programs are in https://github.com/LevitateOS/LevitateOS.\n\
          \n\
          The exact source package of everything in the release, with its licence and hash, is listed in \
@@ -141,6 +144,118 @@ pub(crate) fn licenses_text(variant: &Variant) -> Result<String> {
         licenses = licenses_url(variant),
         sources = sources_url(variant),
     ))
+}
+
+/// The licence texts the system recipe installs under `/usr/share/licenses`,
+/// as the `license_texts` input: records `@@@ <path>` followed by the file's
+/// text, each record ending in a newline and joined by one more.
+///
+/// AcornOS: the identifiers the locked packages declare in their `.PKGINFO`
+/// (and the kernel's), each with the text the project holds for it in
+/// `LICENSES/<identifier>.txt` (a `-only`, `-or-later` or `+` identifier takes
+/// the text of its family: `GPL-2.0.txt` serves `GPL-2.0-or-later`) as
+/// `<identifier>/LICENSE`; every identifier without a text is listed in
+/// `MISSING.txt` with the packages that declare it, never given an invented
+/// text. A text added to `LICENSES/` is picked up by its name alone.
+/// LevitateOS: empty, Fedora's packages carry their own texts.
+pub(crate) fn license_texts(variant: &Variant) -> Result<String> {
+    if variant.contract.profile.packages == PackageBackend::Rpm {
+        return Ok(String::new());
+    }
+    // The desktop lock's APKs are in the store only once its preseed ran;
+    // every package a lock names has to be read, or the list is incomplete.
+    let desktop = preseed_recipe(variant, Flavour::Desktop);
+    crate::recipe::rootfs_source::preseed_rootfs_source(&variant.repo_root, &variant.id, &desktop, Flavour::Desktop, false)
+        .context("acquiring the desktop lock to read its packages' licences")?;
+    let mut declared: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    let mut unread = Vec::new();
+    for row in lock_packages(variant)? {
+        let info = stored(variant, &row).map(|path| apk_info(&path)).transpose();
+        match info {
+            Ok(Some(info)) => {
+                let ids = info.get("license").map(|text| license_ids(text)).unwrap_or_default();
+                if ids.is_empty() {
+                    declared.entry(UNKNOWN.into()).or_default().insert(row.name.clone());
+                }
+                for id in ids {
+                    declared.entry(id).or_default().insert(row.name.clone());
+                }
+            }
+            Ok(None) => unread.push(format!("{} (not in the download store)", row.id)),
+            Err(error) => unread.push(format!("{}: {error:#}", row.id)),
+        }
+    }
+    ensure!(
+        unread.is_empty(),
+        "the licences of these locked packages could not be read from their .PKGINFO, so the licence list \
+         would be incomplete: {}. Run the desktop and base preseeds (`cargo xtask build` does) and rebuild.",
+        unread.join("; ")
+    );
+    for id in license_ids(KERNEL_LICENSE) {
+        declared.entry(id).or_default().insert("linux".into());
+    }
+
+    let dir = variant.repo_root.join("LICENSES");
+    let mut records = Vec::new();
+    let mut missing = String::new();
+    for (id, packages) in &declared {
+        match license_file(&dir, id) {
+            Some(file) => {
+                let text = fs::read_to_string(&file).with_context(|| format!("reading {}", file.display()))?;
+                records.push((format!("{id}/LICENSE"), text));
+            }
+            None => {
+                let packages = packages.iter().cloned().collect::<Vec<_>>().join(",");
+                missing.push_str(&format!("{id}\t{packages}\n"));
+            }
+        }
+    }
+    records.push((
+        "MISSING.txt".into(),
+        format!(
+            "# Licence identifiers declared by the packages of this system (the Alpine package locks and the \
+             kernel)\n# whose text this image does not carry. One per line: the identifier, a tab, the packages \
+             that declare it.\n# A package that ships its own licence files installs them with the package.\n{missing}"
+        ),
+    ));
+    let mut text = String::new();
+    for (index, (path, content)) in records.iter().enumerate() {
+        ensure!(
+            content.ends_with('\n') && !content.lines().any(|line| line.starts_with("@@@ ")),
+            "the licence text for {path} would break the record format of the license_texts input"
+        );
+        if index > 0 {
+            text.push('\n');
+        }
+        text.push_str(&format!("@@@ {path}\n{content}"));
+    }
+    Ok(text)
+}
+
+/// The licence identifiers of a package's `license` field: an SPDX expression
+/// or, as Alpine writes some, a plain list. The operators and parentheses go;
+/// `Public Domain` is one identifier.
+fn license_ids(expression: &str) -> BTreeSet<String> {
+    let flat = expression.replace(['(', ')', ','], " ").replace("Public Domain", "Public-Domain");
+    flat.split_whitespace()
+        .filter(|token| !matches!(*token, "AND" | "OR" | "WITH"))
+        .map(str::to_string)
+        .collect()
+}
+
+/// The text the project holds for licence `id`: `LICENSES/<id>.txt`, else that
+/// of the id's family without `+`, `-only` or `-or-later`.
+fn license_file(dir: &Path, id: &str) -> Option<PathBuf> {
+    let safe = |name: &str| {
+        !name.is_empty() && name.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'+' | b'_'))
+    };
+    let family = id.trim_end_matches('+');
+    let family = family.strip_suffix("-or-later").or_else(|| family.strip_suffix("-only")).unwrap_or(family);
+    [id, family]
+        .into_iter()
+        .filter(|name| safe(name))
+        .map(|name| dir.join(format!("{name}.txt")))
+        .find(|path| path.is_file())
 }
 
 /// Writes [`FILE`] into the release's run directory `dir`.
@@ -383,6 +498,7 @@ fn apk_info(path: &Path) -> Result<BTreeMap<String, String>> {
     let output = Command::new("tar")
         .arg("-xzOf")
         .arg(path)
+        .arg("--occurrence=1")
         .arg(".PKGINFO")
         .stderr(Stdio::null())
         .output()

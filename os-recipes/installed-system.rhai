@@ -269,10 +269,22 @@ fn pretty_name() {
 
 // What the image says about the licences of its software and where its source
 // is: the builder's `licenses` input (src/source_offer.rs), the same written
-// offer as the release's SOURCES.txt.
+// offer as the release's SOURCES.txt. The licence texts the builder collected
+// (its `license_texts` input: records "@@@ <path>" and the file's text, each
+// ending in a newline and joined by one more) go under usr/share/licenses.
 fn licenses(root) {
     for path in ["usr/share/doc", "usr/share/doc/levitate"] { directory(root, path, 0o755); }
     put(root, "usr/share/doc/levitate/LICENSES.txt", read_file(INPUTS.licenses), 0o644);
+    let records = ("\n" + read_file(INPUTS.license_texts)).split("\n@@@ ");
+    records.remove(0);
+    if records.len() == 0 { return; }
+    directory(root, "usr/share/licenses", 0o755);
+    for record in records {
+        let end = record.index_of("\n");
+        let path = record.sub_string(0, end);
+        if path.contains("/") { directory(root, "usr/share/licenses/" + dirname(path), 0o755); }
+        put(root, "usr/share/licenses/" + path, record.sub_string(end + 1), 0o644);
+    }
 }
 
 // The setup program reads the distro profile from /etc/os-release, so it is

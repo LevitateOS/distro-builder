@@ -169,10 +169,11 @@ pub(crate) fn compile_in_build_root(
 ) -> Result<PathBuf> {
     let repo = &variant.repo_root;
     let (reference, image) = build_root(variant).context("making the apps-build root")?;
-    // The static Recipe the image itself ships: it runs in any root.
-    let worker = crate::recipe::tools::build_tool_tree(repo, "levitate-recipe", None)
+    // The static Recipe the image itself ships: it runs in any root. Only the
+    // program, not the packaged tree, which ships the runtime images too.
+    let worker = crate::recipe::tools::compile_crate(repo, "levitate-recipe")
         .context("building the static Recipe that runs inside the apps-build root")?
-        .join("usr/bin/recipe");
+        .join("recipe");
     fs::create_dir_all(work).with_context(|| format!("creating '{}'", work.display()))?;
     let mut invocation = Invocation::new(repo, "install", recipe, work.join("recipe"));
     for (name, path) in inputs {

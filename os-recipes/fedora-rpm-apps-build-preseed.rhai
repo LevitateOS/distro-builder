@@ -9,6 +9,7 @@ const NEEDS = #{
     outputs: #{ apps_build_rpms: "directory" },
     network: ["dl.fedoraproject.org:443"],
     memory_mib: 8192,
+    runtime: "minimal",
 };
 import "sources/levitate-rpm-apps-build-lock.rhai" as lock;
 const PACKAGE = #{ name: "fedora-rpm-apps-build-preseed", description: "Locked Fedora 45 RPM set for compiling the desktop apps" };

@@ -10,6 +10,7 @@ const NEEDS = #{
     network_max_bytes: 536870912,
     memory_mib: 4096,
     timeout_secs: 600,
+    runtime: "minimal",
 };
 const PACKAGE = #{ name: "bun-toolchain", version: "1.4.2", description: "Pinned Bun compiler and target runtime for the TUI producer" };
 

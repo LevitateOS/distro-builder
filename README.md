@@ -73,11 +73,18 @@ gives every invocation that launcher as `GINUX_BIN` and the CLI it runs as
 `RECIPE_WORKER_BIN`; ambient values of those two are ignored (and logged), so a
 build never runs an older launcher or worker than the checkout. `GINUX_ROOT`,
 `GINUX_ROOTFS` and `RECIPE_FRAME_TIMEOUT_SECS` are forwarded; other ambient
-`RECIPE_*`/`GINUX_*` controls are removed. Every invocation names its root as
-Recipe's minimal image too (`GINUX_MINIMAL_ROOT`/`GINUX_MINIMAL_ROOTFS`), so a recipe
-that asks for the minimal image (`NEEDS.runtime`) runs in the compiler image like every
-other recipe of an OS build; the installed Recipe ships the minimal image
-(`tools/recipe/bootstrap/minimal-runtime.json`) for the root effects recipe.
+`RECIPE_*`/`GINUX_*` controls are removed. An invocation whose recipes ask for
+Recipe's minimal runtime image (`NEEDS.runtime: "minimal"`: every OS recipe that needs
+no compiler, see `os-recipes/README.md`) is given it as `GINUX_MINIMAL_ROOT`/
+`GINUX_MINIMAL_ROOTFS`: the image `tools/recipe/bootstrap/minimal-runtime.json` pins,
+at `.artifacts/ginux-env/prepared-image-minimal`, unless the ambient pair names
+another; a run in its own root (the apps-build root) has that root as both images.
+Each pair (`GINUX_ROOT`/`GINUX_ROOTFS`, `GINUX_MINIMAL_ROOT`/`GINUX_MINIMAL_ROOTFS`) is
+set whole or not at all; one variable alone is refused. A run's done stamp, the unpack
+store, the configured tree, the system part and every prebuilt key name the images its
+recipes run in and no other (`recipe::RunImages`), so a new compiler image leaves the
+keys of runs in the minimal image alone, and the other way round. The installed Recipe
+ships the minimal image too, for the root effects recipe.
 
 Each release records `system-sources.sha256` beside its rootfs: the digest of
 every source its system rootfs is built from (the builder, contract, profile,
@@ -139,6 +146,7 @@ recorded in its `part.json` with its output files (path, bytes, sha256):
   the builder's own crates (recinit, reciso, levitate-recipe...),
   Recipe's declared behaviour versions and the identity mode (`declared`, or
   `exact` with the Recipe CLI's and the Ginux launcher's SHA-256), the Ginux root (`GINUX_ROOT`, and the `GINUX_ROOTFS` tar's
+  digest), the minimal runtime image (`GINUX_MINIMAL_ROOT`, and the `GINUX_MINIMAL_ROOTFS` tar's
   digest), the kernel (release, image digest, module tree digest) and busybox;
 - overlay: the system part's key and exact build, the product, the overlay
   tools' crate closures and the running builder executable.
@@ -312,7 +320,8 @@ Every line the builder prints starts with the local time (`HH:MM:SS`; `tprintln!
 Our own tools (`recpart`, `recstrap`, `recab`, `recguest`, `recupdate`, `recipe`, `install-split`), the TUI
 binary (`install-tui`), the Qt desktop apps (family `desktop-apps`, one whole tree per distro: programs, menu entries, polkit actions, Recipe's metadata, kept with exact modes and links) the display server (family `display-server`, AcornOS only) and the login screen (family `login-screen`, reclogin, one tree per distro) are identified by a **key**, the SHA-256 of
 everything their compile depends on (`src/prebuilt.rs`): the prepared source closure,
-the compile recipe, the target, the compiler image digest and Recipe's two behaviour
+the compile recipe, the target, the runtime images its recipes run in (the compiler image,
+the minimal image, each only where a recipe of the part runs in it) and Recipe's two behaviour
 versions (`ENGINE_BEHAVIOUR`, `GINUX_BEHAVIOUR`; `prebuilt::behaviour`). Nothing that does
 not change what the compile writes is in it: not Ginux's contract digests, and not a
 lock's `locked_on` date. So CI builds and publishes a part only when the program would
@@ -329,7 +338,7 @@ program says which: `[prebuilt] recab: local|downloaded|compiled <key16>`.
   a TUI key needs `--distro` for its libc; for `desktop-apps`, `display-server` and `login-screen` the name is the distro and no flag is taken.
 - The desktop apps key covers `tools/gui` (tracked files, modes, worktree content), the base and apps-build
   locks, the apps-build root, both preseed recipes and `desktop-apps.rhai` with their imports, the
-  compiler image, Recipe's declared versions, the distro and its libc. On a hit `desktop_apps.rs` skips
+  images the apps-build root is made in (the minimal image), Recipe's declared versions, the distro and its libc. On a hit `desktop_apps.rs` skips
   building the apps-build root and the compile; the cached tree is merged and `check` still runs.
   `prebuilt build desktop-apps <distro>` (elevated) fills the cache without ISO or download.
 - The login screen (`src/login_screen.rs`, `os-recipes/reclogin.rhai`) links the distro's own libpam,

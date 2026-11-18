@@ -13,8 +13,8 @@
 //!   installed initramfs and the release set (`release-set.json`, `live/` and
 //!   `boot/` members, `system-sources.sha256`). Built from the checkout's
 //!   system sources, the builder's own crates, Recipe's and Ginux's declared
-//!   behaviour versions (and their bytes in exact mode) and the Ginux root,
-//!   the kernel and busybox (`system_inputs`).
+//!   behaviour versions (and their bytes in exact mode), the Ginux root and
+//!   the minimal runtime image, the kernel and busybox (`system_inputs`).
 //! - `overlay-<product>`: the product's overlay tree (live session, overlay
 //!   tools, install screen; on the release medium the default software set
 //!   and its package cache) built on the system tree, and its
@@ -64,6 +64,9 @@ const ATTEMPTS: usize = 3;
 /// Where the builder finds the compiler image when `GINUX_ROOTFS` is unset
 /// (`recipe::compiler_image`).
 const DEFAULT_GINUX_ROOTFS: &str = ".artifacts/ginux-env/prepared-image-build-tools/rootfs.tar";
+/// Where the builder finds the minimal runtime image when `GINUX_MINIMAL_ROOTFS`
+/// is unset (`recipe::minimal_image`).
+const DEFAULT_GINUX_MINIMAL_ROOTFS: &str = ".artifacts/ginux-env/prepared-image-minimal/rootfs.tar";
 
 /// A part's named inputs, each a digest or an exact value.
 pub(crate) type Inputs = BTreeMap<String, String>;
@@ -337,6 +340,24 @@ fn system_inputs(variant: &Variant, kernel: &Path) -> Result<Inputs> {
             file_sha256(&rootfs_tar)?.0
         } else {
             format!("absent: {}", rootfs_tar.display())
+        },
+    );
+    // The minimal runtime image the system's steps that ask for it run in
+    // (the system recipe and every package step but the RPM effects) and the
+    // installed Recipe ships.
+    inputs.insert(
+        "ginux-minimal-root".into(),
+        std::env::var("GINUX_MINIMAL_ROOT").unwrap_or_else(|_| "pinned minimal image".into()),
+    );
+    let minimal_tar = std::env::var_os("GINUX_MINIMAL_ROOTFS")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| repo.join(DEFAULT_GINUX_MINIMAL_ROOTFS));
+    inputs.insert(
+        "ginux-minimal-rootfs".into(),
+        if minimal_tar.is_file() {
+            file_sha256(&minimal_tar)?.0
+        } else {
+            format!("absent: {}", minimal_tar.display())
         },
     );
     // The kernel the system's modules come from.

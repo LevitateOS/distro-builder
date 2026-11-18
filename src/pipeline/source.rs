@@ -295,7 +295,16 @@ fn configured_fields(
         fields.push((format!("branding-{name}"), crate::prebuilt::file_digest(&variant.path(file))?));
     }
     fields.push(("behaviour".into(), crate::prebuilt::behaviour()));
-    fields.push(("compiler-image".into(), crate::recipe::compiler_image_reference(repo)?));
+    // The images steps 1, 3 and 4 run in: a field for each image one of
+    // their recipes asks for (`recipe::RunImages`).
+    let first = repo.join(match variant.contract.profile.packages {
+        PackageBackend::Rpm => compose::RPM_UNPACK_RECIPE,
+        PackageBackend::Apk => compose::APK_BASE_TREE_RECIPE,
+    });
+    let images = crate::recipe::RunImages::of(repo, &[&first, effects_recipe, recipe])?;
+    for (name, reference) in images.key_fields(repo, "compiler-image", "minimal-image")? {
+        fields.push((name.into(), reference));
+    }
     if crate::recipe::exact_identity() {
         fields.push(("declared".into(), levitate_recipe::identity::declared()));
         fields.push(("recipe-cli".into(), crate::parts::file_sha256(crate::recipe::binary(repo)?)?.0));

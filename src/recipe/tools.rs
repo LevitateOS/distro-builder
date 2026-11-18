@@ -881,22 +881,24 @@ pub(crate) fn compile_crate_with_origin(repo: &Path, package: &str) -> Result<(P
 }
 
 /// The key of `package`'s prebuilt programs: its prepared source closure, the compile
-/// recipe, target, compiler image and Recipe's declared behaviour (`crate::prebuilt`).
+/// recipe, target, the runtime image it runs in (`super::RunImages`: the compiler
+/// image) and Recipe's declared behaviour (`crate::prebuilt`).
 fn tool_key(repo: &Path, package: &str, source: &Path) -> Result<crate::prebuilt::Key> {
     let (_, _, binaries) = tool(package)?;
     let mut sorted = binaries.to_vec();
     sorted.sort_unstable();
     let recipe = repo.join("distro/builder/os-recipes/tool-crate.rhai");
-    Ok(crate::prebuilt::Key::new(&[
+    let mut fields = vec![
         ("family", "tools".into()),
         ("package", package.into()),
         ("binaries", sorted.join(",")),
         ("target", crate::prebuilt::TOOLS_TARGET.into()),
         ("source_closure", crate::prebuilt::dir_digest(source)?),
         ("tool_crate_recipe", crate::prebuilt::file_digest(&recipe)?),
-        ("compiler_image", super::compiler_image_reference(repo)?),
-        ("behaviour", crate::prebuilt::behaviour()),
-    ]))
+    ];
+    fields.extend(super::RunImages::of(repo, &[&recipe])?.key_fields(repo, "compiler_image", "minimal_image")?);
+    fields.push(("behaviour", crate::prebuilt::behaviour()));
+    Ok(crate::prebuilt::Key::new(&fields))
 }
 
 /// `distro-builder prebuilt key tools <package>`: prepares the source closure and
@@ -917,15 +919,10 @@ pub(crate) const RELEASE_KEYS_DIR: &str = "distro/keys/release";
 
 /// Compile `package`'s `binary` (its default when `None`) through its recipe,
 /// as a static musl program on every distro, and return the published package tree,
-/// which holds it at `usr/bin/<binary>`. recupdate's tree also depends on the
-/// init system (its service files): use [`build_system_tool_tree`] for it.
-pub(crate) fn build_tool_tree(repo: &Path, package: &str, binary: Option<&str>) -> Result<PathBuf> {
-    build_system_tool_tree(repo, package, binary, None)
-}
-
-/// [`build_tool_tree`] for a system whose init is `init`: recupdate's tree
-/// takes the init's service files from `tools/recupdate/dist` and the release
-/// public keys from [`RELEASE_KEYS_DIR`] (a build without one says so).
+/// which holds it at `usr/bin/<binary>`, for a system whose init is `init`:
+/// recupdate's tree takes the init's service files from `tools/recupdate/dist`
+/// and the release public keys from [`RELEASE_KEYS_DIR`] (a build without one
+/// says so). The levitate-recipe tree also ships both runtime images.
 pub(crate) fn build_system_tool_tree(
     repo: &Path,
     package: &str,

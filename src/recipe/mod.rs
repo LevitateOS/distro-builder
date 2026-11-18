@@ -28,10 +28,10 @@ use crate::process::Cmd;
 /// `tools/ginux` and the Recipe binary it runs, so an invocation never runs an older
 /// launcher or worker than the checkout. Every other `RECIPE_*`/`GINUX_*` variable
 /// is removed, so an ambient one (a worker's `RECIPE_WORKER`, say) cannot change how
-/// Recipe runs. An ambient `GINUX_MINIMAL_ROOT`/`GINUX_MINIMAL_ROOTFS` among them: every
-/// invocation names its root as the minimal image too, so a recipe that asks for the
-/// minimal image (`NEEDS.runtime`) runs in the compiler image like every other recipe of
-/// an OS build, the image its stamp names.
+/// Recipe runs. An ambient `GINUX_MINIMAL_ROOT`/`GINUX_MINIMAL_ROOTFS` among them: an
+/// invocation whose recipes ask for the minimal image (`NEEDS.runtime`) is given the one
+/// [`minimal_image`] selects (which honours that ambient pair), the one its stamp names,
+/// and no other invocation is given one.
 const LAUNCHER_ENV: &[&str] = &["GINUX_ROOT", "GINUX_ROOTFS", "RECIPE_FRAME_TIMEOUT_SECS"];
 /// The worker frame deadline OS builds give Recipe when the caller sets none.
 const OS_BUILD_FRAME_TIMEOUT_SECS: &str = "1800";
@@ -43,8 +43,8 @@ const COMPILER_IMAGE_PIN: &str = "tools/recipe/bootstrap/product-ci.json";
 /// Where the pinned minimal runtime image lives, and the file that pins it
 /// (`tools/recipe/bootstrap/minimal-runtime.json`, whose `image_manifest` is
 /// `ginux-minimal-image.json`). The installed Recipe ships it beside the
-/// compiler image; a recipe with `NEEDS.runtime: "minimal"` (the root effects
-/// recipe) runs in it.
+/// compiler image; a recipe with `NEEDS.runtime: "minimal"` runs in it, in OS
+/// builds too ([`run_images`]).
 const MINIMAL_IMAGE_DIR: &str = ".artifacts/ginux-env/prepared-image-minimal";
 const MINIMAL_IMAGE_PIN: &str = "tools/recipe/bootstrap/minimal-runtime.json";
 
@@ -146,53 +146,146 @@ impl PinnedImage {
 /// The compiler image OS builds run Recipe in, as `(GINUX_ROOT, GINUX_ROOTFS)`:
 /// the one `product-ci.json` pins (`oci:recipe-compiler@sha256:<image_sha256>`),
 /// produced at `.artifacts/ginux-env/prepared-image-build-tools/rootfs.tar`.
-/// `None` when the builder's environment sets `GINUX_ROOT` or `GINUX_ROOTFS`:
-/// those keep winning. The builder never produces the image.
+/// `None` when the builder's environment sets `GINUX_ROOT` and `GINUX_ROOTFS`
+/// ([`ambient_image`]): those keep winning. The builder never produces the image.
 fn compiler_image(repo: &Path) -> Result<Option<(String, PathBuf)>> {
-    if std::env::var_os("GINUX_ROOT").is_some() || std::env::var_os("GINUX_ROOTFS").is_some() {
+    if ambient_image(levitate_recipe::runtime::Image::Full)?.is_some() {
         return Ok(None);
     }
     COMPILER_IMAGE.select(repo).map(Some)
 }
 
-/// The minimal runtime image the installed Recipe ships, as `(reference,
-/// rootfs tar)`: the ambient `GINUX_MINIMAL_ROOT`/`GINUX_MINIMAL_ROOTFS` when
-/// the builder's environment sets them (as Recipe itself reads them), else
-/// the one `minimal-runtime.json` pins (`oci:recipe-minimal@sha256:<digest>`).
-/// OS builds never run in it: every invocation names its root as the minimal
-/// image too (`Invocation::run`), so every recipe runs in the compiler image.
+/// The image the builder's environment selects for `image`, as `(reference,
+/// rootfs tar)`: `GINUX_ROOT` and `GINUX_ROOTFS` for the full image,
+/// `GINUX_MINIMAL_ROOT` and `GINUX_MINIMAL_ROOTFS` for the minimal one. Both
+/// of a pair or neither: one alone is refused, since Recipe would then take
+/// the other half from the host's install, and a key would name another
+/// image than the one a run uses and an install ships.
+fn ambient_image(image: levitate_recipe::runtime::Image) -> Result<Option<(String, PathBuf)>> {
+    let (root, rootfs) = (image.root_env(), image.rootfs_env());
+    match (std::env::var_os(root), std::env::var_os(rootfs)) {
+        (None, None) => Ok(None),
+        (Some(reference), Some(tar)) => {
+            let reference = reference
+                .into_string()
+                .map_err(|_| anyhow::anyhow!("{root} is not valid UTF-8"))?;
+            levitate_recipe::runtime::root_digest(&reference)
+                .with_context(|| format!("{root}={reference} is not an image reference"))?;
+            if tar.is_empty() {
+                bail!("{rootfs} is empty; set it to the tar of {root}={reference}");
+            }
+            Ok(Some((reference, PathBuf::from(tar))))
+        }
+        _ => bail!(
+            "{root} and {rootfs} select an image together: set both (the reference and its tar) \
+             or neither (the pinned image)"
+        ),
+    }
+}
+
+/// The minimal runtime image, as `(reference, rootfs tar)`: the ambient
+/// `GINUX_MINIMAL_ROOT`/`GINUX_MINIMAL_ROOTFS` pair when the builder's
+/// environment sets it ([`ambient_image`]), else the one `minimal-runtime.json`
+/// pins (`oci:recipe-minimal@sha256:<digest>`). The installed Recipe ships it,
+/// and every builder run whose recipes ask for it runs in it ([`run_images`]).
 pub(crate) fn minimal_image(repo: &Path) -> Result<(String, PathBuf)> {
-    if std::env::var_os("GINUX_MINIMAL_ROOT").is_some()
-        || std::env::var_os("GINUX_MINIMAL_ROOTFS").is_some()
-    {
-        let reference = levitate_recipe::runtime::minimal_reference()?
-            .context("GINUX_MINIMAL_ROOTFS is set without GINUX_MINIMAL_ROOT; set both")?;
-        levitate_recipe::runtime::root_digest(&reference)?;
-        let image = levitate_recipe::runtime::rootfs_path(&reference)?;
-        return Ok((reference, image));
+    if let Some(selected) = ambient_image(levitate_recipe::runtime::Image::Minimal)? {
+        return Ok(selected);
     }
     MINIMAL_IMAGE.select(repo)
 }
 
 /// The minimal image's reference, for keys computed without the image: the
-/// ambient `GINUX_MINIMAL_ROOT` when set, else the pinned one. The same
-/// string `minimal_image` selects.
+/// ambient `GINUX_MINIMAL_ROOT` when its pair is set, else the pinned one. The
+/// same string `minimal_image` selects.
 pub(crate) fn minimal_image_reference(repo: &Path) -> Result<String> {
-    if let Some(root) = std::env::var_os("GINUX_MINIMAL_ROOT") {
-        return Ok(root.to_string_lossy().into_owned());
+    if let Some((reference, _)) = ambient_image(levitate_recipe::runtime::Image::Minimal)? {
+        return Ok(reference);
     }
-    MINIMAL_IMAGE.reference(repo)
+    pinned_minimal_image_reference(repo)
 }
 
 /// The compiler image's reference, for keys computed without the image (CI): the
-/// ambient `GINUX_ROOT` when set, else `oci:recipe-compiler@sha256:<image_sha256>`
-/// from `product-ci.json`. The same string `compiler_image` selects.
+/// ambient `GINUX_ROOT` when its pair is set, else
+/// `oci:recipe-compiler@sha256:<image_sha256>` from `product-ci.json`. The same
+/// string `compiler_image` selects.
 pub(crate) fn compiler_image_reference(repo: &Path) -> Result<String> {
-    if let Some(root) = std::env::var_os("GINUX_ROOT") {
-        return Ok(root.to_string_lossy().into_owned());
+    if let Some((reference, _)) = ambient_image(levitate_recipe::runtime::Image::Full)? {
+        return Ok(reference);
     }
     pinned_compiler_image_reference(repo)
 }
+
+/// Which runtime images a builder run of a recipe unpacks: the full
+/// (compiler) image for each recipe of its graph that asks for nothing, the
+/// minimal image for each that declares `NEEDS.runtime: "minimal"`. Keys of
+/// what a run makes name exactly these images ([`RunImages::key_fields`],
+/// the done stamp in [`Invocation::run`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct RunImages {
+    pub full: bool,
+    pub minimal: bool,
+}
+
+impl RunImages {
+    /// The images runs of all of `recipes` (os-recipes, each with its graph) unpack.
+    pub(crate) fn of(repo: &Path, recipes: &[&Path]) -> Result<Self> {
+        let mut images = Self::default();
+        for recipe in recipes {
+            let more = run_images(recipe, &repo.join(OS_RECIPES))?;
+            images.full |= more.full;
+            images.minimal |= more.minimal;
+        }
+        Ok(images)
+    }
+
+    /// The key fields naming these images, computed without them: `full`
+    /// with [`compiler_image_reference`] when a run uses the full image,
+    /// `minimal` with [`minimal_image_reference`] when one uses the minimal
+    /// image. A key without a run in an image does not change with it.
+    pub(crate) fn key_fields(
+        self,
+        repo: &Path,
+        full: &'static str,
+        minimal: &'static str,
+    ) -> Result<Vec<(&'static str, String)>> {
+        let mut fields = Vec::new();
+        if self.full {
+            fields.push((full, compiler_image_reference(repo)?));
+        }
+        if self.minimal {
+            fields.push((minimal, minimal_image_reference(repo)?));
+        }
+        Ok(fields)
+    }
+
+    /// One reference naming these images, for a store key's root field:
+    /// [`compiler_image_reference`] alone for the full image (as such keys
+    /// always named it), [`minimal_image_reference`] alone for the minimal
+    /// one, both joined by ` + ` when a graph uses both.
+    pub(crate) fn reference(self, repo: &Path) -> Result<String> {
+        let fields = self.key_fields(repo, "full", "minimal")?;
+        Ok(fields.into_iter().map(|(_, reference)| reference).collect::<Vec<_>>().join(" + "))
+    }
+}
+
+/// The images a run of `recipe`, with names and `deps` resolved from
+/// `search`, unpacks: each recipe of its graph by its `NEEDS.runtime`.
+pub(crate) fn run_images(recipe: &Path, search: &Path) -> Result<RunImages> {
+    let graph = levitate_recipe::needs::declarations(recipe, Some(search))
+        .with_context(|| format!("reading the runtime images of '{}'", recipe.display()))?;
+    let mut images = RunImages::default();
+    for declaration in &graph {
+        match declaration.needs.runtime {
+            levitate_recipe::runtime::Image::Full => images.full = true,
+            levitate_recipe::runtime::Image::Minimal => images.minimal = true,
+        }
+    }
+    Ok(images)
+}
+
+/// The builder's recipe collection, relative to the repository.
+const OS_RECIPES: &str = "distro/builder/os-recipes";
 
 /// The pinned compiler image's reference, `oci:recipe-compiler@sha256:<image_sha256>`
 /// from `product-ci.json`, whatever the environment says.
@@ -200,15 +293,10 @@ pub(crate) fn pinned_compiler_image_reference(repo: &Path) -> Result<String> {
     COMPILER_IMAGE.reference(repo)
 }
 
-/// The root image recipe steps run in, as its reference: `GINUX_ROOT` when
-/// the builder's environment sets it, else the pinned compiler image
-/// (`oci:recipe-compiler@sha256:<image_sha256>` from `product-ci.json`). For
-/// store keys of what those steps produce; nothing is checked here.
-pub(crate) fn root_reference(repo: &Path) -> Result<String> {
-    if let Some(root) = std::env::var_os("GINUX_ROOT") {
-        return Ok(root.to_string_lossy().into_owned());
-    }
-    COMPILER_IMAGE.reference(repo)
+/// The pinned minimal image's reference, `oci:recipe-minimal@sha256:<image_sha256>`
+/// from `minimal-runtime.json`, whatever the environment says.
+pub(crate) fn pinned_minimal_image_reference(repo: &Path) -> Result<String> {
+    MINIMAL_IMAGE.reference(repo)
 }
 
 /// Whether `release build --exact` selected exact identity for this process.
@@ -231,18 +319,15 @@ pub fn exact_identity() -> bool {
 }
 
 /// The root image Recipe runs in, as `(reference, rootfs tar)`: the ambient
-/// `GINUX_ROOT`/`GINUX_ROOTFS` when the builder's environment sets them (as
-/// Recipe itself reads them), else the pinned compiler image `compiler_image`
+/// `GINUX_ROOT`/`GINUX_ROOTFS` pair when the builder's environment sets it
+/// ([`ambient_image`]), else the pinned compiler image `compiler_image`
 /// selects. The same image the builder's Recipe runs use, and the one the
 /// installed Recipe ships.
 pub(crate) fn runtime_image(repo: &Path) -> Result<(String, PathBuf)> {
-    if let Some(selected) = compiler_image(repo)? {
+    if let Some(selected) = ambient_image(levitate_recipe::runtime::Image::Full)? {
         return Ok(selected);
     }
-    let reference = levitate_recipe::runtime::root_reference()?;
-    levitate_recipe::runtime::root_digest(&reference)?;
-    let image = levitate_recipe::runtime::rootfs_path(&reference)?;
-    Ok((reference, image))
+    COMPILER_IMAGE.select(repo)
 }
 
 /// The Ginux crate's directory, the cargo target it builds for, and its binary.
@@ -503,17 +588,6 @@ impl<'a> Invocation<'a> {
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_else(|| recipe.display().to_string());
-        // An install whose recipe, inputs, root and Recipe behaviour are
-        // unchanged and whose outputs are intact is not run again (`stamp`).
-        let root_reference = match &self.root {
-            Some((reference, _)) => reference.clone(),
-            None => match compiler_image(self.repo)? {
-                Some((reference, _)) => reference,
-                None => {
-                    std::env::var("GINUX_ROOT").unwrap_or_else(|_| "Recipe's default root".into())
-                }
-            },
-        };
         // The stamp reads the recipe file as Recipe will find it: a path
         // relative to the run's folder, else a bare name from os-recipes
         // (`tui-binary`), which Recipe resolves through --recipes-path.
@@ -523,7 +597,7 @@ impl<'a> Invocation<'a> {
         } else {
             let named = self
                 .repo
-                .join("distro/builder/os-recipes")
+                .join(OS_RECIPES)
                 .join(recipe)
                 .with_extension("rhai");
             if named.is_file() {
@@ -531,6 +605,47 @@ impl<'a> Invocation<'a> {
             } else {
                 run_dir.join(recipe)
             }
+        };
+        // OS producers and their imports use the builder's collection;
+        // the workspace's user-managed recipe catalog is a separate consumer.
+        let os_recipes_path = self
+            .recipes_path
+            .clone()
+            .unwrap_or_else(|| self.repo.join(OS_RECIPES));
+        // The images the run unpacks (`run_images`). A run in its own root
+        // has that root as both images, so a recipe asking for the minimal
+        // one runs in it too.
+        let images = if self.root.is_some() {
+            RunImages { full: true, minimal: false }
+        } else {
+            run_images(&recipe_file, &os_recipes_path)?
+        };
+        // The full image: this run's own root, else the pinned compiler image;
+        // None when the ambient GINUX_ROOT/GINUX_ROOTFS pair names it, which
+        // reaches Recipe as it is (LAUNCHER_ENV).
+        let full_image = match &self.root {
+            Some(own) => Some(own.clone()),
+            None => compiler_image(self.repo)?,
+        };
+        let full_reference = match &full_image {
+            Some((reference, _)) => reference.clone(),
+            None => compiler_image_reference(self.repo)?,
+        };
+        // The minimal image, only for a run whose recipes ask for it.
+        let minimal_image = if self.root.is_none() && images.minimal {
+            Some(minimal_image(self.repo)?)
+        } else {
+            None
+        };
+        // An install whose recipe, inputs, images and Recipe behaviour are
+        // unchanged and whose outputs are intact is not run again (`stamp`).
+        // Its root field names the images the run unpacks and no other: the
+        // compiler image's reference alone for a run in it (as before the
+        // minimal image), the minimal image's alone, or both.
+        let root_reference = match (images.full, &minimal_image) {
+            (_, None) => full_reference,
+            (false, Some((minimal, _))) => minimal.clone(),
+            (true, Some((minimal, _))) => format!("{full_reference} + {minimal}"),
         };
         let stamp = if self.redo || (exact_identity() && !self.discard_superseded) {
             None
@@ -603,12 +718,6 @@ impl<'a> Invocation<'a> {
             .suffix(".json")
             .tempfile_in(work)
             .context("creating a fresh recipe result file")?;
-        // OS producers and their imports use the builder's collection;
-        // the workspace's user-managed recipe catalog is a separate consumer.
-        let os_recipes_path = self
-            .recipes_path
-            .clone()
-            .unwrap_or_else(|| self.repo.join("distro/builder/os-recipes"));
 
         let mut cmd = Cmd::new(bin)
             // OS composition consumes products without activating host packages.
@@ -697,34 +806,26 @@ impl<'a> Invocation<'a> {
                 note(format!("    {name}={}", Path::new(&value).display()));
             }
         }
-        // The minimal image is named as this same root (LAUNCHER_ENV), so a
-        // recipe that asks for it runs in the root the stamp names, whatever
-        // the host has installed.
-        if let Some((reference, rootfs)) = &self.root {
-            cmd = cmd
-                .env("GINUX_ROOT", reference)
-                .env("GINUX_ROOTFS", rootfs)
-                .env("GINUX_MINIMAL_ROOT", reference)
-                .env("GINUX_MINIMAL_ROOTFS", rootfs);
-            note(format!(
-                "    GINUX_ROOT={reference} (this recipe's own root)"
-            ));
+        if let Some((reference, rootfs)) = &full_image {
+            cmd = cmd.env("GINUX_ROOT", reference).env("GINUX_ROOTFS", rootfs);
+            let what = if self.root.is_some() { "this recipe's own root" } else { "the pinned compiler image" };
+            note(format!("    GINUX_ROOT={reference} ({what})"));
             note(format!("    GINUX_ROOTFS={}", rootfs.display()));
-        } else if let Some((reference, rootfs)) = compiler_image(self.repo)? {
+        }
+        // A run in its own root has it as the minimal image too; another run
+        // gets a minimal image only when its recipes ask for one, the one its
+        // stamp names (ambient ones were removed above).
+        let minimal = match &self.root {
+            Some(own) => Some((own.clone(), "this recipe's own root")),
+            None => minimal_image.clone().map(|image| (image, "the minimal runtime image")),
+        };
+        if let Some(((reference, rootfs), what)) = minimal {
             cmd = cmd
-                .env("GINUX_ROOT", &reference)
-                .env("GINUX_ROOTFS", &rootfs)
                 .env("GINUX_MINIMAL_ROOT", &reference)
                 .env("GINUX_MINIMAL_ROOTFS", &rootfs);
-            note(format!(
-                "    GINUX_ROOT={reference} (the pinned compiler image)"
-            ));
-            note(format!("    GINUX_ROOTFS={}", rootfs.display()));
-        } else {
-            for (minimal, full) in [("GINUX_MINIMAL_ROOT", "GINUX_ROOT"), ("GINUX_MINIMAL_ROOTFS", "GINUX_ROOTFS")] {
-                if let Some(value) = std::env::var_os(full) {
-                    cmd = cmd.env(minimal, value);
-                }
+            if self.root.is_none() {
+                note(format!("    GINUX_MINIMAL_ROOT={reference} ({what})"));
+                note(format!("    GINUX_MINIMAL_ROOTFS={}", rootfs.display()));
             }
         }
         if let Some(file) = log.take() {

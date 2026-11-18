@@ -6,7 +6,8 @@
 //! catalog change does. So the builder keeps their result under a key of what
 //! they read: the package locks, the recipes (with their imports), the texts
 //! and branding they are given, the unpack and compose formats, Recipe's and
-//! Ginux's behaviour versions and the root they run in. Recipe's and Ginux's
+//! Ginux's behaviour versions and the images they run in (the compiler
+//! image, the minimal one, each where a recipe of theirs runs in it). Recipe's and Ginux's
 //! sources and Ginux's catalog digests are not in it: what the system ships of
 //! them is added after this tree, in the system part. Exact mode adds the
 //! full declared identity and the bytes of the Recipe CLI and the launcher,

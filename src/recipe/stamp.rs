@@ -10,7 +10,9 @@
 //! result and a digest of its outputs. Its key is a SHA-256 over the phase,
 //! the recipe's source closure (`compose::recipe_identity`), the work
 //! directory, every flag with each `--input` replaced by a digest of what it
-//! names, the root the run uses, the worker override, and Recipe's and
+//! names, the images the run unpacks (its own root, else the compiler image
+//! and/or the minimal image, as its recipes ask: `super::RunImages`), the
+//! worker override, and Recipe's and
 //! Ginux's behaviour versions (`prebuilt::behaviour`).
 //!
 //! An input or output tree is described by every entry's path, kind and mode,

@@ -29,6 +29,7 @@ const NEEDS = #{
     memory_mib: 8192,
     storage_max_objects: 262144,
     timeout_secs: 14400,
+    runtime: "minimal",
 };
 const PACKAGE = #{ name: "release-medium", description: "The default software set, its recipes and its package cache, for the release medium" };
 

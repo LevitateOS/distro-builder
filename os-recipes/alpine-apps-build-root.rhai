@@ -8,7 +8,7 @@ const RECIPE_API = 1;
 // it, so they are compiled by the distro's own compiler against the distro's
 // own C library, C++ runtime, Qt and X libraries, the ones the desktop system
 // ships. The tree is never part of an image.
-const NEEDS = #{ inputs: #{ apks: "directory", apps_build_apks: "directory" }, outputs: #{ root: "directory" }, memory_mib: 4096, storage_max_objects: 196608, timeout_secs: 7200 };
+const NEEDS = #{ inputs: #{ apks: "directory", apps_build_apks: "directory" }, outputs: #{ root: "directory" }, memory_mib: 4096, storage_max_objects: 196608, timeout_secs: 7200, runtime: "minimal" };
 const PACKAGE = #{ name: "alpine-apps-build-root", description: "The Alpine v3.24 root the desktop apps are compiled in" };
 import "sources/acorn-apk-lock.rhai" as lock;
 import "sources/acorn-apk-apps-build-lock.rhai" as build_lock;

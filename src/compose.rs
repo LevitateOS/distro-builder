@@ -197,7 +197,8 @@ struct UnpackedRecord<'a> {
 pub(crate) fn unpack(repo: &Path, packages: &[Package]) -> Result<Vec<Unpacked>> {
     let recipe = repo.join(RPM_UNPACK_RECIPE);
     let identity = recipe_identity(repo, &recipe)?;
-    let root = crate::recipe::root_reference(repo)?;
+    // The image(s) the unpack recipe runs in (its NEEDS.runtime).
+    let root = crate::recipe::RunImages::of(repo, &[&recipe])?.reference(repo)?;
     let dir = store(repo).join("unpacked");
     fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
     let entries: Vec<Unpacked> = packages

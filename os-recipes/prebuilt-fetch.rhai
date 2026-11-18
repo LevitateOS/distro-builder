@@ -16,6 +16,7 @@ const NEEDS = #{
     network_max_bytes: 536870912,
     memory_mib: 2048,
     timeout_secs: 900,
+    runtime: "minimal",
 };
 const PACKAGE = #{ name: "prebuilt-fetch", description: "One published prebuilt: its manifest and extracted programs" };
 

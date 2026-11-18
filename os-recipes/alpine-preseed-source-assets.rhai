@@ -7,6 +7,7 @@ const NEEDS = #{
     outputs: #{ apks: "directory" },
     network: ["dl-cdn.alpinelinux.org:443"],
     memory_mib: 4096,
+    runtime: "minimal",
 };
 import "sources/acorn-apk-lock.rhai" as lock;
 const PACKAGE = #{ name: "alpine-preseed-source-assets", description: "Locked Alpine v3.24 APK set" };

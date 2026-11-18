@@ -8,7 +8,7 @@ const RECIPE_API = 1;
 // this publishes. The desktop lock (what the group recipes in recipes/ pin
 // beyond the base) is read only for the commands it ships, which BusyBox
 // leaves to them.
-const NEEDS = #{ inputs: #{ composed: "directory", apks: "directory" }, outputs: #{ tree: "file" }, memory_mib: 8192, storage_max_objects: 262144, timeout_secs: 14400 };
+const NEEDS = #{ inputs: #{ composed: "directory", apks: "directory" }, outputs: #{ tree: "file" }, memory_mib: 8192, storage_max_objects: 262144, timeout_secs: 14400, runtime: "minimal" };
 const PACKAGE = #{ name: "alpine-apk-package-effects", description: "The locked Alpine v3.24 APK set with its packages' effects" };
 import "sources/acorn-apk-lock.rhai" as lock;
 import "sources/acorn-apk-desktop-lock.rhai" as desktop_lock;

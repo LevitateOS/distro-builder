@@ -12,7 +12,7 @@ const RECIPE_API = 1;
 // packages, so the object limit is sized for one share, not for a system.
 // Changing this file changes every package's store key, so the store unpacks
 // everything again.
-const NEEDS = #{ inputs: #{ packages: "directory" }, outputs: #{ trees: "directory" }, memory_mib: 4096, storage_max_objects: 131072, timeout_secs: 7200 };
+const NEEDS = #{ inputs: #{ packages: "directory" }, outputs: #{ trees: "directory" }, memory_mib: 4096, storage_max_objects: 131072, timeout_secs: 7200, runtime: "minimal" };
 const PACKAGE = #{ name: "fedora-rpm-unpack", description: "Locked RPMs, each unpacked into a tree of its own" };
 
 // The package files, as [digest, file], each checked against its name.

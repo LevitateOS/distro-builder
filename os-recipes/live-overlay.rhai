@@ -7,7 +7,7 @@ const RECIPE_API = 1;
 // deps, NetworkManager enabled by its own configuration) to this overlay
 // beside what this recipe writes, so the live session brings up every
 // interface.
-const NEEDS = #{ inputs: #{ config: "file", shadow: "file", shell_ux: "file", live_help: "file", shutdown_cleanup: "file", serial_profile: "file" }, outputs: #{ overlay: "directory" } };
+const NEEDS = #{ inputs: #{ config: "file", shadow: "file", shell_ux: "file", live_help: "file", shutdown_cleanup: "file", serial_profile: "file" }, outputs: #{ overlay: "directory" }, runtime: "minimal" };
 const PACKAGE = #{ name: "live-overlay" };
 import "installed-system.rhai" as system;
 

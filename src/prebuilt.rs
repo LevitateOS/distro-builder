@@ -4,8 +4,9 @@
 //!
 //! An OS build needs the same few programs again and again. Each is identified by a
 //! **key**: the SHA-256 of everything its compile depends on (the source closure the
-//! recipe would compile, the recipe, the compiler image, the target, and Recipe's
-//! declared behaviour versions). Equal key means the same compile, so a result can be
+//! recipe would compile, the recipe, the runtime images its runs unpack (the compiler
+//! image, the minimal one, each where a recipe of the compile runs in it:
+//! `recipe::RunImages`), the target, and Recipe's declared behaviour versions). Equal key means the same compile, so a result can be
 //! reused or downloaded instead of compiled:
 //!
 //! 1. the local cache, `.artifacts/prebuilt/<family>/<key>/` (programs plus
@@ -272,22 +273,29 @@ pub(crate) fn normalize_modes(root: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Prints one line on stderr when the environment's `GINUX_ROOT` replaces the pinned
-/// compiler image: every key then names that image (it is the one a compile would use)
-/// and will not match a published part.
+/// Prints one line on stderr for each of `GINUX_ROOT` and `GINUX_MINIMAL_ROOT` the
+/// environment sets to another image than the pinned one: every key that names that
+/// image then names the ambient one (it is the one a compile would use) and will not
+/// match a published part.
 pub fn warn_ambient_compiler_image(repo: &Path) {
-    let Some(ambient) = std::env::var_os("GINUX_ROOT") else { return };
-    let ambient = ambient.to_string_lossy();
-    match crate::recipe::pinned_compiler_image_reference(repo) {
-        Ok(pinned) if pinned == ambient => {}
-        Ok(pinned) => eprintln!(
-            "[prebuilt] warning: GINUX_ROOT={ambient} replaces the pinned compiler image {pinned}: \
-             these keys are for that image and will not match published parts (unset GINUX_ROOT)"
-        ),
-        Err(error) => eprintln!(
-            "[prebuilt] warning: GINUX_ROOT={ambient} replaces the compiler image in every key \
-             (the pin is unreadable: {error:#}); these keys will not match published parts"
-        ),
+    let images: [(&str, &str, fn(&Path) -> Result<String>); 2] = [
+        ("GINUX_ROOT", "compiler image", crate::recipe::pinned_compiler_image_reference),
+        ("GINUX_MINIMAL_ROOT", "minimal runtime image", crate::recipe::pinned_minimal_image_reference),
+    ];
+    for (variable, what, pinned) in images {
+        let Some(ambient) = std::env::var_os(variable) else { continue };
+        let ambient = ambient.to_string_lossy();
+        match pinned(repo) {
+            Ok(pinned) if pinned == ambient => {}
+            Ok(pinned) => eprintln!(
+                "[prebuilt] warning: {variable}={ambient} replaces the pinned {what} {pinned}: \
+                 keys that name it are for that image and will not match published parts (unset {variable})"
+            ),
+            Err(error) => eprintln!(
+                "[prebuilt] warning: {variable}={ambient} replaces the {what} in every key that names \
+                 it (the pin is unreadable: {error:#}); those keys will not match published parts"
+            ),
+        }
     }
 }
 
@@ -1218,9 +1226,10 @@ pub(crate) fn behaviour() -> String {
 }
 
 /// The key of the desktop apps tree for `variant`: the files of `tools/gui/` the compile gets,
-/// the apps-build root it compiles in ([`build_root_fields`]), `desktop-apps.rhai` with
-/// everything it imports, the compiler image, Recipe's declared behaviour versions, and the
-/// distro and its libc.
+/// the apps-build root it compiles in ([`build_root_fields`], with the images that root is
+/// made in), `desktop-apps.rhai` with everything it imports, Recipe's declared behaviour
+/// versions, and the distro and its libc. The compile runs in the apps-build root, not in
+/// the compiler image.
 ///
 /// The builder's Rust that makes the root enters by version numbers
 /// ([`build_root_fields`]); the Rust that runs the compile (`desktop_apps.rs`) is not
@@ -1235,7 +1244,6 @@ pub fn desktop_apps_key(repo: &Path, variant: &distro_contract::Variant) -> Resu
     fields.extend(build_root_fields(repo, variant)?);
     fields.extend([
         ("desktop_apps_recipe", recipe_digest(repo, &repo.join("distro/builder/os-recipes/desktop-apps.rhai"))?),
-        ("compiler_image", crate::recipe::compiler_image_reference(repo)?),
         ("behaviour", behaviour()),
     ]);
     Ok(Key::new(&fields))
@@ -1254,7 +1262,9 @@ fn recipe_digest(repo: &Path, recipe: &Path) -> Result<String> {
 /// (`desktop_apps::APPS_BUILD_ROOT_FORMAT`). On an RPM variant the root is composed from
 /// the unpack store, so the unpack recipe (`compose::RPM_UNPACK_RECIPE`, with what it
 /// imports) and the unpack store's and composition's versions (`compose::UNPACK_FORMAT`,
-/// `compose::COMPOSE_FORMAT`) are in too.
+/// `compose::COMPOSE_FORMAT`) are in too. So are the images those recipes run in
+/// (`recipe::RunImages`: `minimal_image` for one in the minimal image) and the compiler image
+/// (`compiler_image`: the compile's static Recipe worker is built in it).
 fn build_root_fields(repo: &Path, variant: &distro_contract::Variant) -> Result<Vec<(&'static str, String)>> {
     use crate::pipeline::source::{apps_build_preseed_recipe, apps_build_root_recipe, preseed_recipe};
     let closure = |recipe: &Path| -> Result<BTreeMap<String, String>> {
@@ -1262,9 +1272,27 @@ fn build_root_fields(repo: &Path, variant: &distro_contract::Variant) -> Result<
         recipe_closure(repo, recipe, &mut found)?;
         Ok(found)
     };
-    let base_preseed = closure(&preseed_recipe(variant, distro_contract::profile::Flavour::Base))?;
-    let build_preseed = closure(&apps_build_preseed_recipe(variant))?;
-    let root = closure(&apps_build_root_recipe(variant))?;
+    let base_preseed_recipe = preseed_recipe(variant, distro_contract::profile::Flavour::Base);
+    let build_preseed_recipe = apps_build_preseed_recipe(variant);
+    let root_recipe = apps_build_root_recipe(variant);
+    let unpack_recipe = repo.join(crate::compose::RPM_UNPACK_RECIPE);
+    let base_preseed = closure(&base_preseed_recipe)?;
+    let build_preseed = closure(&build_preseed_recipe)?;
+    let root = closure(&root_recipe)?;
+    let rpm = variant.contract.profile.packages == distro_profile::PackageBackend::Rpm;
+    let mut made_by = vec![base_preseed_recipe.as_path(), build_preseed_recipe.as_path(), root_recipe.as_path()];
+    if rpm {
+        made_by.push(&unpack_recipe);
+    }
+    // The compiler image is always in: the compile runs the static levitate-recipe worker
+    // `compile_crate` builds in it. The minimal image is in where the root's recipes run in it.
+    let mut images = vec![("compiler_image", crate::recipe::compiler_image_reference(repo)?)];
+    images.extend(
+        crate::recipe::RunImages::of(repo, &made_by)?
+            .key_fields(repo, "compiler_image", "minimal_image")?
+            .into_iter()
+            .filter(|(name, _)| *name == "minimal_image"),
+    );
     let mut fields = vec![
         ("base_lock", lock_digest(&base_preseed)),
         ("apps_build_lock", lock_digest(&build_preseed)),
@@ -1273,7 +1301,8 @@ fn build_root_fields(repo: &Path, variant: &distro_contract::Variant) -> Result<
         ("apps_build_root_recipe", closure_digest(&root)),
         ("apps_build_root_format", crate::desktop_apps::APPS_BUILD_ROOT_FORMAT.to_string()),
     ];
-    if variant.contract.profile.packages == distro_profile::PackageBackend::Rpm {
+    fields.extend(images);
+    if rpm {
         fields.extend([
             ("rpm_unpack_recipe", recipe_digest(repo, &repo.join(crate::compose::RPM_UNPACK_RECIPE))?),
             (
@@ -1287,8 +1316,8 @@ fn build_root_fields(repo: &Path, variant: &distro_contract::Variant) -> Result<
 
 /// The key of the display server tree for `variant` (`desktop.display_server_recipe_script`):
 /// that recipe with everything it imports (it holds the source pins), the apps-build root it
-/// compiles in ([`build_root_fields`]: both locks and the root's recipes), the compiler
-/// image, Recipe's declared behaviour versions, and the distro and its libc. Fails for a
+/// compiles in ([`build_root_fields`]: both locks, the root's recipes and the images they run
+/// in), Recipe's declared behaviour versions, and the distro and its libc. Fails for a
 /// distro that names no display server recipe.
 pub fn display_server_key(repo: &Path, variant: &distro_contract::Variant) -> Result<Key> {
     let recipe = crate::display_server::recipe(variant)
@@ -1300,10 +1329,7 @@ pub fn display_server_key(repo: &Path, variant: &distro_contract::Variant) -> Re
         ("display_server_recipe", recipe_digest(repo, &recipe)?),
     ];
     fields.extend(build_root_fields(repo, variant)?);
-    fields.extend([
-        ("compiler_image", crate::recipe::compiler_image_reference(repo)?),
-        ("behaviour", behaviour()),
-    ]);
+    fields.push(("behaviour", behaviour()));
     Ok(Key::new(&fields))
 }
 
@@ -1313,7 +1339,7 @@ pub fn display_server_key(repo: &Path, variant: &distro_contract::Variant) -> Re
 /// pruned `Cargo.lock` and the vendored crates), the recipe that compiles it with what it
 /// imports, the per-OS facts it is given (`login_screen::defines`), the apps-build root it
 /// compiles in ([`build_root_fields`]: both locks, which pin the Rust toolchain and the
-/// libraries it links, and the root's recipes), the compiler image, Recipe's declared
+/// libraries it links, the root's recipes and the images they run in), Recipe's declared
 /// behaviour versions, and the distro and its libc.
 pub fn login_screen_key(repo: &Path, variant: &distro_contract::Variant) -> Result<Key> {
     let source = crate::login_screen::prepare_source(repo, variant)?;
@@ -1328,10 +1354,7 @@ pub fn login_screen_key(repo: &Path, variant: &distro_contract::Variant) -> Resu
         ("login_screen_recipe", recipe_digest(repo, &repo.join(crate::login_screen::RECIPE))?),
     ];
     fields.extend(build_root_fields(repo, variant)?);
-    fields.extend([
-        ("compiler_image", crate::recipe::compiler_image_reference(repo)?),
-        ("behaviour", behaviour()),
-    ]);
+    fields.push(("behaviour", behaviour()));
     Ok(Key::new(&fields))
 }
 

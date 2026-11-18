@@ -102,19 +102,25 @@ pub(crate) fn install(
 
 /// The key of the TUI binary `stem` (`install-tui`) for `libc`'s
 /// target: its source closure, the target, both recipes (`bun-toolchain` pins the
-/// bun version), the compiler image and Recipe's declared behaviour.
+/// bun version), the runtime images they run in (`recipe::RunImages`) and Recipe's
+/// declared behaviour.
 fn tui_key(repo_root: &Path, stem: &str, target: &str, source: &Path) -> Result<crate::prebuilt::Key> {
     let recipes = repo_root.join("distro/builder/os-recipes");
-    Ok(crate::prebuilt::Key::new(&[
+    let recipe = recipes.join("tui-binary.rhai");
+    let mut fields = vec![
         ("family", "tui".into()),
         ("name", stem.into()),
         ("target", target.into()),
         ("source_closure", crate::prebuilt::dir_digest(source)?),
-        ("tui_binary_recipe", crate::prebuilt::file_digest(&recipes.join("tui-binary.rhai"))?),
+        ("tui_binary_recipe", crate::prebuilt::file_digest(&recipe)?),
         ("bun_toolchain_recipe", crate::prebuilt::file_digest(&recipes.join("bun-toolchain.rhai"))?),
-        ("compiler_image", crate::recipe::compiler_image_reference(repo_root)?),
-        ("behaviour", crate::prebuilt::behaviour()),
-    ]))
+    ];
+    // tui-binary with its bun-toolchain dependency.
+    fields.extend(
+        crate::recipe::RunImages::of(repo_root, &[&recipe])?.key_fields(repo_root, "compiler_image", "minimal_image")?,
+    );
+    fields.push(("behaviour", crate::prebuilt::behaviour()));
+    Ok(crate::prebuilt::Key::new(&fields))
 }
 
 /// `distro-builder prebuilt key tui <stem> --distro <id>`: prepares the source and

@@ -14,6 +14,7 @@ const NEEDS = #{
     // namespace entries; compilation/source scratch needs bounded headroom.
     storage_max_objects: 32768,
     timeout_secs: 900,
+    runtime: "minimal",
 };
 const PACKAGE = #{ name: "tui-binary", description: "A TUI layer compiled from its JavaScript source closure" };
 let build_deps = ["bun-toolchain"];

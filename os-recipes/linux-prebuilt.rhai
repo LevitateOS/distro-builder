@@ -11,6 +11,7 @@ const NEEDS = #{
     defines: #{ KERNEL_TARGET: "levitate" },
     outputs: #{ bundle: "directory" },
     network: ["github.com:443", "release-assets.githubusercontent.com:443"],
+    runtime: "minimal",
 };
 const PACKAGE = #{ name: "linux-prebuilt", description: "Prebuilt Linux kernel artifacts" };
 import "kernel/metadata.rhai" as kernel;

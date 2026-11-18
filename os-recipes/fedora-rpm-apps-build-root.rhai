@@ -9,7 +9,7 @@ const RECIPE_API = 1;
 // so the apps are compiled by the distro's own compiler against the distro's
 // own C++ runtime and Qt, the ones the desktop system ships. The tree is
 // never part of an image.
-const NEEDS = #{ inputs: #{ composed: "directory" }, outputs: #{ root: "directory" }, memory_mib: 8192, storage_max_objects: 262144, timeout_secs: 7200 };
+const NEEDS = #{ inputs: #{ composed: "directory" }, outputs: #{ root: "directory" }, memory_mib: 8192, storage_max_objects: 262144, timeout_secs: 7200, runtime: "minimal" };
 const PACKAGE = #{ name: "fedora-rpm-apps-build-root", description: "The Fedora 45 root the desktop apps are compiled in" };
 import "sources/levitate-rpm-lock.rhai" as lock;
 import "sources/levitate-rpm-apps-build-lock.rhai" as build_lock;

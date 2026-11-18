@@ -10,7 +10,7 @@ const RECIPE_API = 1;
 // one and composed like RPMs: a tree from separate apk runs would not have
 // the database one apk run writes. Recipe reuses this step's result while
 // this file, the base lock and the APKs are unchanged.
-const NEEDS = #{ inputs: #{ apks: "directory" }, outputs: #{ tree: "file" }, memory_mib: 8192, storage_max_objects: 262144, timeout_secs: 14400 };
+const NEEDS = #{ inputs: #{ apks: "directory" }, outputs: #{ tree: "file" }, memory_mib: 8192, storage_max_objects: 262144, timeout_secs: 14400, runtime: "minimal" };
 const PACKAGE = #{ name: "alpine-apk-base-tree", description: "The locked Alpine v3.24 base APK set, installed" };
 import "sources/acorn-apk-lock.rhai" as lock;
 

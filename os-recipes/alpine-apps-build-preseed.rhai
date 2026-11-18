@@ -9,6 +9,7 @@ const NEEDS = #{
     outputs: #{ apps_build_apks: "directory" },
     network: ["dl-cdn.alpinelinux.org:443"],
     memory_mib: 4096,
+    runtime: "minimal",
 };
 import "sources/acorn-apk-apps-build-lock.rhai" as lock;
 const PACKAGE = #{ name: "alpine-apps-build-preseed", description: "Locked Alpine v3.24 APK set for compiling the desktop apps" };

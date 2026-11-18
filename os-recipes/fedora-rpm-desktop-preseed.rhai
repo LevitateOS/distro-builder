@@ -8,6 +8,7 @@ const NEEDS = #{
     outputs: #{ desktop_rpms: "directory" },
     network: ["dl.fedoraproject.org:443"],
     memory_mib: 8192,
+    runtime: "minimal",
 };
 import "sources/levitate-rpm-desktop-lock.rhai" as lock;
 const PACKAGE = #{ name: "fedora-rpm-desktop-preseed", description: "Locked Fedora 45 desktop RPM set" };

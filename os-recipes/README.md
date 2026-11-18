@@ -16,6 +16,22 @@ kernel image and its modules, which the builder checks with `bundle_mismatch`
 from `kernel/metadata.rhai`. recab owns the two roots of an A/B
 installation.
 
+The builder runs every recipe here in Ginux. One that needs no compiler declares
+`NEEDS.runtime: "minimal"` and runs in Recipe's minimal runtime image (a shell,
+coreutils, findutils, sed, grep and what the Recipe worker needs, a few megabytes;
+`tools/recipe/bootstrap/ginux-minimal-image.json`) instead of the 1.3 GB compiler
+image: the preseeds, the unpack and base-tree steps, the APK package effects, the
+rootfs recipes, both apps-build roots, the live overlay, the release medium,
+`prebuilt-fetch`, `busybox-static`, `linux-prebuilt`, `bun-toolchain`, `tui-binary`
+and `root-effects`. What they start is a Recipe helper, a program of a root they
+are given (through that root's loader), a downloaded static or glibc program
+(`apk.static`, Bun) or those tools. The others stay in the compiler image for a
+program only it has: `fedora-rpm-package-effects` (python3), `linux-deps`
+(rpm2cpio, cpio), `linux` (make, gcc), `tool-crate` and `install-tools` (cargo,
+gcc); `desktop-apps`, `xlibre` and `reclogin` run in the apps-build root.
+A program added to a minimal recipe must be in that image's `keep` list, with the
+libraries its `readelf -d` names.
+
 The desktop apps (`tools/gui` in the workspace) are compiled here too, but not in
 Recipe's usual root: a Qt program has to be compiled against the distro's own
 Qt and C++ runtime. The variant's `*-apps-build-root.rhai` recipe makes one

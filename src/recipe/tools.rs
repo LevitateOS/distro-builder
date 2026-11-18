@@ -973,17 +973,23 @@ pub(crate) fn build_system_tool_tree(
             .input("dist", &repo.join("tools/recupdate/dist"))
             .input("keys", keys.path());
     }
-    // The package manager ships the same pinned runtime the builder uses.
-    // Explicit inputs give the recipe no ambient access to the host image.
+    // The package manager ships the same pinned runtime the builder uses, and
+    // the minimal image the root effects recipe runs in. Explicit inputs give
+    // the recipe no ambient access to the host images.
     let reference_file = tempfile::NamedTempFile::new()?;
+    let minimal_reference_file = tempfile::NamedTempFile::new()?;
     if package == "levitate-recipe" {
         let (reference, image) = super::runtime_image(repo)?;
         fs::write(reference_file.path(), format!("{reference}\n"))?;
+        let (minimal_reference, minimal_image) = super::minimal_image(repo)?;
+        fs::write(minimal_reference_file.path(), format!("{minimal_reference}\n"))?;
         invocation = invocation
             .input("catalog", &repo.join("recipes"))
             .input("launcher", super::ginux_binary(repo)?)
             .input("runtime_image", &image)
-            .input("runtime_reference", reference_file.path());
+            .input("runtime_reference", reference_file.path())
+            .input("minimal_image", &minimal_image)
+            .input("minimal_reference", minimal_reference_file.path());
     }
     let tree = invocation.discard_superseded().run()?.directory("rootfs")?;
     drop(keys);

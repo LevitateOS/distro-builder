@@ -40,8 +40,9 @@ pub enum Command {
         name: String,
         distro: Option<String>,
     },
-    /// Compress the Recipe runtime image the installed Recipe ships and upload it to the
-    /// prebuilt repository's release `recipe-runtime-<digest16>` with `gh`.
+    /// Compress the Recipe runtime images the installed Recipe ships (the compiler image and
+    /// the minimal image) and upload each to the prebuilt repository's release
+    /// `recipe-runtime-<digest16>` with `gh`.
     PrebuiltPublishRuntime,
     /// Compile a prebuilt (no download, no ISO) into the local cache and print its key and
     /// cache directory: what CI publishes. Needs root, like every compile.
@@ -108,7 +109,7 @@ pub fn usage() -> String {
          prebuilt build <tools|tui|desktop-apps|display-server|login-screen> <name> [--distro <id>]  compile that part into the local cache (no download, no ISO; needs root) and print its key and cache directory\n  \
          prebuilt get tools <name>                          take a tool package like an image build does (local cache, else download of tools-<key16>, else compile) and print its key, cache directory and where it came from\n  \
          prebuilt publish <tools|tui|desktop-apps|display-server|login-screen> <name> [--distro <id>]  upload the local cache entry of that key to the prebuilt repository's release with gh\n  \
-         prebuilt publish-runtime                           compress the Recipe runtime image and upload it to the release recipe-runtime-<digest16> with gh",
+         prebuilt publish-runtime                           compress the Recipe runtime images (compiler and minimal) and upload each to its release recipe-runtime-<digest16> with gh",
         releases = ProductId::list(ProductId::iso_products()),
         products = ProductId::list(ProductId::ALL),
     )

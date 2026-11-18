@@ -68,6 +68,10 @@ pub fn system_sources_digest(repo: &Path, distro_id: &str) -> Result<String> {
     hasher.update(b"recipe runtime image\0");
     hasher.update(crate::recipe::compiler_image_reference(&repo)?.as_bytes());
     hasher.update([0]);
+    // So does the minimal image the root effects recipe runs in.
+    hasher.update(b"recipe minimal runtime image\0");
+    hasher.update(crate::recipe::minimal_image_reference(&repo)?.as_bytes());
+    hasher.update([0]);
     // The workspace's manifest and locks pick the tools' and TUI's dependencies.
     for file in ["Cargo.toml", "Cargo.lock", "package.json", "bun.lock"] {
         hash_file(&mut hasher, &repo, Path::new(file))?;

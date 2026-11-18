@@ -11,7 +11,12 @@ const RECIPE_API = 1;
 //
 // Every tool is the root's own, run through the root's own dynamic loader
 // with the root's libraries first (the libc's loader names which: glibc on
-// LevitateOS, musl on AcornOS), so one recipe serves both systems. The root
+// LevitateOS, musl on AcornOS), so one recipe serves both systems. Of its own
+// the run needs only a shell, coreutils (ls, cp), findutils, sed and the
+// other GNU tools icon_cache_inputs uses, so it runs in Recipe's minimal
+// runtime image (NEEDS.runtime), a few megabytes, not the 1.3 GB compiler
+// image: each run unpacks a private copy of its image, and on a disk without
+// reflinks the large one took a minute and more. The root
 // is read-only: a tool that writes beside its input runs on a scratch
 // directory of links into the root, and only the files it generates are
 // kept. The `system` output holds those generated files and nothing else;
@@ -32,6 +37,7 @@ const NEEDS = #{
     memory_mib: 4096,
     storage_max_objects: 262144,
     timeout_secs: 3600,
+    runtime: "minimal",
 };
 // No name here: the image installs this file as /usr/lib/recipe/effects.rhai, and Recipe takes the name from the file name.
 const PACKAGE = #{ version: "1", description: "The whole-root caches of a LevitateOS or AcornOS root" };
@@ -233,8 +239,9 @@ fn fonts(job) {
 // others and gives up after 5 s, and two programs working at once (find
 // feeding sort) abort the run that way ("argument peer interrupt timed
 // out"). Any failing program fails the whole command (set -e), so a missing
-// tool never passes for an unchanged theme. GNU find, xargs and realpath, as
-// the runtime image has them.
+// tool never passes for an unchanged theme. GNU find, xargs, sort, sed,
+// paste, realpath and sha256sum, as the minimal runtime image has them
+// (tools/recipe/bootstrap/ginux-minimal-image.json).
 fn icon_cache_inputs(job, tool, args, theme, dir) {
     let lists = join_path(job.scratch, "icon-inputs-" + theme);
     if exists(lists) { rm(lists); }

@@ -28,7 +28,10 @@ use crate::process::Cmd;
 /// `tools/ginux` and the Recipe binary it runs, so an invocation never runs an older
 /// launcher or worker than the checkout. Every other `RECIPE_*`/`GINUX_*` variable
 /// is removed, so an ambient one (a worker's `RECIPE_WORKER`, say) cannot change how
-/// Recipe runs.
+/// Recipe runs. An ambient `GINUX_MINIMAL_ROOT`/`GINUX_MINIMAL_ROOTFS` among them: every
+/// invocation names its root as the minimal image too, so a recipe that asks for the
+/// minimal image (`NEEDS.runtime`) runs in the compiler image like every other recipe of
+/// an OS build, the image its stamp names.
 const LAUNCHER_ENV: &[&str] = &["GINUX_ROOT", "GINUX_ROOTFS", "RECIPE_FRAME_TIMEOUT_SECS"];
 /// The worker frame deadline OS builds give Recipe when the caller sets none.
 const OS_BUILD_FRAME_TIMEOUT_SECS: &str = "1800";
@@ -37,56 +40,148 @@ const OS_BUILD_FRAME_TIMEOUT_SECS: &str = "1800";
 const COMPILER_IMAGE_DIR: &str = ".artifacts/ginux-env/prepared-image-build-tools";
 const COMPILER_IMAGE_PIN: &str = "tools/recipe/bootstrap/product-ci.json";
 
+/// Where the pinned minimal runtime image lives, and the file that pins it
+/// (`tools/recipe/bootstrap/minimal-runtime.json`, whose `image_manifest` is
+/// `ginux-minimal-image.json`). The installed Recipe ships it beside the
+/// compiler image; a recipe with `NEEDS.runtime: "minimal"` (the root effects
+/// recipe) runs in it.
+const MINIMAL_IMAGE_DIR: &str = ".artifacts/ginux-env/prepared-image-minimal";
+const MINIMAL_IMAGE_PIN: &str = "tools/recipe/bootstrap/minimal-runtime.json";
+
+/// A pinned image: `name` in its reference (`oci:<name>@sha256:<digest>`),
+/// the directory it is produced in and the file whose `image_sha256` pins it.
+/// `what` names it in messages and `guide` says how it is produced.
+struct PinnedImage {
+    what: &'static str,
+    name: &'static str,
+    dir: &'static str,
+    pin: &'static str,
+    guide: &'static str,
+}
+
+const COMPILER_IMAGE: PinnedImage = PinnedImage {
+    what: "compiler image",
+    name: "recipe-compiler",
+    dir: COMPILER_IMAGE_DIR,
+    pin: COMPILER_IMAGE_PIN,
+    guide: "tools/recipe/docs/setup-linux.md",
+};
+const MINIMAL_IMAGE: PinnedImage = PinnedImage {
+    what: "minimal runtime image",
+    name: "recipe-minimal",
+    dir: MINIMAL_IMAGE_DIR,
+    pin: MINIMAL_IMAGE_PIN,
+    guide: "tools/recipe/bootstrap/README.md (\"Minimal runtime image\")",
+};
+
+impl PinnedImage {
+    /// The pinned digest, `image_sha256` of the pin file.
+    fn digest(&self, repo: &Path) -> Result<String> {
+        let pin_file = repo.join(self.pin);
+        let pin: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(&pin_file).with_context(|| format!("reading '{}'", pin_file.display()))?,
+        )
+        .with_context(|| format!("parsing '{}'", pin_file.display()))?;
+        let digest = pin["image_sha256"]
+            .as_str()
+            .with_context(|| format!("'{}' has no image_sha256", pin_file.display()))?;
+        if digest.is_empty() {
+            bail!(
+                "'{}' pins no {} yet: produce it as {} describes and set image_sha256 to the sha256 \
+                 its provenance.json records",
+                pin_file.display(),
+                self.what,
+                self.guide
+            );
+        }
+        Ok(digest.to_string())
+    }
+
+    /// The pinned reference, `oci:<name>@sha256:<image_sha256>`.
+    fn reference(&self, repo: &Path) -> Result<String> {
+        Ok(format!("oci:{}@sha256:{}", self.name, self.digest(repo)?))
+    }
+
+    /// The pinned image as `(reference, rootfs tar)`, produced at
+    /// `<dir>/rootfs.tar`, after checking its `provenance.json` carries the
+    /// pinned `sha256`. The builder never produces the image.
+    fn select(&self, repo: &Path) -> Result<(String, PathBuf)> {
+        let digest = self.digest(repo)?;
+        let dir = repo.join(self.dir);
+        let (rootfs, provenance) = (dir.join("rootfs.tar"), dir.join("provenance.json"));
+        let missing = |why: String| {
+            anyhow::anyhow!(
+                "the {} oci:{}@sha256:{digest} (pinned in {}) is {why}; \
+                 produce it as {} describes (expected {} and {})",
+                self.what,
+                self.name,
+                self.pin,
+                self.guide,
+                rootfs.display(),
+                provenance.display()
+            )
+        };
+        if !rootfs.is_file() {
+            return Err(missing(format!("not at '{}'", rootfs.display())));
+        }
+        let recorded: serde_json::Value = match std::fs::read(&provenance) {
+            Ok(bytes) => serde_json::from_slice(&bytes)
+                .with_context(|| format!("parsing '{}'", provenance.display()))?,
+            Err(_) => return Err(missing(format!("without '{}'", provenance.display()))),
+        };
+        match recorded["sha256"].as_str() {
+            Some(found) if found == digest => {}
+            found => {
+                return Err(missing(format!(
+                    "not what '{}' records (sha256 {})",
+                    provenance.display(),
+                    found.unwrap_or("absent")
+                )))
+            }
+        }
+        Ok((format!("oci:{}@sha256:{digest}", self.name), rootfs))
+    }
+}
+
 /// The compiler image OS builds run Recipe in, as `(GINUX_ROOT, GINUX_ROOTFS)`:
 /// the one `product-ci.json` pins (`oci:recipe-compiler@sha256:<image_sha256>`),
-/// produced at `.artifacts/ginux-env/prepared-image-build-tools/rootfs.tar`, after
-/// checking its `provenance.json` carries the pinned `sha256`. `None` when the
-/// builder's environment sets `GINUX_ROOT` or `GINUX_ROOTFS`: those keep winning.
-/// The builder never produces the image.
+/// produced at `.artifacts/ginux-env/prepared-image-build-tools/rootfs.tar`.
+/// `None` when the builder's environment sets `GINUX_ROOT` or `GINUX_ROOTFS`:
+/// those keep winning. The builder never produces the image.
 fn compiler_image(repo: &Path) -> Result<Option<(String, PathBuf)>> {
     if std::env::var_os("GINUX_ROOT").is_some() || std::env::var_os("GINUX_ROOTFS").is_some() {
         return Ok(None);
     }
-    let pin_file = repo.join(COMPILER_IMAGE_PIN);
-    let pin: serde_json::Value = serde_json::from_slice(
-        &std::fs::read(&pin_file).with_context(|| format!("reading '{}'", pin_file.display()))?,
-    )
-    .with_context(|| format!("parsing '{}'", pin_file.display()))?;
-    let digest = pin["image_sha256"]
-        .as_str()
-        .with_context(|| format!("'{}' has no image_sha256", pin_file.display()))?;
-    let dir = repo.join(COMPILER_IMAGE_DIR);
-    let (rootfs, provenance) = (dir.join("rootfs.tar"), dir.join("provenance.json"));
-    let missing = |why: String| {
-        anyhow::anyhow!(
-            "the compiler image oci:recipe-compiler@sha256:{digest} (pinned in {COMPILER_IMAGE_PIN}) is {why}; \
-             produce it as tools/recipe/docs/setup-linux.md describes (expected {} and {})",
-            rootfs.display(),
-            provenance.display()
-        )
-    };
-    if !rootfs.is_file() {
-        return Err(missing(format!("not at '{}'", rootfs.display())));
+    COMPILER_IMAGE.select(repo).map(Some)
+}
+
+/// The minimal runtime image the installed Recipe ships, as `(reference,
+/// rootfs tar)`: the ambient `GINUX_MINIMAL_ROOT`/`GINUX_MINIMAL_ROOTFS` when
+/// the builder's environment sets them (as Recipe itself reads them), else
+/// the one `minimal-runtime.json` pins (`oci:recipe-minimal@sha256:<digest>`).
+/// OS builds never run in it: every invocation names its root as the minimal
+/// image too (`Invocation::run`), so every recipe runs in the compiler image.
+pub(crate) fn minimal_image(repo: &Path) -> Result<(String, PathBuf)> {
+    if std::env::var_os("GINUX_MINIMAL_ROOT").is_some()
+        || std::env::var_os("GINUX_MINIMAL_ROOTFS").is_some()
+    {
+        let reference = levitate_recipe::runtime::minimal_reference()?
+            .context("GINUX_MINIMAL_ROOTFS is set without GINUX_MINIMAL_ROOT; set both")?;
+        levitate_recipe::runtime::root_digest(&reference)?;
+        let image = levitate_recipe::runtime::rootfs_path(&reference)?;
+        return Ok((reference, image));
     }
-    let recorded: serde_json::Value = match std::fs::read(&provenance) {
-        Ok(bytes) => serde_json::from_slice(&bytes)
-            .with_context(|| format!("parsing '{}'", provenance.display()))?,
-        Err(_) => return Err(missing(format!("without '{}'", provenance.display()))),
-    };
-    match recorded["sha256"].as_str() {
-        Some(found) if found == digest => {}
-        found => {
-            return Err(missing(format!(
-                "not what '{}' records (sha256 {})",
-                provenance.display(),
-                found.unwrap_or("absent")
-            )))
-        }
+    MINIMAL_IMAGE.select(repo)
+}
+
+/// The minimal image's reference, for keys computed without the image: the
+/// ambient `GINUX_MINIMAL_ROOT` when set, else the pinned one. The same
+/// string `minimal_image` selects.
+pub(crate) fn minimal_image_reference(repo: &Path) -> Result<String> {
+    if let Some(root) = std::env::var_os("GINUX_MINIMAL_ROOT") {
+        return Ok(root.to_string_lossy().into_owned());
     }
-    Ok(Some((
-        format!("oci:recipe-compiler@sha256:{digest}"),
-        rootfs,
-    )))
+    MINIMAL_IMAGE.reference(repo)
 }
 
 /// The compiler image's reference, for keys computed without the image (CI): the
@@ -102,15 +197,7 @@ pub(crate) fn compiler_image_reference(repo: &Path) -> Result<String> {
 /// The pinned compiler image's reference, `oci:recipe-compiler@sha256:<image_sha256>`
 /// from `product-ci.json`, whatever the environment says.
 pub(crate) fn pinned_compiler_image_reference(repo: &Path) -> Result<String> {
-    let pin_file = repo.join(COMPILER_IMAGE_PIN);
-    let pin: serde_json::Value = serde_json::from_slice(
-        &std::fs::read(&pin_file).with_context(|| format!("reading '{}'", pin_file.display()))?,
-    )
-    .with_context(|| format!("parsing '{}'", pin_file.display()))?;
-    let digest = pin["image_sha256"]
-        .as_str()
-        .with_context(|| format!("'{}' has no image_sha256", pin_file.display()))?;
-    Ok(format!("oci:recipe-compiler@sha256:{digest}"))
+    COMPILER_IMAGE.reference(repo)
 }
 
 /// The root image recipe steps run in, as its reference: `GINUX_ROOT` when
@@ -121,15 +208,7 @@ pub(crate) fn root_reference(repo: &Path) -> Result<String> {
     if let Some(root) = std::env::var_os("GINUX_ROOT") {
         return Ok(root.to_string_lossy().into_owned());
     }
-    let pin_file = repo.join(COMPILER_IMAGE_PIN);
-    let pin: serde_json::Value = serde_json::from_slice(
-        &std::fs::read(&pin_file).with_context(|| format!("reading '{}'", pin_file.display()))?,
-    )
-    .with_context(|| format!("parsing '{}'", pin_file.display()))?;
-    let digest = pin["image_sha256"]
-        .as_str()
-        .with_context(|| format!("'{}' has no image_sha256", pin_file.display()))?;
-    Ok(format!("oci:recipe-compiler@sha256:{digest}"))
+    COMPILER_IMAGE.reference(repo)
 }
 
 /// Whether `release build --exact` selected exact identity for this process.
@@ -618,8 +697,15 @@ impl<'a> Invocation<'a> {
                 note(format!("    {name}={}", Path::new(&value).display()));
             }
         }
+        // The minimal image is named as this same root (LAUNCHER_ENV), so a
+        // recipe that asks for it runs in the root the stamp names, whatever
+        // the host has installed.
         if let Some((reference, rootfs)) = &self.root {
-            cmd = cmd.env("GINUX_ROOT", reference).env("GINUX_ROOTFS", rootfs);
+            cmd = cmd
+                .env("GINUX_ROOT", reference)
+                .env("GINUX_ROOTFS", rootfs)
+                .env("GINUX_MINIMAL_ROOT", reference)
+                .env("GINUX_MINIMAL_ROOTFS", rootfs);
             note(format!(
                 "    GINUX_ROOT={reference} (this recipe's own root)"
             ));
@@ -627,11 +713,19 @@ impl<'a> Invocation<'a> {
         } else if let Some((reference, rootfs)) = compiler_image(self.repo)? {
             cmd = cmd
                 .env("GINUX_ROOT", &reference)
-                .env("GINUX_ROOTFS", &rootfs);
+                .env("GINUX_ROOTFS", &rootfs)
+                .env("GINUX_MINIMAL_ROOT", &reference)
+                .env("GINUX_MINIMAL_ROOTFS", &rootfs);
             note(format!(
                 "    GINUX_ROOT={reference} (the pinned compiler image)"
             ));
             note(format!("    GINUX_ROOTFS={}", rootfs.display()));
+        } else {
+            for (minimal, full) in [("GINUX_MINIMAL_ROOT", "GINUX_ROOT"), ("GINUX_MINIMAL_ROOTFS", "GINUX_ROOTFS")] {
+                if let Some(value) = std::env::var_os(full) {
+                    cmd = cmd.env(minimal, value);
+                }
+            }
         }
         if let Some(file) = log.take() {
             cmd = cmd

@@ -6,7 +6,8 @@ const RECIPE_API = 1;
 // BIN names the binary (default recstrap); INSTALL_PATH where it goes in the
 // package tree (default usr/bin/<BIN>). recipe also packages the official source of recipes
 // (the file that names it and a copy of it at the pinned commit) and the same
-// pinned runtime image/launcher the builder selected, supplied as typed inputs.
+// pinned runtime image/launcher the builder selected, and the minimal runtime image
+// the root effects recipe runs in (NEEDS.runtime "minimal"), supplied as typed inputs.
 // Input `program`, when given, is the already compiled binary: it is
 // installed as it is and nothing compiles.
 // recupdate (the release checker every installed system has) also installs its
@@ -21,7 +22,8 @@ const RECIPE_API = 1;
 // rootfs output is the tree it installs.
 const NEEDS = #{
     inputs: #{ source: "directory", catalog: "directory?", launcher: "file?", runtime_image: "file?",
-               runtime_reference: "file?", program: "file?", dist: "directory?", keys: "directory?" },
+               runtime_reference: "file?", minimal_image: "file?", minimal_reference: "file?",
+               program: "file?", dist: "directory?", keys: "directory?" },
     defines: #{ BIN: "recstrap", INSTALL_PATH: "", INIT: "" },
     outputs: #{ program: "file", rootfs: "directory" },
     // Packaging Recipe retains compiler outputs while copying its selected
@@ -119,18 +121,20 @@ fn recipe_inputs() {
     if !is_file(join_path(INPUTS.catalog, "index.json")) {
         throw "the public catalog has no index.json; run 'recipe index' in recipes/ and commit it";
     }
-    for name in ["launcher", "runtime_image", "runtime_reference"] {
+    for name in ["launcher", "runtime_image", "runtime_reference", "minimal_image", "minimal_reference"] {
         if INPUTS[name] == () { throw "Recipe packaging requires input " + name; }
     }
 }
 
 fn recipe_runtime(out) {
     recipe_inputs();
-    // Recipe's `runtime stage` owns the runtime's layout and verifies the image against the reference's digest.
+    // Recipe's `runtime stage` owns the runtime's layout and verifies each image against its reference's digest.
     exec_checked(out.program, ["runtime", "stage", "--root", out.rootfs,
         "--launcher", INPUTS.launcher,
         "--reference", trim(read_file(INPUTS.runtime_reference)),
         "--image", INPUTS.runtime_image,
+        "--minimal-reference", trim(read_file(INPUTS.minimal_reference)),
+        "--minimal-image", INPUTS.minimal_image,
         "--catalog", INPUTS.catalog]);
 }
 
@@ -185,7 +189,8 @@ fn verify(out) {
     if !is_file(join_path(out.rootfs, install_path())) { throw "the installed package tree lacks /" + install_path(); }
     if DEFINES.BIN == "recipe" {
         for path in ["usr/libexec/recipe/ginux", "usr/share/recipe/runtime/rootfs.tar",
-                     "usr/share/recipe/runtime/root-reference", "etc/profile.d/recipe.sh"] {
+                     "usr/share/recipe/runtime/root-reference", "usr/share/recipe/runtime/minimal.tar",
+                     "usr/share/recipe/runtime/minimal-reference", "etc/profile.d/recipe.sh"] {
             if !is_file(join_path(out.rootfs, path)) { throw "Recipe runtime is missing " + path; }
         }
         for path in ["usr/share/recipe/sources/levitate.toml", "usr/share/recipe/sources/levitate/index.json"] {

@@ -73,13 +73,19 @@ gives every invocation that launcher as `GINUX_BIN` and the CLI it runs as
 `RECIPE_WORKER_BIN`; ambient values of those two are ignored (and logged), so a
 build never runs an older launcher or worker than the checkout. `GINUX_ROOT`,
 `GINUX_ROOTFS` and `RECIPE_FRAME_TIMEOUT_SECS` are forwarded; other ambient
-`RECIPE_*`/`GINUX_*` controls are removed.
+`RECIPE_*`/`GINUX_*` controls are removed. Every invocation names its root as
+Recipe's minimal image too (`GINUX_MINIMAL_ROOT`/`GINUX_MINIMAL_ROOTFS`), so a recipe
+that asks for the minimal image (`NEEDS.runtime`) runs in the compiler image like every
+other recipe of an OS build; the installed Recipe ships the minimal image
+(`tools/recipe/bootstrap/minimal-runtime.json`) for the root effects recipe.
 
 Each release records `system-sources.sha256` beside its rootfs: the digest of
 every source its system rootfs is built from (the builder, contract, profile,
 variant, the terminal apps in `tools/tui` and the Qt apps in `tools/gui`, the recipes repository and the rootfs tools' crate
 closures, uncommitted edits included), the Ginux launcher built from
-`tools/ginux` (by content: the system ships it as `usr/libexec/recipe/ginux`)
+`tools/ginux` (by content: the system ships it as `usr/libexec/recipe/ginux`),
+the references of the two runtime images the installed Recipe ships (the compiler
+image and the minimal image)
 and Recipe's declared behaviour versions of the Recipe and Ginux that run the
 recipe steps (`levitate_recipe::identity::declared`, not their bytes). It is
 one input of the system part's key (below), so every
@@ -346,9 +352,10 @@ program says which: `[prebuilt] recab: local|downloaded|compiled <key16>`.
   `gh`: it creates the release if missing, never replaces an asset with different bytes, and
   uploads `<family>-<name>.tar.gz` before `prebuilt.json`.
 - `distro-builder prebuilt publish-runtime` (also `cargo xtask prebuilt publish-runtime`, run as the
-  user) compresses the Recipe runtime image the installed Recipe ships (`zstd -T0 -19`) and uploads
-  it as `rootfs.tar.zst`, with `runtime.json`, to release `recipe-runtime-<digest16>`; a release that
-  already has `rootfs.tar.zst` is left alone. Recipe downloads it on first use.
+  user) compresses each Recipe runtime image the installed Recipe ships, the compiler image and the
+  minimal image (`zstd -T0 -19`), and uploads it as `rootfs.tar.zst`, with `runtime.json`, to release
+  `recipe-runtime-<digest16>`; a release that already has `rootfs.tar.zst` is left alone. Recipe
+  downloads it on first use.
 
 ## Release set
 

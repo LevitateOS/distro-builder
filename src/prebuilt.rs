@@ -1001,8 +1001,19 @@ pub fn publish(repo: &Path, family: Family, name: &str, key: &Key) -> Result<()>
     Ok(())
 }
 
-/// Compresses the Recipe runtime image the installed Recipe ships and uploads it to the
-/// release `recipe-runtime-<digest16>` of the prebuilt repository with `gh`.
+/// Compresses the Recipe runtime images the installed Recipe ships, the compiler image and
+/// the minimal image, and uploads each to the release `recipe-runtime-<digest16>` of the
+/// prebuilt repository with `gh` ([`publish_runtime_image`]).
+pub fn publish_runtime(repo: &Path) -> Result<()> {
+    let slug = repository()?;
+    let (reference, tar) = crate::recipe::runtime_image(repo)?;
+    publish_runtime_image(&slug, &reference, &tar)?;
+    let (reference, tar) = crate::recipe::minimal_image(repo)?;
+    publish_runtime_image(&slug, &reference, &tar)
+}
+
+/// Compresses the runtime image `tar` named by `reference` and uploads it to the release
+/// `recipe-runtime-<digest16>` of the prebuilt repository `slug` with `gh`.
 ///
 /// Recipe downloads `rootfs.tar.zst` from that release on first use (when the image is not
 /// shipped) and verifies the *decompressed* bytes against the SHA-256 digest of its
@@ -1011,11 +1022,10 @@ pub fn publish(repo: &Path, family: Family, name: &str, key: &Key) -> Result<()>
 /// complete and is left alone (zstd output differs between versions, so it is not compared).
 /// `runtime.json` records the reference, digest and sizes. Plain `zstd -19` with the default
 /// window, so a default decoder reads it.
-pub fn publish_runtime(repo: &Path) -> Result<()> {
-    let slug = repository()?;
-    let (reference, tar) = crate::recipe::runtime_image(repo)?;
-    let digest = levitate_recipe::runtime::root_digest(&reference)?.to_string();
-    let (tar_sha, tar_bytes) = sha256_file(&tar)?;
+fn publish_runtime_image(slug: &str, reference: &str, tar: &Path) -> Result<()> {
+    let slug = slug.to_string();
+    let digest = levitate_recipe::runtime::root_digest(reference)?.to_string();
+    let (tar_sha, tar_bytes) = sha256_file(tar)?;
     if tar_sha != digest {
         bail!("the runtime image '{}' has SHA-256 {tar_sha}, but its reference {reference} names {digest}", tar.display());
     }
@@ -1042,7 +1052,7 @@ pub fn publish_runtime(repo: &Path) -> Result<()> {
     Cmd::new("zstd")
         .args(["-T0", "-19", "-q", "-o"])
         .arg(&zst)
-        .arg(&tar)
+        .arg(tar)
         .error_msg("compressing the runtime image with zstd")
         .run()?;
     let (zst_sha, zst_bytes) = sha256_file(&zst)?;

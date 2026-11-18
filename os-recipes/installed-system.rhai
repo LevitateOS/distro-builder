@@ -399,6 +399,9 @@ fn apply(root, init) {
     check_init(init);
     identity(root);
     put(root, "etc/issue", pretty_name() + " \\l\n", 0o644);
+    // A package's own message of the day (Alpine's names its wiki and
+    // setup-alpine) is not this system's.
+    if is_file(join_path(root, "etc/motd")) { put(root, "etc/motd", "Welcome to " + pretty_name() + ".\n", 0o644); }
     put(root, "etc/locale.conf", "LANG=C.UTF-8\n", 0o644);
     locale_env(root, init);
     // sshd's privilege-separation directories.

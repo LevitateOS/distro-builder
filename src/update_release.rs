@@ -30,9 +30,16 @@
 //! - `recipes.tar.zst`: the same group recipes and pins files as
 //!   [`RELEASE_RECIPES`] (taken from the tree, so they are the same bytes),
 //!   flat at its top level;
+//! - `parts-<category>.tar.zst`, one per `[[desktop.categories]]` of the
+//!   variant: the package-cache files that category's recipes pin, which the
+//!   ISO does not carry (docs/release-engineering.md, section 11). The overlay
+//!   part writes them (`default_set::write_medium`) and the combiner links
+//!   them here; this module only names them in the manifest;
 //! - `release.json`: the unsigned manifest (schema 1) with the archives'
-//!   `url`, `sha256` and `size` left empty; `cargo xtask release publish`
-//!   fills them, signs it and publishes.
+//!   `url`, `sha256` and `size` left empty, and in `parts` one
+//!   `{name, category, url, sha256, size}` per category (`name` is the file's
+//!   name without `.tar.zst`); `cargo xtask release publish` fills them, signs
+//!   it and publishes.
 
 use anyhow::{bail, ensure, Context, Result};
 use distro_contract::Variant;
@@ -280,6 +287,33 @@ pub(crate) fn write(variant: &Variant, rootfs: &Path, kernel: &Path, initramfs: 
         Ok(())
     })?;
 
+    // The parts the overlay part wrote, one per category, and no other.
+    let mut parts = Vec::new();
+    for category in &variant.contract.desktop.categories {
+        let name = crate::default_set::part_name(&category.name);
+        let file = dir.join(format!("{name}.tar.zst"));
+        ensure!(
+            file.is_file(),
+            "{} is missing: the release's overlay part writes one parts-<category>.tar.zst per category; \
+             build the release again (`cargo xtask build release {}`)",
+            file.display(),
+            variant.id
+        );
+        parts.push(serde_json::json!({ "name": name, "category": category.name, "url": "", "sha256": "", "size": 0 }));
+    }
+    for entry in fs::read_dir(dir).with_context(|| format!("listing {}", dir.display()))? {
+        let entry = entry?.file_name().to_string_lossy().into_owned();
+        if let Some(name) = entry.strip_suffix(".tar.zst").filter(|n| n.starts_with("parts-")) {
+            ensure!(
+                parts.iter().any(|p| p["name"] == name),
+                "{} is no part of a category in distro/variants/{}/distro.toml; remove it from {}",
+                entry,
+                variant.id,
+                dir.display()
+            );
+        }
+    }
+
     let empty = || serde_json::json!({ "url": "", "sha256": "", "size": 0 });
     // The image's own record, so the manifest names the same release (and
     // date) as the base it carries, also when the system part was reused.
@@ -288,6 +322,7 @@ pub(crate) fn write(variant: &Variant, rootfs: &Path, kernel: &Path, initramfs: 
     object.insert("base".into(), empty());
     object.insert("boot".into(), empty());
     object.insert("iso".into(), empty());
+    object.insert("parts".into(), serde_json::Value::Array(parts));
     object.insert(
         "recipes".into(),
         serde_json::json!({ "url": "", "sha256": "", "size": 0, "revision": recipes_revision(variant)? }),
@@ -306,7 +341,7 @@ pub(crate) fn write(variant: &Variant, rootfs: &Path, kernel: &Path, initramfs: 
 }
 
 /// One regular member `name` (mode 0644, root, mtime 0) with `file`'s bytes.
-fn append_file<W: Write>(tar: &mut tar::Builder<W>, name: &str, file: &Path) -> Result<()> {
+pub(crate) fn append_file<W: Write>(tar: &mut tar::Builder<W>, name: &str, file: &Path) -> Result<()> {
     let mut input = levitate_recipe::fsx::open_regular(file)
         .with_context(|| format!("opening {}", file.display()))?;
     let mut header = tar::Header::new_gnu();
@@ -322,7 +357,7 @@ fn append_file<W: Write>(tar: &mut tar::Builder<W>, name: &str, file: &Path) -> 
 
 /// Streams what `write` produces through `zstd -T0 -19` into `path` (written
 /// as `<path>.part`, renamed when complete).
-fn compress_into(path: &Path, write: impl FnOnce(&mut dyn Write) -> Result<()>) -> Result<()> {
+pub(crate) fn compress_into(path: &Path, write: impl FnOnce(&mut dyn Write) -> Result<()>) -> Result<()> {
     let partial = PathBuf::from(format!("{}.part", path.display()));
     let output = fs::File::create(&partial).with_context(|| format!("creating {}", partial.display()))?;
     let mut zstd = Command::new("zstd")

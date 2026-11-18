@@ -134,9 +134,30 @@ from and kept under `.artifacts/parts/<distro>/<kind>/<key>/`
 - `overlay-<product>`: the product's overlay tree (live session with the
   `network` group, overlay tools, install screen; on the release medium also
   the recab app for A/B installs, the Updater for mutable installs and the
-  default software set: its recipes, its
-  list and the package cache of every file they pin, `src/default_set.rs`)
-  built on the system part's tree, and its EROFS.
+  default software set's recipes and list, `src/default_set.rs`) built on the
+  system part's tree, and its EROFS. On the release medium this part also
+  holds the release's category parts (`parts-<category>.tar.zst`, below) as
+  recorded outputs: the package cache is not in the overlay or the ISO.
+
+**Category parts.** The default set's package cache (every file the
+`[desktop].recipes` and their deps pin for the variant's C library, taken from
+the download store the desktop lock's preseed fills; `os-recipes/release-medium.rhai`
+downloads what the store lacks and verifies every file) is not on the ISO.
+`[[desktop.categories]]` in `distro.toml` cuts the default set into named
+groups (each recipe of `[desktop].recipes` in exactly one; the contract rejects
+anything else with the recipe names). The overlay part of the release product
+writes one `parts-<category>.tar.zst` per category into its own directory:
+a tar (`sha256/<digest>` members after a `sha256` directory, sorted, regular
+files 0644, root, mtime 0) through `zstd -T0 -19`, with paths relative to
+`install_tools::RECIPE_CACHE_DIR`, so extracting a part there is its whole
+install. A cache file goes into exactly one part: the first category, in the
+table's order, whose recipes with their deps need it. A part over 1.5 GiB
+fails the build and names the category to split. Being recorded outputs of the
+overlay part, the files follow its key discipline (a changed variant, recipe,
+pins file or builder rebuilds the overlay part; an unchanged one is reused with
+its parts, checked by size and hash) and the combiner links them into the run
+directory beside the ISO. The combiner fails an ISO over 2 GiB (the release
+asset limit) with the run directory to look at.
 
 A part's key is a SHA-256 over its kind, the distro and named inputs, all
 recorded in its `part.json` with its output files (path, bytes, sha256):
@@ -402,10 +423,17 @@ writes the update release in the run directory, next to the ISO:
   `zstd -T0 -19`, in the format Recipe's `src/release.rs` documents;
 - `boot.tar.zst`: `vmlinuz` and `initramfs.img` (the installed initramfs);
 - `recipes.tar.zst`: the release's group recipes, flat;
+- `parts-<category>.tar.zst`: one per `[[desktop.categories]]` (above), the
+  package cache the ISO does not carry;
 - `release.json`: the unsigned manifest (schema 1; `url`, `sha256`, `size`
-  empty, `recipes.revision` the `recipes` submodule's commit).
+  empty, `recipes.revision` the `recipes` submodule's commit, and `parts`:
+  `[{"name": "parts-<category>", "category", "url", "sha256", "size"}]`, also
+  empty).
 
-`cargo xtask release publish <distro>` signs and publishes that folder. The
+`cargo xtask release publish <distro>` signs and publishes that folder: the
+archives, the ISO and every part are assets of the one GitHub release
+(nothing over 2 GiB is uploaded); `cargo xtask release site <distro>` records
+the release in the website's `docs/website/src/data/releases.json`. The
 test products' run directories have no update release.
 
 ## License

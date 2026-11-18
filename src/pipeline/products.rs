@@ -142,8 +142,10 @@ pub(crate) fn write_manifest(variant: &Variant, product: ProductId, dir: &Path) 
 /// `network` group, for a product with the install screen the overlay tools
 /// and the screen, and on the release medium (the desktop flavour) the recab
 /// app for A/B installs, the Updater for mutable installs and the default
-/// software set with its package cache.
-pub(crate) fn build_overlay(variant: &Variant, product: ProductId, rootfs: &Path, overlay: &Path) -> Result<()> {
+/// software set's recipes and list. Its package cache is not in the overlay:
+/// the release parts (`parts-<category>.tar.zst`) are written into `parts_dir`
+/// (the overlay part's directory, where they are recorded outputs).
+pub(crate) fn build_overlay(variant: &Variant, product: ProductId, rootfs: &Path, overlay: &Path, parts_dir: &Path) -> Result<()> {
     let contract = &variant.contract;
     let build = crate::product::build(product);
     if build.live_session {
@@ -166,7 +168,7 @@ pub(crate) fn build_overlay(variant: &Variant, product: ProductId, rootfs: &Path
         if product.flavour() == Flavour::Desktop {
             crate::desktop_apps::install_mode_only(variant, overlay)
                 .with_context(|| format!("adding the recab app and the Updater to the live medium of {}", variant.id))?;
-            crate::default_set::write_medium(variant, overlay)
+            crate::default_set::write_medium(variant, overlay, parts_dir)
                 .with_context(|| format!("adding the default software set to the live medium of {}", variant.id))?;
         }
     }

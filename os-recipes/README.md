@@ -59,8 +59,9 @@ step to the next as one archive (`target_pack_tree`, `target_unpack_tree`).
 
 Only the base system is image-owned here: no image carries software above it.
 `root-effects.rhai` is the root effects recipe the base ships for Recipe, and
-`release-medium.rhai` assembles the default software set the release medium
-carries for the installer. The workspace's top-level
+`release-medium.rhai` assembles the default software set's recipes and list
+for the release medium and the package cache the builder cuts into the
+release's category parts (the cache is not on the medium). The workspace's top-level
 [`recipes/`](../../../recipes/README.md) is the separate catalog for software
 users manage independently of the image. Both collections share one format and
 engine; their consumers and output lifecycles differ. User package activation is

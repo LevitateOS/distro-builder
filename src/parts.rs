@@ -16,9 +16,11 @@
 //!   behaviour versions (and their bytes in exact mode), the Ginux root and
 //!   the minimal runtime image, the kernel and busybox (`system_inputs`).
 //! - `overlay-<product>`: the product's overlay tree (live session, overlay
-//!   tools, install screen; on the release medium the default software set
-//!   and its package cache) built on the system tree, and its
-//!   EROFS. Built from the system part (its key and its exact build), the
+//!   tools, install screen; on the release medium the default software set's
+//!   recipes and list) built on the system tree, and its EROFS. On the release
+//!   medium the package cache is not in it: the part also holds the release's
+//!   `parts-<category>.tar.zst` files (one per `[[desktop.categories]]`) as
+//!   recorded outputs, which the combiner links beside the ISO. Built from the system part (its key and its exact build), the
 //!   product, the overlay tools' crates and the running builder itself
 //!   (`overlay_inputs`).
 //!
@@ -255,7 +257,7 @@ pub(crate) fn overlay(variant: &Variant, product: ProductId, system: &Part) -> R
             crate::tprintln!("{label} preparing the overlay");
             seq.step("preparing the overlay");
             let overlay = create_empty_overlay_dir(dir, build.overlay_dir)?;
-            products::build_overlay(variant, product, &system.tree(), &overlay)
+            products::build_overlay(variant, product, &system.tree(), &overlay, dir)
                 .with_context(|| format!("preparing the {product} overlay of {}", variant.id))?;
             crate::tprintln!("{label} writing the overlay image");
             seq.step("writing the overlay image");

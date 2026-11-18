@@ -8,11 +8,16 @@
 //! extracts the system image, not the overlay):
 //!
 //! - [`write_medium`], on the release medium: the default set's list and its
-//!   recipes with their deps (`install_tools::DEFAULT_SET_DIR`), and the
-//!   package cache (`install_tools::RECIPE_CACHE_DIR`) holding every file
-//!   those recipes pin for the variant's C library, taken from the download
-//!   store that the desktop lock's preseed fills (`os-recipes/release-medium.rhai`
-//!   assembles the tree).
+//!   recipes with their deps (`install_tools::DEFAULT_SET_DIR`) go onto the
+//!   overlay. The package cache (every file those recipes pin for the
+//!   variant's C library, taken from the download store that the desktop
+//!   lock's preseed fills; `os-recipes/release-medium.rhai` assembles it) does
+//!   not: it is cut by category into one `parts-<category>.tar.zst` per
+//!   `[[desktop.categories]]` of the variant (docs/release-engineering.md,
+//!   section 11), written into the overlay part's directory, so they are
+//!   recorded outputs of that part and the release run links them beside the
+//!   ISO. A part holds the files with paths relative to
+//!   `install_tools::RECIPE_CACHE_DIR`, so extracting it there installs it.
 //! - [`add_live_network`], on every live medium: the `network` group and its
 //!   deps, so the live session has NetworkManager. The builder produces that
 //!   group for the variant's system (`RECIPE_HOST_LIBC_ROOT`, the base tree)
@@ -24,10 +29,10 @@
 //! files (`NAME.pins`, which travel with the recipes) and lays out
 //! the inputs; the recipes own acquiring, checking and building.
 
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, ensure, Context, Result};
 use distro_contract::profile::{Flavour, Libc};
 use distro_contract::Variant;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -169,9 +174,21 @@ fn libc_name(libc: Libc) -> &'static str {
     }
 }
 
-/// Puts the default set onto the release medium's `overlay`: its list, its
-/// recipes with their deps, and the package cache of every file they pin.
-pub(crate) fn write_medium(variant: &Variant, overlay: &Path) -> Result<()> {
+/// A part may not be larger than this (GitHub's asset limit is 2 GiB; the
+/// installer needs room to download and unpack).
+pub(crate) const MAX_PART_BYTES: u64 = 1536 * 1024 * 1024;
+
+/// The file name of the part of `category`, without the `.tar.zst`.
+pub(crate) fn part_name(category: &str) -> String {
+    format!("parts-{category}")
+}
+
+/// Puts the default set onto the release medium's `overlay`: its list and its
+/// recipes with their deps. The package cache of every file they pin does not
+/// go there: it is written into `parts_dir` as one `parts-<category>.tar.zst`
+/// per category of the variant, each cache file in the first category (in the
+/// contract's order) whose recipes, with their deps, need it.
+pub(crate) fn write_medium(variant: &Variant, overlay: &Path, parts_dir: &Path) -> Result<()> {
     let repo = &variant.repo_root;
     let id = &variant.id;
     let set = &variant.contract.desktop.recipes;
@@ -192,10 +209,15 @@ pub(crate) fn write_medium(variant: &Variant, overlay: &Path) -> Result<()> {
     let recipes = inputs.join("recipes");
     fs::create_dir_all(&recipes).with_context(|| format!("creating {}", recipes.display()))?;
     let mut pins = BTreeSet::new();
+    // What each recipe pins itself, for cutting the cache into parts.
+    let mut pinned_by: BTreeMap<&str, BTreeSet<String>> = BTreeMap::new();
     for name in &all {
         let file = recipe_file(repo, name);
         let text = fs::read_to_string(&file).with_context(|| format!("reading {}", file.display()))?;
-        pins.extend(sources_of(&text, libc));
+        let own = pinned_by.entry(name).or_default();
+        let found = sources_of(&text, libc);
+        own.extend(found.iter().map(|(sha, _)| sha.clone()));
+        pins.extend(found);
         fs::write(recipes.join(format!("{name}.rhai")), &text)
             .with_context(|| format!("copying recipes/{name}.rhai"))?;
         // The pins file travels with its recipe onto the medium.
@@ -203,7 +225,9 @@ pub(crate) fn write_medium(variant: &Variant, overlay: &Path) -> Result<()> {
         if pins_path.is_file() {
             let text = fs::read_to_string(&pins_path)
                 .with_context(|| format!("reading {}", pins_path.display()))?;
-            pins.extend(pins_file_of(&text, libc));
+            let found = pins_file_of(&text, libc);
+            own.extend(found.iter().map(|(sha, _)| sha.clone()));
+            pins.extend(found);
             fs::write(recipes.join(format!("{name}.pins")), &text)
                 .with_context(|| format!("copying recipes/{name}.pins"))?;
         }
@@ -231,14 +255,71 @@ pub(crate) fn write_medium(variant: &Variant, overlay: &Path) -> Result<()> {
         .input("recipes", &recipes)
         .input("list", &list)
         .input("store", store.path())
-        .define("CACHE_DIR", install_tools::RECIPE_CACHE_DIR)
         .define("DEFAULT_SET_DIR", install_tools::DEFAULT_SET_DIR)
         .run()
-        .with_context(|| format!("assembling the {id} release medium's default set"))?
-        .directory("medium")?;
+        .with_context(|| format!("assembling the {id} release medium's default set"))?;
     drop(store);
-    levitate_recipe::target::merge_tree(&medium, overlay)
-        .with_context(|| format!("adding the default set to the overlay {}", overlay.display()))
+    let (medium_tree, cache) = (medium.directory("medium")?, medium.directory("cache")?);
+    levitate_recipe::target::merge_tree(&medium_tree, overlay)
+        .with_context(|| format!("adding the default set to the overlay {}", overlay.display()))?;
+
+    // Every cache file into exactly one part: the first category that needs it.
+    let mut assigned = BTreeSet::new();
+    for category in &variant.contract.desktop.categories {
+        let mut files = BTreeSet::new();
+        for name in closure(repo, &category.recipes)? {
+            let own = pinned_by.get(name.as_str()).with_context(|| format!("the closure of {} has no recipe {name}", category.name))?;
+            files.extend(own.iter().filter(|sha| !assigned.contains(*sha)).cloned());
+        }
+        assigned.extend(files.iter().cloned());
+        write_part(id, &cache, parts_dir, &category.name, &files)?;
+    }
+    ensure!(
+        assigned.len() == digests.len(),
+        "the categories cover {} of the {} package files the default set pins; every recipe of [desktop].recipes must be in a category",
+        assigned.len(),
+        digests.len()
+    );
+    Ok(())
+}
+
+/// Writes `parts-<category>.tar.zst` into `parts_dir`: the cache files `files`
+/// (SHA-256 digests) of the tree `cache`, as `sha256/<digest>` members after a
+/// `sha256` directory, sorted, regular files 0644, owner root, mtime 0, so the
+/// same files give the same bytes. Fails above [`MAX_PART_BYTES`].
+fn write_part(distro: &str, cache: &Path, parts_dir: &Path, category: &str, files: &BTreeSet<String>) -> Result<()> {
+    let name = part_name(category);
+    let path = parts_dir.join(format!("{name}.tar.zst"));
+    crate::tprintln!("[release] writing {name}.tar.zst ({} package files, zstd -19)", files.len());
+    crate::update_release::compress_into(&path, |out| {
+        let mut tar = tar::Builder::new(out);
+        let mut header = tar::Header::new_gnu();
+        header.set_entry_type(tar::EntryType::Directory);
+        header.set_mode(0o755);
+        header.set_uid(0);
+        header.set_gid(0);
+        header.set_mtime(0);
+        header.set_size(0);
+        tar.append_data(&mut header, "sha256", std::io::empty())?;
+        for sha in files {
+            crate::update_release::append_file(&mut tar, &format!("sha256/{sha}"), &cache.join("sha256").join(sha))?;
+        }
+        tar.finish()?;
+        Ok(())
+    })?;
+    let size = fs::metadata(&path).with_context(|| format!("reading {}", path.display()))?.len();
+    if size > MAX_PART_BYTES {
+        let _ = fs::remove_file(&path);
+        bail!(
+            "{name}.tar.zst is {:.2} GiB, over the {:.1} GiB a part may have (a release asset is limited to 2 GiB); \
+             split the category '{category}' in [[desktop.categories]] of distro/variants/{distro}/distro.toml into two \
+             categories and build again",
+            size as f64 / 1073741824.0,
+            MAX_PART_BYTES as f64 / 1073741824.0,
+        );
+    }
+    crate::tprintln!("[release] {name}.tar.zst: {:.1} MiB", size as f64 / 1048576.0);
+    Ok(())
 }
 
 /// The account files, as Recipe's system route names them.

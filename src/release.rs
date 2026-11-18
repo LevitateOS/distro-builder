@@ -16,6 +16,9 @@ use std::path::{Path, PathBuf};
 use crate::kernel::{KERNEL_MODULES_DIR, KERNEL_RELEASE_PATH};
 use crate::recipe::{recipe_work_dir, Invocation};
 
+/// The most a release ISO may have: GitHub release assets stop at 2 GiB.
+const MAX_ISO_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+
 /// What a live UKI boots into; each role is one UKI and one boot menu entry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BootRole {
@@ -257,6 +260,17 @@ pub fn assemble(
     ];
     config.systemd_boot = rootfs.join(SYSTEMD_BOOT_EFI);
     let iso = reciso::create_iso(&config, &|message| crate::tprintln!("  {message}")).context(what)?;
+    if product == ProductId::Release {
+        let size = fs::metadata(&iso).with_context(|| format!("reading {}", iso.display()))?.len();
+        ensure!(
+            size <= MAX_ISO_BYTES,
+            "{} is {:.2} GiB, over the 2 GiB a release asset may have; the package cache belongs in the release's \
+             parts (distro/variants/{id}/distro.toml [[desktop.categories]]), so look for what else grew the system \
+             image or the overlay (`ls -l` the run directory) and remove it",
+            iso.display(),
+            size as f64 / 1073741824.0
+        );
+    }
 
     // The release medium's run directory is also the update release
     // (docs/release-engineering.md, section 3): the archives and the

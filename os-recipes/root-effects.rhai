@@ -23,8 +23,9 @@ const RECIPE_API = 1;
 // root's own ldconfig after the effects, on a glibc root (tools/recipe
 // README, "Library cache"). musl has no cache.
 //
-// The caches follow the root, which changed: they are made again at every
-// run (RERUN).
+// The caches follow the root, which changed: the recipe runs at every change
+// (RERUN) and makes them again, except an icon cache whose inputs did not
+// change, which it keeps as it is (icon_caches).
 const NEEDS = #{
     inputs: #{ root: "directory" },
     outputs: #{ system: "directory" },
@@ -209,20 +210,112 @@ fn fonts(job) {
     }
 }
 
+// What theme folder `dir`'s icon cache is made from, as text. Without
+// --include-image-data, gtk-update-icon-cache (gtk/updateiconcache.c,
+// scan_directory and load_icon_data) reads no pixels: it records, for every
+// folder below the theme, the names of the files in it that end in .png,
+// .svg, .xpm or .icon (following links; a name that is neither a folder nor a
+// regular file is skipped), and parses the .icon files. So the cache follows
+// the tool, its arguments, those names and the .icon files' contents. It
+// reads index.theme only to check that it exists; its contents are in too, to
+// be safe. Not mtimes: Recipe installs files with fixed ones.
+//
+// Each name a program looks up is a call Ginux mediates, and following every
+// link costs what the tool itself costs (breeze: 20000 names, 12000 of them
+// links, 58 of those to folders that hold 34000 more names). So the tree is
+// listed as it lies, with each name's own type and the type it leads to
+// (one look-up per link), and only the links to folders are resolved: one
+// that stays in the theme is its target, already listed, so the pair is
+// recorded; one that leaves it is listed through, as the tool sees it.
+//
+// The lists go through files, one program at a time, not through pipes: while
+// one task of a Ginux run makes a path or mapping call, Ginux stops all the
+// others and gives up after 5 s, and two programs working at once (find
+// feeding sort) abort the run that way ("argument peer interrupt timed
+// out"). Any failing program fails the whole command (set -e), so a missing
+// tool never passes for an unchanged theme. GNU find, xargs and realpath, as
+// the runtime image has them.
+fn icon_cache_inputs(job, tool, args, theme, dir) {
+    let lists = join_path(job.scratch, "icon-inputs-" + theme);
+    if exists(lists) { rm(lists); }
+    mkdir(lists);
+    let icon = "-name '*.png' -o -name '*.svg' -o -name '*.xpm' -o -name '*.icon'";
+    let script = [
+        "set -e",
+        "cd '" + dir + "'",
+        "L='" + lists + "'",
+        // "ff", "dd", "lf", "ld" (a link to a folder), "lN" (a broken link).
+        "find . \\( " + icon + " -o -type d -o -xtype d \\) -printf '%y%Y %p\\n' > \"$L/names\"",
+        "LC_ALL=C sort -o \"$L/names\" \"$L/names\"",
+        "sed -n 's/^ld //p' \"$L/names\" > \"$L/folder-links\"",
+        "xargs -r -d '\\n' -a \"$L/folder-links\" realpath -e --relative-base=. > \"$L/folder-link-targets\"",
+        "paste -d ' ' \"$L/folder-links\" \"$L/folder-link-targets\" > \"$L/folder-link-pairs\"",
+        "sed -n '/^\\//p' \"$L/folder-link-targets\" > \"$L/outside\"",
+        ": > \"$L/outside-names\"",
+        "xargs -r -d '\\n' -a \"$L/outside\" -I{} find -L {} \\( -type d -printf 'd %p\\n' \\) -o \\( -type f \\( " + icon + " \\) -printf 'f %p\\n' \\) >> \"$L/outside-names\"",
+        "LC_ALL=C sort -o \"$L/outside-names\" \"$L/outside-names\"",
+        "sed -n 's/^[fl]f \\(.*\\.icon\\)$/\\1/p; s/^f \\(.*\\.icon\\)$/\\1/p' \"$L/names\" \"$L/outside-names\" > \"$L/icon-list\"",
+        "xargs -r -d '\\n' -a \"$L/icon-list\" sha256sum > \"$L/icon-files\"",
+        "sha256sum '" + join_path(job.root, tool) + "' index.theme \"$L/names\" \"$L/folder-link-pairs\" \"$L/outside-names\" \"$L/icon-files\"",
+    ];
+    let command = "";
+    for line in script { command += (if command == "" { "" } else { "; " }) + line; }
+    let sums = shell_output(command);
+    let text = "gtk-update-icon-cache inputs 2\nargs";
+    for arg in args { text += " " + arg; }
+    text += "\n";
+    let lines = 0;
+    for line in sums.split("\n") {
+        if trim(line) == "" { continue; }
+        text += replace(replace(trim(line), lists + "/", ""), job.root + "/", "") + "\n";
+        lines += 1;
+    }
+    if lines != 6 { throw "sha256sum gave " + lines + " sums, not 6"; }
+    text
+}
+
+// Each theme's cache, made again only when what it is made from changed. The
+// text icon_cache_inputs gives is kept beside the cache, as
+// .icon-theme.cache.inputs (in the same package and folder, so it comes and
+// goes with the cache; the tool skips it, as it skips every name without an
+// icon suffix). A theme whose text matches the root's copy keeps the root's
+// cache, copied as it is: the output replaces system-effects whole, so a
+// cache not in it would be removed.
 fn icon_caches(job) {
     let icons = join_path(job.root, "usr/share/icons");
     let tool = program(job, ["gtk-update-icon-cache"]);
     if tool == "" { return; }
+    let args = ["-q", "-t", "-f"];
     for theme in entries(icons) {
         let dir = join_path(icons, theme);
         if !is_file(join_path(dir, "index.theme")) { continue; }
+        let cache_path = "usr/share/icons/" + theme + "/icon-theme.cache";
+        let inputs_path = "usr/share/icons/" + theme + "/.icon-theme.cache.inputs";
+        // Inputs that cannot be read make the cache again, as every run did
+        // before, and keep no inputs file.
+        let inputs = "";
+        try {
+            inputs = icon_cache_inputs(job, tool, args, theme, dir);
+        } catch (error) {
+            log(`  icon cache of ${theme}: its inputs could not be read (${error})`);
+        }
+        let old_cache = join_path(job.root, cache_path);
+        let old_inputs = join_path(job.root, inputs_path);
+        if inputs != "" && is_file(old_cache) && is_file(old_inputs) && read_file(old_inputs) == inputs {
+            log("  icon cache of " + theme + ": unchanged, kept");
+            keep(job, old_cache, cache_path);
+            keep_text(job, inputs_path, inputs);
+            continue;
+        }
+        log("  icon cache of " + theme + ": making");
         let farm = farm(job, "icons-" + theme, dir);
-        run(job, tool, ["-q", "-t", "-f", farm]);
+        run(job, tool, args + [farm]);
         // A theme with no icon files (a cursor-only theme such as `default`,
         // which only names the theme it inherits) gets no cache from the tool.
         let cache = join_path(farm, "icon-theme.cache");
         if !is_file(cache) { continue; }
-        keep(job, cache, "usr/share/icons/" + theme + "/icon-theme.cache");
+        keep(job, cache, cache_path);
+        if inputs != "" { keep_text(job, inputs_path, inputs); }
     }
 }
 

@@ -273,12 +273,16 @@ pub(crate) fn normalize_modes(root: &Path) -> Result<()> {
     Ok(())
 }
 
+/// An ambient-image check: the environment variable, what the image is called, and the
+/// function that reads the pinned reference.
+type AmbientImage = (&'static str, &'static str, fn(&Path) -> Result<String>);
+
 /// Prints one line on stderr for each of `GINUX_ROOT` and `GINUX_MINIMAL_ROOT` the
 /// environment sets to another image than the pinned one: every key that names that
 /// image then names the ambient one (it is the one a compile would use) and will not
 /// match a published part.
 pub fn warn_ambient_compiler_image(repo: &Path) {
-    let images: [(&str, &str, fn(&Path) -> Result<String>); 2] = [
+    let images: [AmbientImage; 2] = [
         ("GINUX_ROOT", "compiler image", crate::recipe::pinned_compiler_image_reference),
         ("GINUX_MINIMAL_ROOT", "minimal runtime image", crate::recipe::pinned_minimal_image_reference),
     ];

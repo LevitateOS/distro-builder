@@ -431,9 +431,12 @@ fn rpm_header(path: &Path) -> Result<(String, Option<String>)> {
     Ok((srpm, string(LICENSE)))
 }
 
+/// One RPM header index entry: (tag, type, offset, count).
+type IndexEntry = (u32, u32, u32, u32);
+
 /// One RPM header section: its index entries (tag, type, offset, count) and
 /// data; `pad` skips the padding to 8 bytes the signature header has.
-fn read_section(file: &mut impl Read, pad: bool) -> Result<(Vec<(u32, u32, u32, u32)>, Vec<u8>)> {
+fn read_section(file: &mut impl Read, pad: bool) -> Result<(Vec<IndexEntry>, Vec<u8>)> {
     let mut intro = [0u8; 16];
     file.read_exact(&mut intro)?;
     ensure!(intro[..3] == [0x8e, 0xad, 0xe8], "not an RPM header");
@@ -450,7 +453,9 @@ fn read_section(file: &mut impl Read, pad: bool) -> Result<(Vec<(u32, u32, u32, 
     }
     let word = |bytes: &[u8]| u32::from_be_bytes(bytes.try_into().expect("four bytes"));
     let entries = index
-        .chunks_exact(16)
+        .as_chunks::<16>()
+        .0
+        .iter()
         .map(|e| (word(&e[0..4]), word(&e[4..8]), word(&e[8..12]), word(&e[12..16])))
         .collect();
     Ok((entries, data))

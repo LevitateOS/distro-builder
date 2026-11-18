@@ -7,7 +7,7 @@ const RECIPE_API = 1;
 const NEEDS = #{
     inputs: #{ store: "directory?" },
     outputs: #{ apps_build_rpms: "directory" },
-    network: ["dl.fedoraproject.org:443"],
+    network: ["dl.fedoraproject.org:443", "kojipkgs.fedoraproject.org:443"],
     memory_mib: 8192,
     runtime: "minimal",
 };

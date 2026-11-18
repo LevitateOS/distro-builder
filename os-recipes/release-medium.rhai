@@ -24,7 +24,7 @@ const NEEDS = #{
     inputs: #{ pins: "file", recipes: "directory", list: "file", store: "directory?" },
     defines: #{ CACHE_DIR: (), DEFAULT_SET_DIR: () },
     outputs: #{ medium: "directory" },
-    network: ["dl.fedoraproject.org:443", "dl-cdn.alpinelinux.org:443", "github.com:443",
+    network: ["dl.fedoraproject.org:443", "kojipkgs.fedoraproject.org:443", "dl-cdn.alpinelinux.org:443", "github.com:443",
               "release-assets.githubusercontent.com:443", "objects.githubusercontent.com:443"],
     memory_mib: 8192,
     storage_max_objects: 262144,

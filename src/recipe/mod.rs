@@ -32,9 +32,9 @@ use crate::process::Cmd;
 /// invocation whose recipes ask for the minimal image (`NEEDS.runtime`) is given the one
 /// [`minimal_image`] selects (which honours that ambient pair), the one its stamp names,
 /// and no other invocation is given one.
-const LAUNCHER_ENV: &[&str] = &["GINUX_ROOT", "GINUX_ROOTFS", "RECIPE_FRAME_TIMEOUT_SECS"];
-/// The worker frame deadline OS builds give Recipe when the caller sets none.
-const OS_BUILD_FRAME_TIMEOUT_SECS: &str = "1800";
+const LAUNCHER_ENV: &[&str] = &["GINUX_ROOT", "GINUX_ROOTFS", "RECIPE_OUTPUT_TIMEOUT_SECS"];
+/// The longest quiet time (no complete worker output line) OS builds give Recipe when the caller sets none.
+const OS_BUILD_OUTPUT_TIMEOUT_SECS: &str = "1800";
 
 /// Where the pinned compiler image lives, and the file that pins it.
 const COMPILER_IMAGE_DIR: &str = ".artifacts/ginux-env/prepared-image-build-tools";
@@ -812,12 +812,9 @@ impl<'a> Invocation<'a> {
                 note(format!("    {name}={}", value.display()));
             }
         }
-        // Recipe allows a worker frame 300 s by default, and a checkpoint is one
-        // frame: snapshotting a step's storage, several GB for a desktop
-        // tree, outlasted that under a busy disk and failed package effects
-        // on 2026-11-12. Unless the caller set one, OS builds allow 30 min.
-        if std::env::var_os("RECIPE_FRAME_TIMEOUT_SECS").is_none() {
-            cmd = cmd.env("RECIPE_FRAME_TIMEOUT_SECS", OS_BUILD_FRAME_TIMEOUT_SECS);
+        // the longest quiet time (no complete worker output line) allowed; the first line also waits for the launcher to restore kept downloads, so builds allow 1800 s.
+        if std::env::var_os("RECIPE_OUTPUT_TIMEOUT_SECS").is_none() {
+            cmd = cmd.env("RECIPE_OUTPUT_TIMEOUT_SECS", OS_BUILD_OUTPUT_TIMEOUT_SECS);
         }
         for name in LAUNCHER_ENV {
             // This invocation's own root replaces the ambient one.

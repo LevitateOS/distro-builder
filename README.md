@@ -31,7 +31,8 @@ AcornOS over Recipe. It reads each variant through `distro_contract::load`
   live overlay, tools, kernel) and their shared modules and locks. Each recipe
   documents what it produces; [the collection guide](os-recipes/README.md)
   explains its boundary with user-managed software. The kernel recipes
-  (`linux`, `linux-prebuilt`) publish one output, `bundle`; the builder checks
+  (`linux`, over its build dependencies `linux-source` and `linux-compile`, and
+  `linux-prebuilt`) publish one output, `bundle`; the builder checks
   the kernel image and the modules inside it (`bundle_mismatch` from
   `kernel/metadata.rhai`).
 - `guest/`: shell files installed into the live and installed systems.
@@ -72,7 +73,7 @@ CLI). It builds Ginux's launcher from `tools/ginux` on first use in each run and
 gives every invocation that launcher as `GINUX_BIN` and the CLI it runs as
 `RECIPE_WORKER_BIN`; ambient values of those two are ignored (and logged), so a
 build never runs an older launcher or worker than the checkout. `GINUX_ROOT`,
-`GINUX_ROOTFS` and `RECIPE_FRAME_TIMEOUT_SECS` are forwarded; other ambient
+`GINUX_ROOTFS` and `RECIPE_OUTPUT_TIMEOUT_SECS` are forwarded; other ambient
 `RECIPE_*`/`GINUX_*` controls are removed. An invocation whose recipes ask for
 Recipe's minimal runtime image (`NEEDS.runtime: "minimal"`: every OS recipe that needs
 no compiler, see `os-recipes/README.md`) is given it as `GINUX_MINIMAL_ROOT`/

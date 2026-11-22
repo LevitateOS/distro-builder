@@ -1,5 +1,5 @@
-// The kernel pins and the kernel bundle rules both kernel recipes share. No
-// lifecycle hooks. distro-builder's kernel module (src/pipeline/kernel.rs)
+// The kernel pins and the kernel bundle rules the kernel recipes share (the
+// source build's linux-source, linux-compile and linux, and linux-prebuilt). distro-builder's kernel module (src/pipeline/kernel.rs)
 // also evaluates `source_spec` and `bundle_mismatch` (with `release_mismatch`),
 // with only `join_path`, `is_file`, `is_dir`, `read_file_or_empty` and `trim`
 // defined, so keep those functions to these helpers and plain Rhai.

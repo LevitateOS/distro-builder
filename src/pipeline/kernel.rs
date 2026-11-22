@@ -43,7 +43,8 @@ pub struct KernelPin {
 pub enum Source {
     /// The published prebuilt bundle (`linux-prebuilt.rhai`).
     Prebuilt,
-    /// A source build (`linux.rhai`).
+    /// A source build (`linux.rhai`, over `linux-source.rhai` and
+    /// `linux-compile.rhai`).
     Compile,
 }
 
@@ -173,27 +174,41 @@ pub fn install(variant: &Variant, source: &Source, force: bool) -> Result<String
     let current = kernel_dir(repo_root, &variant.id);
     let kconfig = merged_kconfig(variant)?;
     let target = existing_bundle(&current)?;
-    let mut inputs: Vec<(&str, &Path)> = vec![("kconfig", &kconfig)];
-    if let Some(target) = &target {
-        inputs.push(("target", target));
-    }
+    let release = pin(variant)?.release;
     // The bundle `cargo xtask kernel publish` left on this machine: the recipe
     // takes it as `kernel_archive` (checked against the pinned digest) instead
     // of downloading the same file.
-    let release = pin(variant)?.release;
     let published = repo_root
         .join(".artifacts/kernel")
         .join(&variant.id)
         .join(&release)
         .join("dist")
         .join(format!("{}-{release}-runtime.tar.xz", variant.id));
-    if matches!(source, Source::Prebuilt) && published.is_file() {
-        inputs.push(("kernel_archive", &published));
-    }
-    // GitHub redirects release downloads to its asset host.
+    let mut inputs: Vec<(&str, &Path)> = Vec::new();
     let recipe = match source {
-        Source::Prebuilt => "linux-prebuilt.rhai",
-        Source::Compile => "linux.rhai",
+        Source::Prebuilt => {
+            inputs.push(("kconfig", &kconfig));
+            if let Some(target) = &target {
+                inputs.push(("target", target));
+            }
+            if published.is_file() {
+                inputs.push(("kernel_archive", &published));
+            }
+            "linux-prebuilt.rhai"
+        }
+        // `linux` installs what its dependency `linux-compile` compiled from
+        // what `linux-source` unpacked; the kconfig is linux-compile's. The
+        // previous bundle seeds both linux-compile (its kernel-build kept when
+        // configured from the same kconfig) and linux (kept when it already
+        // holds that build, installed).
+        Source::Compile => {
+            inputs.push(("linux-compile::kconfig", &kconfig));
+            if let Some(target) = &target {
+                inputs.push(("linux-compile::target", target));
+                inputs.push(("target", target));
+            }
+            "linux.rhai"
+        }
     };
     let result = run(variant, recipe, &inputs, force)?;
     crate::recipe::linux::select_kernel_bundle(&result, &current)?;

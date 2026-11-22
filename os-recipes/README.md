@@ -13,7 +13,15 @@ function writes the owned output (inside Ginux when it starts programs), or its
 files and directories, and the builder consumes them to assemble images. A normal
 recipe has one output; the kernel recipes publish one, `bundle`, holding the
 kernel image and its modules, which the builder checks with `bundle_mismatch`
-from `kernel/metadata.rhai`. recab owns the two roots of an A/B
+from `kernel/metadata.rhai`. A kernel built from source is three recipes,
+each a normal step whose finished output Recipe keeps by its identity, so a
+run interrupted after the hours-long compile does not compile again:
+`linux-source` unpacks the pinned kernel.org source (or the `kernel_archive`
+input), `linux-compile` configures it with the `kconfig` input and compiles
+it, and `linux` installs the image and the modules into the bundle. The
+previous bundle, given as `target` to `linux-compile` and to `linux`, is kept
+when it was built from the same kconfig. `kernel/make.rhai` holds the `make`
+environment the last two share. recab owns the two roots of an A/B
 installation.
 
 The builder runs every recipe here in Ginux. One that needs no compiler declares
@@ -22,12 +30,12 @@ coreutils, findutils, sed, grep and what the Recipe worker needs, a few megabyte
 `tools/recipe/bootstrap/ginux-minimal-image.json`) instead of the 1.3 GB compiler
 image: the preseeds, the unpack and base-tree steps, the APK package effects, the
 rootfs recipes, both apps-build roots, the live overlay, the release medium,
-`prebuilt-fetch`, `busybox-static`, `linux-prebuilt`, `bun-toolchain`, `tui-binary`
+`prebuilt-fetch`, `busybox-static`, `linux-prebuilt`, `linux-source`, `bun-toolchain`, `tui-binary`
 and `root-effects`. What they start is a Recipe helper, a program of a root they
 are given (through that root's loader), a downloaded static or glibc program
 (`apk.static`, Bun) or those tools. The others stay in the compiler image for a
 program only it has: `fedora-rpm-package-effects` (python3), `linux-deps`
-(rpm2cpio, cpio), `linux` (make, gcc), `tool-crate` and `install-tools` (cargo,
+(rpm2cpio, cpio), `linux-compile` and `linux` (make, gcc), `tool-crate` and `install-tools` (cargo,
 gcc); `desktop-apps`, `xlibre` and `reclogin` run in the apps-build root.
 A program added to a minimal recipe must be in that image's `keep` list, with the
 libraries its `readelf -d` names.

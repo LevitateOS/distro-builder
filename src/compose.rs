@@ -145,19 +145,35 @@ pub(crate) fn package_files(repo: &Path, rows: &[LockRow], preseed_dirs: &[PathB
 /// file it is compiled from (the recipe, its pins, its base and the modules
 /// they import), by content, as one line. A module edit must make a new key,
 /// so this is `Declaration::content`, not `source_digests` (which leaves the
-/// imported modules out).
+/// imported modules out). The recipes it depends on (`deps`, `build_deps`,
+/// the kernel's `linux-source` and `linux-compile`, say) follow, each file
+/// named after its recipe, so editing one also makes a new key; a recipe
+/// without dependencies has the same line as before they were counted.
 pub(crate) fn recipe_identity(repo: &Path, recipe: &Path) -> Result<String> {
     let os_recipes = repo.join("distro/builder/os-recipes");
-    let declaration = levitate_recipe::needs::declaration(recipe, Some(&os_recipes))
+    let graph = levitate_recipe::needs::declarations(recipe, Some(&os_recipes))
         .with_context(|| format!("reading the declaration of '{}'", recipe.display()))?;
-    let content = declaration
-        .content()
-        .with_context(|| format!("hashing the sources of '{}'", recipe.display()))?;
-    Ok(content
+    let (main, dependencies) = graph
+        .split_last()
+        .with_context(|| format!("'{}' has no declaration", recipe.display()))?;
+    let content = |declaration: &levitate_recipe::needs::Declaration| {
+        declaration
+            .content()
+            .with_context(|| format!("hashing the sources of '{}'", declaration.recipe.display()))
+    };
+    let mut lines: Vec<String> = content(main)?
         .iter()
         .map(|(name, digest)| format!("{name}={digest}"))
-        .collect::<Vec<_>>()
-        .join(";"))
+        .collect();
+    for dependency in dependencies {
+        let recipe_name = dependency.name().to_owned();
+        lines.extend(
+            content(dependency)?
+                .iter()
+                .map(|(name, digest)| format!("{recipe_name}:{name}={digest}")),
+        );
+    }
+    Ok(lines.join(";"))
 }
 
 /// The unpack key of the package with SHA-256 `sha256`.

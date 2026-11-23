@@ -10,7 +10,7 @@
 //! image, the minimal one, each where a recipe of theirs runs in it). Recipe's and Ginux's
 //! sources and Ginux's catalog digests are not in it: what the system ships of
 //! them is added after this tree, in the system part. Exact mode adds the
-//! full declared identity and the bytes of the Recipe CLI and the launcher,
+//! full declared identity and the bytes of the Recipe CLI and the Ginux tools,
 //! so a release reuses only what byte-identical tools made.
 //!
 //! An entry is made in a sibling temporary directory and renamed into place

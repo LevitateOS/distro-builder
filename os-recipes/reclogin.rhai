@@ -180,20 +180,6 @@ fn build(src, out) {
     let shim = fcntl_shim();
     if shim != "" {
         env.LD_PRELOAD = shim;
-        // WORKAROUND for a second Ginux gap, the same musl root. Files under
-        // /work come from one domain-wide pool of 64 descriptors (tools/ginux,
-        // crates/ginux-init/src/launch_storage.rs, `type MemoryFs = VirtualFs<
-        // ..., 64, ...>`), while RLIMIT_NOFILE reports the 256-entry public
-        // table (descriptors.rs, DescriptorTable::new) and cannot be lowered
-        // (prlimit64 setting it is EPERM). GNU ld (bfd; this root has no gold
-        // or lld) keeps up to RLIMIT_NOFILE/8 = 32 inputs in its cache, and with
-        // gcc's LTO linker plugin it also holds one more descriptor for every
-        // archive until the link ends (binutils bfd/plugin.c), so the ~70 rlibs
-        // of each program run it out: "No file descriptors available". Rust
-        // objects carry no GCC LTO code, so the plugin claims nothing and
-        // leaving it out links the same programs. Fedora's root links with
-        // gold, which closes and retries on EMFILE.
-        env.RUSTFLAGS = "-C link-arg=-fno-use-linker-plugin";
     }
     // The workspace's rust-version is the floor cargo enforces; the log says
     // which toolchain this distro has, for when it refuses.

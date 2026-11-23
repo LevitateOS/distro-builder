@@ -310,7 +310,7 @@ fn configured_fields(
     if crate::recipe::exact_identity() {
         fields.push(("declared".into(), levitate_recipe::identity::declared()));
         fields.push(("recipe-cli".into(), crate::parts::file_sha256(crate::recipe::binary(repo)?)?.0));
-        fields.push(("ginux-launcher".into(), crate::parts::file_sha256(crate::recipe::ginux_binary(repo)?)?.0));
+        fields.push(("ginux-tools".into(), crate::recipe::ginux::tools(repo)?.digest()?));
     }
     Ok(fields)
 }

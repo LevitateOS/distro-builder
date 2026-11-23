@@ -63,12 +63,12 @@ const FORMAT: &str = "1";
 const RECORD: &str = "part.json";
 /// How often a part is built again when its inputs changed while it was built.
 const ATTEMPTS: usize = 3;
-/// Where the builder finds the compiler image when `GINUX_ROOTFS` is unset
+/// Where the builder finds the compiler image when `RECIPE_IMAGE_LAYOUT` is unset
 /// (`recipe::compiler_image`).
-const DEFAULT_GINUX_ROOTFS: &str = ".artifacts/ginux-env/prepared-image-build-tools/rootfs.tar";
-/// Where the builder finds the minimal runtime image when `GINUX_MINIMAL_ROOTFS`
+const DEFAULT_IMAGE_LAYOUT: &str = ".artifacts/ginux-env/prepared-image-build-tools/image.oci.tar";
+/// Where the builder finds the minimal runtime image when `RECIPE_MINIMAL_IMAGE_LAYOUT`
 /// is unset (`recipe::minimal_image`).
-const DEFAULT_GINUX_MINIMAL_ROOTFS: &str = ".artifacts/ginux-env/prepared-image-minimal/rootfs.tar";
+const DEFAULT_MINIMAL_IMAGE_LAYOUT: &str = ".artifacts/ginux-env/prepared-image-minimal/image.oci.tar";
 
 /// A part's named inputs, each a digest or an exact value.
 pub(crate) type Inputs = BTreeMap<String, String>;
@@ -297,7 +297,7 @@ fn system_inputs(variant: &Variant, kernel: &Path) -> Result<Inputs> {
     let repo = &variant.repo_root;
     let mut inputs = Inputs::new();
     // The checkout's builder, contract, profile, variant, apps, recipes, rootfs
-    // tools and the Ginux launcher.
+    // tools and the Ginux tools.
     inputs.insert(
         "system-sources".into(),
         sources::system_sources_digest(repo, &variant.id).context("fingerprinting the system's sources")?,
@@ -314,54 +314,37 @@ fn system_inputs(variant: &Variant, kernel: &Path) -> Result<Inputs> {
     // behaviour versions, as Recipe names them in its saved-state identities;
     // in exact mode also by the bytes of the Recipe CLI (the worker too,
     // unless a root needs the static one, which is built from the same
-    // sources) and of the launcher, so a release comes only from these exact
+    // sources) and of the five Ginux tools, so a release comes only from these exact
     // tools. Recipe's sources are in "system-sources" and "builder-sources"
     // either way: the system ships Recipe.
     inputs.insert("recipe-behaviour".into(), levitate_recipe::identity::declared());
     if crate::recipe::exact_identity() {
         inputs.insert("recipe-identity".into(), "exact".into());
         inputs.insert("recipe-cli".into(), file_sha256(crate::recipe::binary(repo)?)?.0);
-        inputs.insert(
-            "ginux-launcher".into(),
-            file_sha256(crate::recipe::ginux_binary(repo)?)?.0,
-        );
+        inputs.insert("ginux-tools".into(), crate::recipe::ginux::tools(repo)?.digest()?);
     } else {
         inputs.insert("recipe-identity".into(), "declared".into());
     }
-    // The Ginux root recipe steps run in.
+    // The Ginux image recipe steps run in.
     inputs.insert(
-        "ginux-root".into(),
-        std::env::var("GINUX_ROOT").unwrap_or_else(|_| "pinned compiler image".into()),
+        "ginux-image".into(),
+        std::env::var("RECIPE_IMAGE").unwrap_or_else(|_| "pinned compiler image".into()),
     );
-    let rootfs_tar = std::env::var_os("GINUX_ROOTFS")
+    let layout = std::env::var_os("RECIPE_IMAGE_LAYOUT")
         .map(PathBuf::from)
-        .unwrap_or_else(|| repo.join(DEFAULT_GINUX_ROOTFS));
-    inputs.insert(
-        "ginux-rootfs".into(),
-        if rootfs_tar.is_file() {
-            file_sha256(&rootfs_tar)?.0
-        } else {
-            format!("absent: {}", rootfs_tar.display())
-        },
-    );
+        .unwrap_or_else(|| repo.join(DEFAULT_IMAGE_LAYOUT));
+    inputs.insert("ginux-image-layout".into(), layout_digest(&layout)?);
     // The minimal runtime image the system's steps that ask for it run in
     // (the system recipe and every package step but the RPM effects) and the
     // installed Recipe ships.
     inputs.insert(
-        "ginux-minimal-root".into(),
-        std::env::var("GINUX_MINIMAL_ROOT").unwrap_or_else(|_| "pinned minimal image".into()),
+        "ginux-minimal-image".into(),
+        std::env::var("RECIPE_MINIMAL_IMAGE").unwrap_or_else(|_| "pinned minimal image".into()),
     );
-    let minimal_tar = std::env::var_os("GINUX_MINIMAL_ROOTFS")
+    let minimal_layout = std::env::var_os("RECIPE_MINIMAL_IMAGE_LAYOUT")
         .map(PathBuf::from)
-        .unwrap_or_else(|| repo.join(DEFAULT_GINUX_MINIMAL_ROOTFS));
-    inputs.insert(
-        "ginux-minimal-rootfs".into(),
-        if minimal_tar.is_file() {
-            file_sha256(&minimal_tar)?.0
-        } else {
-            format!("absent: {}", minimal_tar.display())
-        },
-    );
+        .unwrap_or_else(|| repo.join(DEFAULT_MINIMAL_IMAGE_LAYOUT));
+    inputs.insert("ginux-minimal-image-layout".into(), layout_digest(&minimal_layout)?);
     // The kernel the system's modules come from.
     let release = crate::release::kernel_release(kernel)?;
     inputs.insert("kernel-image".into(), file_sha256(&kernel.join(KERNEL_IMAGE_PATH))?.0);
@@ -993,6 +976,18 @@ fn checked_relative(path: &str) -> Result<&Path> {
 }
 
 /// The SHA-256 of the file at `path` and its length.
+/// An image layout's input value: the SHA-256 of its tar, or of the layout
+/// directory's files (`tree_digest`), or `absent: PATH`.
+fn layout_digest(layout: &Path) -> Result<String> {
+    Ok(if layout.is_file() {
+        file_sha256(layout)?.0
+    } else if layout.is_dir() {
+        tree_digest(layout)?
+    } else {
+        format!("absent: {}", layout.display())
+    })
+}
+
 pub(crate) fn file_sha256(path: &Path) -> Result<(String, u64)> {
     let mut file = fs::File::open(path).with_context(|| format!("opening {}", path.display()))?;
     let mut hasher = Sha256::new();

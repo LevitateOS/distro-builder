@@ -6,8 +6,10 @@
 //! the builder links come from the same source. [`Invocation`] runs one recipe phase
 //! under the [`crate::process`] policy and returns its [`RecipeResult`].
 
+pub mod ginux;
 pub mod linux;
 mod outputs;
+mod root_filter;
 pub mod rootfs_source;
 mod stamp;
 pub mod tools;
@@ -23,16 +25,26 @@ use std::sync::OnceLock;
 use crate::process::Cmd;
 
 /// Recipe's settings for its image and frame timeout, passed to every invocation as
-/// the builder got them. The launcher (`GINUX_BIN`) and the worker
+/// the builder got them. The `ginux` CLI (`RECIPE_GINUX`), the helper wrapper
+/// (`GINUX_INSTANCE_HELPER`, [`ginux::helper_wrapper`]) and the worker
 /// (`RECIPE_WORKER_BIN`) are the builder's own: the Ginux it builds from
-/// `tools/ginux` and the Recipe binary it runs, so an invocation never runs an older
-/// launcher or worker than the checkout. Every other `RECIPE_*`/`GINUX_*` variable
-/// is removed, so an ambient one (a worker's `RECIPE_WORKER`, say) cannot change how
-/// Recipe runs. An ambient `GINUX_MINIMAL_ROOT`/`GINUX_MINIMAL_ROOTFS` among them: an
-/// invocation whose recipes ask for the minimal image (`NEEDS.runtime`) is given the one
-/// [`minimal_image`] selects (which honours that ambient pair), the one its stamp names,
-/// and no other invocation is given one.
-const LAUNCHER_ENV: &[&str] = &["GINUX_ROOT", "GINUX_ROOTFS", "RECIPE_OUTPUT_TIMEOUT_SECS"];
+/// `tools/ginux` and the Recipe binary it runs, so an invocation never runs older
+/// Ginux or an older worker than the checkout. Every other `RECIPE_*`/`GINUX_*`
+/// variable is removed, so an ambient one (a worker's `RECIPE_WORKER`, say) cannot
+/// change how Recipe runs. An ambient `RECIPE_MINIMAL_IMAGE`/`RECIPE_MINIMAL_IMAGE_LAYOUT`
+/// among them: an invocation whose recipes ask for the minimal image (`NEEDS.runtime`)
+/// is given the one [`minimal_image`] selects (which honours that ambient pair), the
+/// one its stamp names, and no other invocation is given one.
+const PASSED_ENV: &[&str] = &["RECIPE_IMAGE", "RECIPE_IMAGE_LAYOUT", "RECIPE_OUTPUT_TIMEOUT_SECS"];
+/// The environment of the fork's retired launcher, each with what replaced it. A
+/// builder started with one set stops: it would silently select nothing now.
+const RETIRED_ENV: [(&str, &str); 5] = [
+    ("GINUX_BIN", "RECIPE_GINUX (the builder sets it itself)"),
+    ("GINUX_ROOT", "RECIPE_IMAGE"),
+    ("GINUX_ROOTFS", "RECIPE_IMAGE_LAYOUT"),
+    ("GINUX_MINIMAL_ROOT", "RECIPE_MINIMAL_IMAGE"),
+    ("GINUX_MINIMAL_ROOTFS", "RECIPE_MINIMAL_IMAGE_LAYOUT"),
+];
 /// The longest quiet time (no complete worker output line) OS builds give Recipe when the caller sets none.
 const OS_BUILD_OUTPUT_TIMEOUT_SECS: &str = "1800";
 
@@ -48,8 +60,10 @@ const COMPILER_IMAGE_PIN: &str = "tools/recipe/bootstrap/product-ci.json";
 const MINIMAL_IMAGE_DIR: &str = ".artifacts/ginux-env/prepared-image-minimal";
 const MINIMAL_IMAGE_PIN: &str = "tools/recipe/bootstrap/minimal-runtime.json";
 
-/// A pinned image: `name` in its reference (`oci:<name>@sha256:<digest>`),
-/// the directory it is produced in and the file whose `image_sha256` pins it.
+/// A pinned image: `name` in its reference (`local/<name>@sha256:<manifest>`),
+/// the directory it is produced in (an OCI layout with `image.oci.tar` and
+/// `provenance.json`, written by `recipe-image`) and the file whose
+/// `image_digest` (the manifest digest) pins it.
 /// `what` names it in messages and `guide` says how it is produced.
 struct PinnedImage {
     what: &'static str,
@@ -75,20 +89,20 @@ const MINIMAL_IMAGE: PinnedImage = PinnedImage {
 };
 
 impl PinnedImage {
-    /// The pinned digest, `image_sha256` of the pin file.
+    /// The pinned manifest digest, `image_digest` of the pin file.
     fn digest(&self, repo: &Path) -> Result<String> {
         let pin_file = repo.join(self.pin);
         let pin: serde_json::Value = serde_json::from_slice(
             &std::fs::read(&pin_file).with_context(|| format!("reading '{}'", pin_file.display()))?,
         )
         .with_context(|| format!("parsing '{}'", pin_file.display()))?;
-        let digest = pin["image_sha256"]
+        let digest = pin["image_digest"]
             .as_str()
-            .with_context(|| format!("'{}' has no image_sha256", pin_file.display()))?;
+            .with_context(|| format!("'{}' has no image_digest", pin_file.display()))?;
         if digest.is_empty() {
             bail!(
-                "'{}' pins no {} yet: produce it as {} describes and set image_sha256 to the sha256 \
-                 its provenance.json records",
+                "'{}' pins no {} yet: produce it as {} describes and set image_digest to the \
+                 manifest_digest its provenance.json records",
                 pin_file.display(),
                 self.what,
                 self.guide
@@ -97,56 +111,135 @@ impl PinnedImage {
         Ok(digest.to_string())
     }
 
-    /// The pinned reference, `oci:<name>@sha256:<image_sha256>`.
+    /// The pinned reference, `local/<name>@sha256:<image_digest>`.
     fn reference(&self, repo: &Path) -> Result<String> {
-        Ok(format!("oci:{}@sha256:{}", self.name, self.digest(repo)?))
+        Ok(format!("local/{}@sha256:{}", self.name, self.digest(repo)?))
     }
 
-    /// The pinned image as `(reference, rootfs tar)`, produced at
-    /// `<dir>/rootfs.tar`, after checking its `provenance.json` carries the
-    /// pinned `sha256`. The builder never produces the image.
+    /// The pinned image as `(reference, layout tar)`, produced at
+    /// `<dir>/image.oci.tar`, after checking its `provenance.json` records the
+    /// pinned `manifest_digest`. The builder never produces the image.
     fn select(&self, repo: &Path) -> Result<(String, PathBuf)> {
         let digest = self.digest(repo)?;
         let dir = repo.join(self.dir);
-        let (rootfs, provenance) = (dir.join("rootfs.tar"), dir.join("provenance.json"));
+        let (layout, provenance) =
+            (dir.join(levitate_recipe::image::LAYOUT_TAR), dir.join("provenance.json"));
         let missing = |why: String| {
             anyhow::anyhow!(
-                "the {} oci:{}@sha256:{digest} (pinned in {}) is {why}; \
+                "the {} local/{}@sha256:{digest} (pinned in {}) is {why}; \
                  produce it as {} describes (expected {} and {})",
                 self.what,
                 self.name,
                 self.pin,
                 self.guide,
-                rootfs.display(),
+                layout.display(),
                 provenance.display()
             )
         };
-        if !rootfs.is_file() {
-            return Err(missing(format!("not at '{}'", rootfs.display())));
+        if !layout.is_file() {
+            return Err(missing(format!("not at '{}'", layout.display())));
         }
         let recorded: serde_json::Value = match std::fs::read(&provenance) {
             Ok(bytes) => serde_json::from_slice(&bytes)
                 .with_context(|| format!("parsing '{}'", provenance.display()))?,
             Err(_) => return Err(missing(format!("without '{}'", provenance.display()))),
         };
-        match recorded["sha256"].as_str() {
+        match recorded["manifest_digest"].as_str() {
             Some(found) if found == digest => {}
             found => {
                 return Err(missing(format!(
-                    "not what '{}' records (sha256 {})",
+                    "not what '{}' records (manifest_digest {})",
                     provenance.display(),
                     found.unwrap_or("absent")
                 )))
             }
         }
-        Ok((format!("oci:{}@sha256:{digest}", self.name), rootfs))
+        Ok((format!("local/{}@sha256:{digest}", self.name), layout))
     }
 }
 
-/// The compiler image OS builds run Recipe in, as `(GINUX_ROOT, GINUX_ROOTFS)`:
-/// the one `product-ci.json` pins (`oci:recipe-compiler@sha256:<image_sha256>`),
-/// produced at `.artifacts/ginux-env/prepared-image-build-tools/rootfs.tar`.
-/// `None` when the builder's environment sets `GINUX_ROOT` and `GINUX_ROOTFS`
+/// The variables that select `image` together: its reference and its layout.
+fn image_env(image: levitate_recipe::runtime::Image) -> (&'static str, &'static str) {
+    match image {
+        levitate_recipe::runtime::Image::Full => ("RECIPE_IMAGE", "RECIPE_IMAGE_LAYOUT"),
+        levitate_recipe::runtime::Image::Minimal => {
+            ("RECIPE_MINIMAL_IMAGE", "RECIPE_MINIMAL_IMAGE_LAYOUT")
+        }
+    }
+}
+
+/// Stops when a variable of the fork's retired launcher is set ([`RETIRED_ENV`]).
+fn refuse_retired_env() -> Result<()> {
+    for (gone, now) in RETIRED_ENV {
+        if std::env::var_os(gone).is_some() {
+            bail!("{gone} is gone (Recipe runs on the public Ginux lifecycle); unset it and set {now}");
+        }
+    }
+    Ok(())
+}
+
+/// Where the builder keeps the image layouts it makes from root tars
+/// ([`root_layout`]), one directory per tar SHA-256.
+const ROOT_LAYOUTS_DIR: &str = ".artifacts/ginux-env/roots";
+
+/// The root tar `layer` (an assembled root filesystem) as a Ginux image:
+/// `(local/<name>@sha256:<manifest>, layout tar)`. The one-layer OCI layout
+/// is written once per distinct tar (`levitate_recipe::image::write_layout`,
+/// the same bytes `recipe-image` writes) under
+/// `.artifacts/ginux-env/roots/<tar sha256>/` and reused while that tar's
+/// bytes are unchanged. Members the image rules refuse (`etc/hosts`, device
+/// nodes and FIFOs, `.wh.` names) are left out first ([`root_filter`]). The
+/// desktop apps' build root runs this way.
+pub(crate) fn root_layout(repo: &Path, name: &str, layer: &Path) -> Result<(String, PathBuf)> {
+    let sha = crate::parts::file_sha256(layer)?.0;
+    let roots = repo.join(ROOT_LAYOUTS_DIR);
+    let dir = roots.join(&sha);
+    let record = dir.join("manifest-digest");
+    let tar = dir.join(levitate_recipe::image::LAYOUT_TAR);
+    if let Ok(manifest) = std::fs::read_to_string(&record) {
+        let manifest = manifest.trim();
+        if manifest.len() == 64 && manifest.bytes().all(|b| b.is_ascii_hexdigit()) && tar.is_file() {
+            return Ok((format!("local/{name}@sha256:{manifest}"), tar));
+        }
+    }
+    std::fs::create_dir_all(&roots).with_context(|| format!("creating '{}'", roots.display()))?;
+    let partial = tempfile::Builder::new()
+        .prefix(".partial-")
+        .tempdir_in(&roots)
+        .with_context(|| format!("creating a directory in '{}'", roots.display()))?;
+    let layout = partial.path().join("layout");
+    // The image rules refuse some members an OS root holds (etc/hosts, device
+    // nodes, FIFOs, `.wh.` names): they are left out, and reported, first.
+    let filtered = root_filter::filter(layer, &partial.path().join("layer.tar"))
+        .with_context(|| format!("filtering the root '{}' for the image rules", layer.display()))?;
+    let layer = filtered.as_deref().unwrap_or(layer);
+    let manifest = levitate_recipe::image::write_layout(layer, &layout)
+        .with_context(|| format!("making an image layout of the root '{}'", layer.display()))?;
+    std::fs::write(layout.join("manifest-digest"), format!("{manifest}\n"))?;
+    std::fs::write(layout.join("name"), format!("{name}\n"))?;
+    if dir.exists() {
+        std::fs::remove_dir_all(&dir).with_context(|| format!("removing '{}'", dir.display()))?;
+    }
+    std::fs::rename(&layout, &dir).with_context(|| format!("publishing '{}'", dir.display()))?;
+    // An earlier layout of the same root is superseded: each holds a copy of
+    // a whole root, so only the current one stays.
+    for entry in std::fs::read_dir(&roots).with_context(|| format!("reading '{}'", roots.display()))? {
+        let entry = entry?;
+        let same_name = std::fs::read_to_string(entry.path().join("name"))
+            .is_ok_and(|recorded| recorded.trim() == name);
+        if same_name && entry.file_name() != sha.as_str() {
+            if let Err(error) = std::fs::remove_dir_all(entry.path()) {
+                crate::teprintln!("warning: '{}' was not removed: {error}", entry.path().display());
+            }
+        }
+    }
+    Ok((format!("local/{name}@sha256:{manifest}"), tar))
+}
+
+/// The compiler image OS builds run Recipe in, as `(RECIPE_IMAGE, RECIPE_IMAGE_LAYOUT)`:
+/// the one `product-ci.json` pins (`local/recipe-compiler@sha256:<image_digest>`),
+/// produced at `.artifacts/ginux-env/prepared-image-build-tools/image.oci.tar`.
+/// `None` when the builder's environment sets `RECIPE_IMAGE` and `RECIPE_IMAGE_LAYOUT`
 /// ([`ambient_image`]): those keep winning. The builder never produces the image.
 fn compiler_image(repo: &Path) -> Result<Option<(String, PathBuf)>> {
     if ambient_image(levitate_recipe::runtime::Image::Full)?.is_some() {
@@ -156,13 +249,15 @@ fn compiler_image(repo: &Path) -> Result<Option<(String, PathBuf)>> {
 }
 
 /// The image the builder's environment selects for `image`, as `(reference,
-/// rootfs tar)`: `GINUX_ROOT` and `GINUX_ROOTFS` for the full image,
-/// `GINUX_MINIMAL_ROOT` and `GINUX_MINIMAL_ROOTFS` for the minimal one. Both
-/// of a pair or neither: one alone is refused, since Recipe would then take
+/// layout)`: `RECIPE_IMAGE` and `RECIPE_IMAGE_LAYOUT` for the full image,
+/// `RECIPE_MINIMAL_IMAGE` and `RECIPE_MINIMAL_IMAGE_LAYOUT` for the minimal one.
+/// Both of a pair or neither: one alone is refused, since Recipe would then take
 /// the other half from the host's install, and a key would name another
-/// image than the one a run uses and an install ships.
+/// image than the one a run uses and an install ships. A retired `GINUX_*`
+/// variable of the fork's launcher stops the builder ([`refuse_retired_env`]).
 fn ambient_image(image: levitate_recipe::runtime::Image) -> Result<Option<(String, PathBuf)>> {
-    let (root, rootfs) = (image.root_env(), image.rootfs_env());
+    refuse_retired_env()?;
+    let (root, rootfs) = image_env(image);
     match (std::env::var_os(root), std::env::var_os(rootfs)) {
         (None, None) => Ok(None),
         (Some(reference), Some(tar)) => {
@@ -172,21 +267,21 @@ fn ambient_image(image: levitate_recipe::runtime::Image) -> Result<Option<(Strin
             levitate_recipe::runtime::root_digest(&reference)
                 .with_context(|| format!("{root}={reference} is not an image reference"))?;
             if tar.is_empty() {
-                bail!("{rootfs} is empty; set it to the tar of {root}={reference}");
+                bail!("{rootfs} is empty; set it to the image layout of {root}={reference}");
             }
             Ok(Some((reference, PathBuf::from(tar))))
         }
         _ => bail!(
-            "{root} and {rootfs} select an image together: set both (the reference and its tar) \
+            "{root} and {rootfs} select an image together: set both (the reference and its layout) \
              or neither (the pinned image)"
         ),
     }
 }
 
-/// The minimal runtime image, as `(reference, rootfs tar)`: the ambient
-/// `GINUX_MINIMAL_ROOT`/`GINUX_MINIMAL_ROOTFS` pair when the builder's
+/// The minimal runtime image, as `(reference, layout)`: the ambient
+/// `RECIPE_MINIMAL_IMAGE`/`RECIPE_MINIMAL_IMAGE_LAYOUT` pair when the builder's
 /// environment sets it ([`ambient_image`]), else the one `minimal-runtime.json`
-/// pins (`oci:recipe-minimal@sha256:<digest>`). The installed Recipe ships it,
+/// pins (`local/recipe-minimal@sha256:<image_digest>`). The installed Recipe ships it,
 /// and every builder run whose recipes ask for it runs in it ([`run_images`]).
 pub(crate) fn minimal_image(repo: &Path) -> Result<(String, PathBuf)> {
     if let Some(selected) = ambient_image(levitate_recipe::runtime::Image::Minimal)? {
@@ -196,7 +291,7 @@ pub(crate) fn minimal_image(repo: &Path) -> Result<(String, PathBuf)> {
 }
 
 /// The minimal image's reference, for keys computed without the image: the
-/// ambient `GINUX_MINIMAL_ROOT` when its pair is set, else the pinned one. The
+/// ambient `RECIPE_MINIMAL_IMAGE` when its pair is set, else the pinned one. The
 /// same string `minimal_image` selects.
 pub(crate) fn minimal_image_reference(repo: &Path) -> Result<String> {
     if let Some((reference, _)) = ambient_image(levitate_recipe::runtime::Image::Minimal)? {
@@ -206,8 +301,8 @@ pub(crate) fn minimal_image_reference(repo: &Path) -> Result<String> {
 }
 
 /// The compiler image's reference, for keys computed without the image (CI): the
-/// ambient `GINUX_ROOT` when its pair is set, else
-/// `oci:recipe-compiler@sha256:<image_sha256>` from `product-ci.json`. The same
+/// ambient `RECIPE_IMAGE` when its pair is set, else
+/// `local/recipe-compiler@sha256:<image_digest>` from `product-ci.json`. The same
 /// string `compiler_image` selects.
 pub(crate) fn compiler_image_reference(repo: &Path) -> Result<String> {
     if let Some((reference, _)) = ambient_image(levitate_recipe::runtime::Image::Full)? {
@@ -287,13 +382,13 @@ pub(crate) fn run_images(recipe: &Path, search: &Path) -> Result<RunImages> {
 /// The builder's recipe collection, relative to the repository.
 const OS_RECIPES: &str = "distro/builder/os-recipes";
 
-/// The pinned compiler image's reference, `oci:recipe-compiler@sha256:<image_sha256>`
+/// The pinned compiler image's reference, `local/recipe-compiler@sha256:<image_digest>`
 /// from `product-ci.json`, whatever the environment says.
 pub(crate) fn pinned_compiler_image_reference(repo: &Path) -> Result<String> {
     COMPILER_IMAGE.reference(repo)
 }
 
-/// The pinned minimal image's reference, `oci:recipe-minimal@sha256:<image_sha256>`
+/// The pinned minimal image's reference, `local/recipe-minimal@sha256:<image_digest>`
 /// from `minimal-runtime.json`, whatever the environment says.
 pub(crate) fn pinned_minimal_image_reference(repo: &Path) -> Result<String> {
     MINIMAL_IMAGE.reference(repo)
@@ -312,14 +407,14 @@ pub fn select_exact_identity() {
 /// Recipe invocation gets
 /// `--exact-identity` (Recipe reuses saved state only from byte-identical
 /// Recipe and Ginux binaries), and the system part's key carries the Recipe
-/// and launcher bytes (`crate::parts`). Otherwise both name the tools by
+/// and Ginux tools' bytes (`crate::parts`). Otherwise both name the tools by
 /// Recipe's declared behaviour versions (`levitate_recipe::identity`).
 pub fn exact_identity() -> bool {
     EXACT_FLAG.load(std::sync::atomic::Ordering::SeqCst)
 }
 
-/// The root image Recipe runs in, as `(reference, rootfs tar)`: the ambient
-/// `GINUX_ROOT`/`GINUX_ROOTFS` pair when the builder's environment sets it
+/// The root image Recipe runs in, as `(reference, layout)`: the ambient
+/// `RECIPE_IMAGE`/`RECIPE_IMAGE_LAYOUT` pair when the builder's environment sets it
 /// ([`ambient_image`]), else the pinned compiler image `compiler_image`
 /// selects. The same image the builder's Recipe runs use, and the one the
 /// installed Recipe ships.
@@ -329,10 +424,6 @@ pub(crate) fn runtime_image(repo: &Path) -> Result<(String, PathBuf)> {
     }
     COMPILER_IMAGE.select(repo)
 }
-
-/// The Ginux crate's directory, the cargo target it builds for, and its binary.
-const GINUX_DIR: &str = "tools/ginux";
-const GINUX_TARGET: &str = "x86_64-unknown-linux-gnu";
 
 /// The `recipe` binary: `RECIPE_BIN` if set, else the workspace build (built on
 /// first use).
@@ -353,50 +444,6 @@ pub fn binary(repo: &Path) -> Result<&'static Path> {
         }
         None => build(repo)?,
     };
-    Ok(BINARY.get_or_init(|| path))
-}
-
-/// The Ginux launcher every invocation runs: `tools/ginux`'s `ginux` binary,
-/// built (release, as its Makefile builds it) on first use in each process, so it
-/// is always the checkout's.
-pub fn ginux_binary(repo: &Path) -> Result<&'static Path> {
-    static BINARY: OnceLock<PathBuf> = OnceLock::new();
-    if let Some(path) = BINARY.get() {
-        return Ok(path);
-    }
-    let dir = repo.join(GINUX_DIR);
-    // Beside the builder's own builds when they have a target directory of their
-    // own (a build run as root keeps root's files out of tools/ginux).
-    let target_dir = std::env::var_os("CARGO_TARGET_DIR")
-        .map(|target| PathBuf::from(target).join("ginux"))
-        .unwrap_or_else(|| dir.join("target"));
-    crate::teprintln!(
-        "  building ginux (cargo build -p ginux-init --bin ginux --release in {GINUX_DIR})"
-    );
-    let step = crate::timeline::Step::begin("tool", "cargo build ginux");
-    Cmd::new("cargo")
-        .args([
-            "build",
-            "-q",
-            "-p",
-            "ginux-init",
-            "--bin",
-            "ginux",
-            "--release",
-            "--target",
-            GINUX_TARGET,
-        ])
-        .arg("--target-dir")
-        .arg(&target_dir)
-        .dir(&dir)
-        .stdout_to_stderr()
-        .error_msg("building ginux")
-        .run_interactive()?;
-    let path = target_dir.join(GINUX_TARGET).join("release/ginux");
-    if !path.is_file() {
-        bail!("cargo built ginux, but it is not at '{}'", path.display());
-    }
-    step.finish();
     Ok(BINARY.get_or_init(|| path))
 }
 
@@ -520,11 +567,11 @@ impl<'a> Invocation<'a> {
     }
 
     /// Runs this recipe in another root than Recipe's usual one: the image
-    /// `rootfs` (an assembled root tar), named by `reference`
-    /// (`oci:NAME@sha256:DIGEST`, the digest of that tar). The desktop apps
-    /// are compiled this way, in a root made of the variant's own packages.
-    pub fn root(mut self, reference: impl Into<String>, rootfs: impl Into<PathBuf>) -> Self {
-        self.root = Some((reference.into(), rootfs.into()));
+    /// `layout` (an OCI image layout, [`root_layout`]), named by `reference`
+    /// (`local/NAME@sha256:<manifest digest>`). The desktop apps are compiled
+    /// this way, in a root made of the variant's own packages.
+    pub fn root(mut self, reference: impl Into<String>, layout: impl Into<PathBuf>) -> Self {
+        self.root = Some((reference.into(), layout.into()));
         self
     }
 
@@ -621,8 +668,8 @@ impl<'a> Invocation<'a> {
             run_images(&recipe_file, &os_recipes_path)?
         };
         // The full image: this run's own root, else the pinned compiler image;
-        // None when the ambient GINUX_ROOT/GINUX_ROOTFS pair names it, which
-        // reaches Recipe as it is (LAUNCHER_ENV).
+        // None when the ambient RECIPE_IMAGE/RECIPE_IMAGE_LAYOUT pair names it,
+        // which reaches Recipe as it is (PASSED_ENV).
         let full_image = match &self.root {
             Some(own) => Some(own.clone()),
             None => compiler_image(self.repo)?,
@@ -762,7 +809,7 @@ impl<'a> Invocation<'a> {
         for (key, _) in std::env::vars_os() {
             let name = key.to_string_lossy();
             let control = name.starts_with("RECIPE_") || name.starts_with("GINUX_");
-            if control && !LAUNCHER_ENV.contains(&name.as_ref()) {
+            if control && !PASSED_ENV.contains(&name.as_ref()) {
                 cmd = cmd.env_remove(&key);
             }
         }
@@ -796,10 +843,30 @@ impl<'a> Invocation<'a> {
             ));
             cmd = cmd.env(name, value);
         }
-        let ginux = ginux_binary(self.repo)?;
+        // The checkout's Ginux: its CLI, and the root-owned wrapper of its
+        // helper the CLI runs through sudo (the CLI's own variable, which
+        // Recipe passes through to it).
+        let ginux = ginux::tools(self.repo)?.cli.as_path();
+        let helper = ginux::helper_wrapper(self.repo)?;
         let worker = self.worker.as_deref().unwrap_or(bin);
-        cmd = cmd.env("GINUX_BIN", ginux).env("RECIPE_WORKER_BIN", worker);
-        for (name, value) in [("GINUX_BIN", ginux), ("RECIPE_WORKER_BIN", worker)] {
+        // The copies the wrapper exports to the helper, named to Recipe too:
+        // its exact identity of Ginux hashes the runtime and image tool at
+        // these variables (the helper itself at `GINUX_INSTANCE_HELPER`).
+        let runtime = ginux::tool_copy("ginux-runtime");
+        let image_tool = ginux::tool_copy("ginux-image");
+        cmd = cmd
+            .env("RECIPE_GINUX", ginux)
+            .env("GINUX_INSTANCE_HELPER", helper)
+            .env("GINUX_RUNTIME", &runtime)
+            .env("GINUX_IMAGE_TOOL", &image_tool)
+            .env("RECIPE_WORKER_BIN", worker);
+        for (name, value) in [
+            ("RECIPE_GINUX", ginux),
+            ("GINUX_INSTANCE_HELPER", helper),
+            ("GINUX_RUNTIME", runtime.as_path()),
+            ("GINUX_IMAGE_TOOL", image_tool.as_path()),
+            ("RECIPE_WORKER_BIN", worker),
+        ] {
             if let Some(ambient) =
                 std::env::var_os(name).filter(|ambient| Path::new(ambient) != value)
             {
@@ -812,24 +879,24 @@ impl<'a> Invocation<'a> {
                 note(format!("    {name}={}", value.display()));
             }
         }
-        // the longest quiet time (no complete worker output line) allowed; the first line also waits for the launcher to restore kept downloads, so builds allow 1800 s.
+        // the longest quiet time (no complete worker output line) allowed; the first line also waits for the instance to be created and its inputs injected, so builds allow 1800 s.
         if std::env::var_os("RECIPE_OUTPUT_TIMEOUT_SECS").is_none() {
             cmd = cmd.env("RECIPE_OUTPUT_TIMEOUT_SECS", OS_BUILD_OUTPUT_TIMEOUT_SECS);
         }
-        for name in LAUNCHER_ENV {
+        for name in PASSED_ENV {
             // This invocation's own root replaces the ambient one.
-            if self.root.is_some() && name.starts_with("GINUX_ROOT") {
+            if self.root.is_some() && name.starts_with("RECIPE_IMAGE") {
                 continue;
             }
             if let Some(value) = std::env::var_os(name) {
                 note(format!("    {name}={}", Path::new(&value).display()));
             }
         }
-        if let Some((reference, rootfs)) = &full_image {
-            cmd = cmd.env("GINUX_ROOT", reference).env("GINUX_ROOTFS", rootfs);
+        if let Some((reference, layout)) = &full_image {
+            cmd = cmd.env("RECIPE_IMAGE", reference).env("RECIPE_IMAGE_LAYOUT", layout);
             let what = if self.root.is_some() { "this recipe's own root" } else { "the pinned compiler image" };
-            note(format!("    GINUX_ROOT={reference} ({what})"));
-            note(format!("    GINUX_ROOTFS={}", rootfs.display()));
+            note(format!("    RECIPE_IMAGE={reference} ({what})"));
+            note(format!("    RECIPE_IMAGE_LAYOUT={}", layout.display()));
         }
         // A run in its own root has it as the minimal image too; another run
         // gets a minimal image only when its recipes ask for one, the one its
@@ -838,13 +905,13 @@ impl<'a> Invocation<'a> {
             Some(own) => Some((own.clone(), "this recipe's own root")),
             None => minimal_image.clone().map(|image| (image, "the minimal runtime image")),
         };
-        if let Some(((reference, rootfs), what)) = minimal {
+        if let Some(((reference, layout), what)) = minimal {
             cmd = cmd
-                .env("GINUX_MINIMAL_ROOT", &reference)
-                .env("GINUX_MINIMAL_ROOTFS", &rootfs);
+                .env("RECIPE_MINIMAL_IMAGE", &reference)
+                .env("RECIPE_MINIMAL_IMAGE_LAYOUT", &layout);
             if self.root.is_none() {
-                note(format!("    GINUX_MINIMAL_ROOT={reference} ({what})"));
-                note(format!("    GINUX_MINIMAL_ROOTFS={}", rootfs.display()));
+                note(format!("    RECIPE_MINIMAL_IMAGE={reference} ({what})"));
+                note(format!("    RECIPE_MINIMAL_IMAGE_LAYOUT={}", layout.display()));
             }
         }
         if let Some(file) = log.take() {

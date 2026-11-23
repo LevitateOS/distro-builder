@@ -6,6 +6,9 @@ use std::path::{Path, PathBuf};
 
 use crate::process::Cmd;
 
+/// Recipe's guard, compiled with `recipe` from the levitate-recipe crate.
+const RECIPE_GUARD: &str = "recipe-ginux-guard";
+
 /// The live tools `os-recipes/install-tools.rhai` builds: package, crate directory,
 /// binaries (the first is the package's default).
 const TOOLS: &[(&str, &str, &[&str])] = &[
@@ -18,7 +21,9 @@ const TOOLS: &[(&str, &str, &[&str])] = &[
     ("recab", "tools/recab", &["recab"]),
     ("recguest", "tools/recguest", &["recguest"]),
     ("recupdate", "tools/recupdate", &["recupdate"]),
-    ("levitate-recipe", "tools/recipe", &["recipe"]),
+    // The guard is the one program Recipe's sudoers rule names; it ships in
+    // the same package (`install-tools.rhai`, input `recipe_guard`).
+    ("levitate-recipe", "tools/recipe", &["recipe", RECIPE_GUARD]),
     (
         "install-split-pane",
         "distro/builder/install-split-pane",
@@ -951,11 +956,12 @@ pub(crate) fn build_system_tool_tree(
         None => binary.to_string(),
     });
     let install_path = format!("usr/bin/{binary}");
+    let bins = compile_crate(repo, package)?;
     let mut invocation = super::Invocation::new(repo, "install", &recipe, &work)
         .define("BIN", binary)
         .define("INSTALL_PATH", &install_path)
         .input("source", source.path())
-        .input("program", &compile_crate(repo, package)?.join(binary));
+        .input("program", &bins.join(binary));
     let keys = tempfile::Builder::new().prefix("release-keys-").tempdir()?;
     if let Some(init) = init_name {
         let found = copy_release_keys(repo, keys.path())?;
@@ -970,22 +976,29 @@ pub(crate) fn build_system_tool_tree(
             .input("dist", &repo.join("tools/recupdate/dist"))
             .input("keys", keys.path());
     }
-    // The package manager ships the same pinned runtime the builder uses, and
-    // the minimal image the root effects recipe runs in. Explicit inputs give
-    // the recipe no ambient access to the host images.
+    // The package manager ships the same pinned runtime the builder uses (the
+    // checkout's five Ginux tools and the compiler image layout), and the
+    // minimal image the root effects recipe runs in. Explicit inputs give the
+    // recipe no ambient access to the host images.
     let reference_file = tempfile::NamedTempFile::new()?;
     let minimal_reference_file = tempfile::NamedTempFile::new()?;
     if package == "levitate-recipe" {
-        let (reference, image) = super::runtime_image(repo)?;
+        let (reference, layout) = super::runtime_image(repo)?;
         fs::write(reference_file.path(), format!("{reference}\n"))?;
-        let (minimal_reference, minimal_image) = super::minimal_image(repo)?;
+        let (minimal_reference, minimal_layout) = super::minimal_image(repo)?;
         fs::write(minimal_reference_file.path(), format!("{minimal_reference}\n"))?;
+        let ginux = super::ginux::tools(repo)?;
         invocation = invocation
             .input("catalog", &repo.join("recipes"))
-            .input("launcher", super::ginux_binary(repo)?)
-            .input("runtime_image", &image)
+            .input("recipe_guard", &bins.join(RECIPE_GUARD))
+            .input("ginux_cli", &ginux.cli)
+            .input("ginux_helper", &ginux.helper)
+            .input("ginux_image", &ginux.image)
+            .input("ginux_runtime", &ginux.runtime)
+            .input("ginux_allocator", &ginux.allocator)
+            .input("runtime_layout", &layout)
             .input("runtime_reference", reference_file.path())
-            .input("minimal_image", &minimal_image)
+            .input("minimal_layout", &minimal_layout)
             .input("minimal_reference", minimal_reference_file.path());
     }
     let tree = invocation.discard_superseded().run()?.directory("rootfs")?;

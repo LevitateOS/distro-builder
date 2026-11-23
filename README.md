@@ -55,7 +55,8 @@ Recipe tool package ships it as a source: `/usr/share/recipe/sources/levitate.to
 says where it is fetched from, and `/usr/share/recipe/sources/levitate/` is a
 copy at the pinned commit, with its published `index.json`, that Recipe uses
 until it has fetched a newer index. It sits alongside the builder's selected
-pinned Ginux root image and static launcher. Root's override catalog remains under `/var/lib/recipe`.
+pinned Ginux image layouts and the five Ginux tools (the `ginux` CLI, the helper, image tool,
+runtime and allocator), Recipe's guard (`recipe-ginux-guard`, built with `recipe`, the one program the sudoers rule names) and that rule for `wheel`. Root's override catalog remains under `/var/lib/recipe`.
 
 The builder always passes `--no-activate`: it consumes recipe outputs to compose
 images, without activating packages on the build host. The user catalog is not
@@ -69,19 +70,31 @@ does not introduce another recipe type or execution engine.
 
 The builder links the current `levitate-recipe` library and normally builds its
 CLI from that same workspace source (`RECIPE_BIN` explicitly selects a prepared
-CLI). It builds Ginux's launcher from `tools/ginux` on first use in each run and
-gives every invocation that launcher as `GINUX_BIN` and the CLI it runs as
-`RECIPE_WORKER_BIN`; ambient values of those two are ignored (and logged), so a
-build never runs an older launcher or worker than the checkout. `GINUX_ROOT`,
-`GINUX_ROOTFS` and `RECIPE_OUTPUT_TIMEOUT_SECS` are forwarded; other ambient
-`RECIPE_*`/`GINUX_*` controls are removed. An invocation whose recipes ask for
-Recipe's minimal runtime image (`NEEDS.runtime: "minimal"`: every OS recipe that needs
-no compiler, see `os-recipes/README.md`) is given it as `GINUX_MINIMAL_ROOT`/
-`GINUX_MINIMAL_ROOTFS`: the image `tools/recipe/bootstrap/minimal-runtime.json` pins,
-at `.artifacts/ginux-env/prepared-image-minimal`, unless the ambient pair names
-another; a run in its own root (the apps-build root) has that root as both images.
-Each pair (`GINUX_ROOT`/`GINUX_ROOTFS`, `GINUX_MINIMAL_ROOT`/`GINUX_MINIMAL_ROOTFS`) is
-set whole or not at all; one variable alone is refused. A run's done stamp, the unpack
+CLI). It builds the five Ginux tools from `tools/ginux` on first use in each run
+(`recipe::ginux::tools`: the runtime freestanding, the `ginux` CLI and image tool as
+static musl programs, the allocator for the host, the helper script as it is). Recipe
+runs Ginux only through the helper as root, so the builder (root) copies the helper,
+runtime, image tool and allocator into the root-owned `/var/lib/levitate-builder/ginux/`
+and writes a wrapper there that exports `GINUX_RUNTIME`, `GINUX_IMAGE_TOOL` and
+`GINUX_ALLOCATOR_LIBRARY` for those copies and execs the helper; the host's
+`/usr/libexec` is never touched. Every invocation gets the CLI as `RECIPE_GINUX`, the
+wrapper as `GINUX_INSTANCE_HELPER` and the CLI it runs as `RECIPE_WORKER_BIN`; ambient
+values of those are ignored (and logged), so a build never runs older Ginux or an older
+worker than the checkout. Recipe keeps its default Ginux roots (`/var/lib/recipe/ginux`,
+`/run/recipe/ginux`). `RECIPE_IMAGE`, `RECIPE_IMAGE_LAYOUT` and
+`RECIPE_OUTPUT_TIMEOUT_SECS` are forwarded; other ambient `RECIPE_*`/`GINUX_*` controls
+are removed, and a retired variable of the fork's launcher (`GINUX_BIN`, `GINUX_ROOT`,
+`GINUX_ROOTFS`, `GINUX_MINIMAL_ROOT`, `GINUX_MINIMAL_ROOTFS`) stops the builder. An
+invocation whose recipes ask for Recipe's minimal runtime image (`NEEDS.runtime:
+"minimal"`: every OS recipe that needs no compiler, see `os-recipes/README.md`) is given
+it as `RECIPE_MINIMAL_IMAGE`/`RECIPE_MINIMAL_IMAGE_LAYOUT`: the image
+`tools/recipe/bootstrap/minimal-runtime.json` pins (`image_digest`, the manifest
+digest), at `.artifacts/ginux-env/prepared-image-minimal/image.oci.tar`, unless the
+ambient pair names another; a run in its own root (the apps-build root, made a one-layer
+image layout under `.artifacts/ginux-env/roots/<tar sha256>/`) has that root as both
+images. Each pair (`RECIPE_IMAGE`/`RECIPE_IMAGE_LAYOUT`,
+`RECIPE_MINIMAL_IMAGE`/`RECIPE_MINIMAL_IMAGE_LAYOUT`) is set whole or not at all; one
+variable alone is refused. A run's done stamp, the unpack
 store, the configured tree, the system part and every prebuilt key name the images its
 recipes run in and no other (`recipe::RunImages`), so a new compiler image leaves the
 keys of runs in the minimal image alone, and the other way round. The installed Recipe
@@ -90,8 +103,9 @@ ships the minimal image too, for the root effects recipe.
 Each release records `system-sources.sha256` beside its rootfs: the digest of
 every source its system rootfs is built from (the builder, contract, profile,
 variant, the terminal apps in `tools/tui` and the Qt apps in `tools/gui`, the recipes repository and the rootfs tools' crate
-closures, uncommitted edits included), the Ginux launcher built from
-`tools/ginux` (by content: the system ships it as `usr/libexec/recipe/ginux`),
+closures, uncommitted edits included), the five Ginux tools built from
+`tools/ginux` (by content: the system ships them as `usr/libexec/recipe/ginux`,
+`usr/libexec/ginux/*` and `usr/lib64/ginux/libginux_allocator.so`),
 the references of the two runtime images the installed Recipe ships (the compiler
 image and the minimal image)
 and Recipe's declared behaviour versions of the Recipe and Ginux that run the
@@ -167,9 +181,9 @@ recorded in its `part.json` with its output files (path, bytes, sha256):
   release serial, and the release keys in `distro/keys/release`), the source closure of
   the builder's own crates (recinit, reciso, levitate-recipe...),
   Recipe's declared behaviour versions and the identity mode (`declared`, or
-  `exact` with the Recipe CLI's and the Ginux launcher's SHA-256), the Ginux root (`GINUX_ROOT`, and the `GINUX_ROOTFS` tar's
-  digest), the minimal runtime image (`GINUX_MINIMAL_ROOT`, and the `GINUX_MINIMAL_ROOTFS` tar's
-  digest), the kernel (release, image digest, module tree digest) and busybox;
+  `exact` with the Recipe CLI's SHA-256 and the digest of the five Ginux tools), the Ginux image (`RECIPE_IMAGE`, and the
+  `RECIPE_IMAGE_LAYOUT` digest), the minimal runtime image (`RECIPE_MINIMAL_IMAGE`, and the
+  `RECIPE_MINIMAL_IMAGE_LAYOUT` digest), the kernel (release, image digest, module tree digest) and busybox;
 - overlay: the system part's key and exact build, the product, the overlay
   tools' crate closures and the running builder executable.
 
@@ -187,10 +201,10 @@ part: `[part:system:levitate] reused <key prefix>`, `building ...` or
 by declared behaviour versions, in Recipe's saved-state identities and in the
 system part's key, so a Recipe or Ginux rebuild that behaves the same reuses
 every step whose inputs did not change (a Ginux change still builds the system
-part again, because the system ships the launcher, but its Recipe steps are
+part again, because the system ships the Ginux tools, but its Recipe steps are
 reused). `release build <product> <distro> --exact` (`cargo xtask build
 <product> <distro> --exact`) passes `--exact-identity` to every Recipe
-invocation and puts the Recipe CLI's and launcher's bytes into the system
+invocation and puts the Recipe CLI's and the Ginux tools' bytes into the system
 part's key, so a release comes only from what byte-identical tools built.
 When to bump the declared versions is stated in
 `tools/recipe/src/identity.rs`.
@@ -275,14 +289,13 @@ reuse the pinned prebuilt kernel (`cargo xtask build kernel <distro>
 --prebuilt` when preparation is needed). Do not replace this with kernel
 recompilation.
 
-`cargo xtask build` runs this builder through `sudo -n` (passwordless sudo or root is required), the builder picks the compiler image pinned in `tools/recipe/bootstrap/product-ci.json` itself (an ambient `GINUX_ROOT`/`GINUX_ROOTFS` still wins) and a product build acquires its package locks itself; `artifact preseed-rootfs-source` remains for `--refresh`.
+`cargo xtask build` runs this builder through `sudo -n` (passwordless sudo or root is required), the builder picks the compiler image pinned in `tools/recipe/bootstrap/product-ci.json` itself (an ambient `RECIPE_IMAGE`/`RECIPE_IMAGE_LAYOUT` still wins) and a product build acquires its package locks itself; `artifact preseed-rootfs-source` remains for `--refresh`.
 
-Configured Recipe needs whole-coordinator bootstrap privileges, and its private
-publications need an appropriately privileged builder consumer. Configure the
-launcher/image/worker explicitly as in Recipe's `docs/setup-linux.md`. A privileged
-xtask build also needs the operator's explicitly selected installed Rust/Cargo
-toolchain and dependency inputs; root's rustup defaults may be empty. Do not wrap
-only the Ginux launcher in sudo. Producer commands build artifacts; scenarios
+Recipe runs every Ginux instance through the Ginux helper as root, so OS builds
+run as root and need `sudo` on the build host (root needs no sudoers rule). A
+privileged xtask build also needs the operator's explicitly selected installed
+Rust/Cargo toolchain (with the `x86_64-unknown-linux-musl` target, for the `ginux`
+CLI and image tool) and dependency inputs; root's rustup defaults may be empty. Producer commands build artifacts; scenarios
 consume existing artifacts.
 
 On enforcing SELinux hosts, prepare each root-built public ISO for read-only
@@ -384,9 +397,11 @@ program says which: `[prebuilt] recab: local|downloaded|compiled <key16>`.
   uploads `<family>-<name>.tar.gz` before `prebuilt.json`.
 - `distro-builder prebuilt publish-runtime` (also `cargo xtask prebuilt publish-runtime`, run as the
   user) compresses each Recipe runtime image the installed Recipe ships, the compiler image and the
-  minimal image (`zstd -T0 -19`), and uploads it as `rootfs.tar.zst`, with `runtime.json`, to release
-  `recipe-runtime-<digest16>`; a release that already has `rootfs.tar.zst` is left alone. Recipe
-  downloads it on first use.
+  minimal image (each an uncompressed OCI layout tar, `image.oci.tar`, `zstd -T0 -19`), and uploads it
+  as `image.oci.tar.zst`, with `runtime.json`, to release `recipe-runtime-<manifest digest16>`; a
+  release that already has `image.oci.tar.zst` is left alone. Recipe downloads it with
+  `recipe runtime fetch` (root's first run does it too) and root imports it with `ginux import-image`
+  (never through Recipe's guard, which allows no `import-image`).
 
 ## Release set
 

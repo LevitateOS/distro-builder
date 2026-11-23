@@ -311,9 +311,10 @@ fn run_shards(repo: &Path, recipe: &Path, dir: &Path, identity: &str, root: &str
     let shards = shards(jobs, workers);
     let count = shards.len();
     let running = workers.min(count);
-    // The launcher and Recipe are built once, before the threads need them.
+    // Recipe, the Ginux tools and the helper wrapper are made once, before
+    // the threads need them.
     crate::recipe::binary(repo)?;
-    crate::recipe::ginux_binary(repo)?;
+    crate::recipe::ginux::helper_wrapper(repo)?;
     let work = repo.join(".artifacts/work/unpack");
     let logs = work.join("logs");
     fs::create_dir_all(&logs).with_context(|| format!("creating {}", logs.display()))?;

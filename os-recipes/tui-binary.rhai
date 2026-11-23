@@ -24,7 +24,7 @@ fn sha(path) { trim(exec_output("sha256sum", [path])).split(" ")[0] }
 // docs/content's page index (src/generated/index.ts) is generated and
 // gitignored, so the source snapshot never carries it: make it here, from the
 // same sources, before the TUI that imports it is compiled. (Bun's JavaScript
-// needs /dev/urandom, which Recipe assigns where the launcher serves it.)
+// needs /dev/urandom, which every Ginux instance has.)
 fn generate_docs_index(compiler, work) {
     let docs = join_path(work, "docs/content");
     if !is_file(join_path(docs, "scripts/build.ts")) { return; }

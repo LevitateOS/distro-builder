@@ -36,9 +36,7 @@
 use anyhow::{bail, Context, Result};
 use distro_contract::profile::Flavour;
 use distro_contract::{Variant, AB_DESKTOP_APP_FILES, MUTABLE_DESKTOP_APP_FILES};
-use sha2::{Digest, Sha256};
 use std::fs;
-use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use crate::pipeline::source::{apps_build_preseed_recipe, apps_build_root_recipe, preseed_recipe};
@@ -168,7 +166,7 @@ pub(crate) fn compile_in_build_root(
     defines: &[(&str, &str)],
 ) -> Result<PathBuf> {
     let repo = &variant.repo_root;
-    let (reference, image) = build_root(variant).context("making the apps-build root")?;
+    let (reference, layout) = build_root(variant).context("making the apps-build root")?;
     // The static Recipe the image itself ships: it runs in any root. Only the
     // program, not the packaged tree, which ships the runtime images too.
     let worker = crate::recipe::tools::compile_crate(repo, "levitate-recipe")
@@ -182,19 +180,21 @@ pub(crate) fn compile_in_build_root(
     for (name, value) in defines {
         invocation = invocation.define(name, value);
     }
-    invocation.root(reference, image).worker(worker).discard_superseded().run()?.directory("rootfs")
+    invocation.root(reference, layout).worker(worker).discard_superseded().run()?.directory("rootfs")
 }
 
 /// The version of how the builder makes the apps-build root image ([`build_root`]):
 /// which lock rows an RPM root takes (`compose::apps_build_wanted`), how they are
 /// unpacked and composed (`compose::unpack`, `compose::compose`, `compose::input_view`)
-/// and the tar flags of the image. It is in the key of every part compiled in that root
-/// (`prebuilt::build_root_fields`). Bump it whenever a change there can change the root
-/// those parts see; a bump republishes them all.
-pub(crate) const APPS_BUILD_ROOT_FORMAT: u32 = 1;
+/// and the tar flags and exclusions of the image's layer. It is in the key of every part
+/// compiled in that root (`prebuilt::build_root_fields`). Bump it whenever a change there
+/// can change the root those parts see; a bump republishes them all.
+/// 2: the root is a one-layer OCI image layout without `etc/hosts` (Recipe injects it).
+pub(crate) const APPS_BUILD_ROOT_FORMAT: u32 = 2;
 
-/// The variant's apps-build root as a root image: its reference
-/// (`oci:NAME@sha256:DIGEST`) and the tar.
+/// The variant's apps-build root as a Ginux image: its reference
+/// (`local/NAME@sha256:<manifest digest>`) and its layout tar
+/// (`recipe::root_layout`).
 fn build_root(variant: &Variant) -> Result<(String, PathBuf)> {
     let repo = &variant.repo_root;
     let recipe = apps_build_root_recipe(variant);
@@ -239,14 +239,17 @@ fn build_root(variant: &Variant) -> Result<(String, PathBuf)> {
         .with_context(|| format!("unpacking the apps-build root via '{}'", recipe.display()))?
         .directory("root")?;
 
-    // One tar of the tree, the same bytes for the same tree: Recipe checks
-    // the digest in the reference against the tar before it runs anything.
+    // One tar of the tree, the same bytes for the same tree: the image's
+    // one layer, so the same tree always has the same manifest digest.
+    // `etc/hosts` stays out: Recipe injects it into every instance and the
+    // injector never overwrites a path the image has.
     // A change to these flags changes the root: bump APPS_BUILD_ROOT_FORMAT.
-    let image = work.join("rootfs.tar");
-    let partial = work.join("rootfs.tar.part");
+    let layer = work.join("layer.tar");
+    let partial = work.join("layer.tar.part");
     Cmd::new("tar")
         .args(["--create", "--format=gnu", "--sort=name", "--mtime=@0", "--owner=0", "--group=0", "--numeric-owner"])
         .arg(format!("--exclude=./{}", levitate_recipe::target::MANIFEST))
+        .arg("--exclude=./etc/hosts")
         .arg("--file")
         .arg(&partial)
         .arg("--directory")
@@ -254,23 +257,8 @@ fn build_root(variant: &Variant) -> Result<(String, PathBuf)> {
         .arg(".")
         .error_msg(format!("archiving the apps-build root '{}' (GNU tar is needed on the host)", tree.display()))
         .run()?;
-    let digest = sha256_of(&partial)?;
-    fs::rename(&partial, &image).with_context(|| format!("publishing '{}'", image.display()))?;
-    Ok((format!("oci:{}-apps-build@sha256:{digest}", variant.id), image))
-}
-
-fn sha256_of(path: &Path) -> Result<String> {
-    let mut file = fs::File::open(path).with_context(|| format!("opening '{}'", path.display()))?;
-    let mut hasher = Sha256::new();
-    let mut buffer = vec![0u8; 1 << 20];
-    loop {
-        let read = file.read(&mut buffer).with_context(|| format!("reading '{}'", path.display()))?;
-        if read == 0 {
-            break;
-        }
-        hasher.update(&buffer[..read]);
-    }
-    Ok(hasher.finalize().iter().map(|byte| format!("{byte:02x}")).collect())
+    fs::rename(&partial, &layer).with_context(|| format!("publishing '{}'", layer.display()))?;
+    crate::recipe::root_layout(repo, &format!("{}-apps-build", variant.id), &layer)
 }
 
 /// The files of `tools/gui/` (relative to it) the compile reads, as the CMake files name

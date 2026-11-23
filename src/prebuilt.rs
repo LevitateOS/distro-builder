@@ -277,14 +277,14 @@ pub(crate) fn normalize_modes(root: &Path) -> Result<()> {
 /// function that reads the pinned reference.
 type AmbientImage = (&'static str, &'static str, fn(&Path) -> Result<String>);
 
-/// Prints one line on stderr for each of `GINUX_ROOT` and `GINUX_MINIMAL_ROOT` the
+/// Prints one line on stderr for each of `RECIPE_IMAGE` and `RECIPE_MINIMAL_IMAGE` the
 /// environment sets to another image than the pinned one: every key that names that
 /// image then names the ambient one (it is the one a compile would use) and will not
 /// match a published part.
 pub fn warn_ambient_compiler_image(repo: &Path) {
     let images: [AmbientImage; 2] = [
-        ("GINUX_ROOT", "compiler image", crate::recipe::pinned_compiler_image_reference),
-        ("GINUX_MINIMAL_ROOT", "minimal runtime image", crate::recipe::pinned_minimal_image_reference),
+        ("RECIPE_IMAGE", "compiler image", crate::recipe::pinned_compiler_image_reference),
+        ("RECIPE_MINIMAL_IMAGE", "minimal runtime image", crate::recipe::pinned_minimal_image_reference),
     ];
     for (variable, what, pinned) in images {
         let Some(ambient) = std::env::var_os(variable) else { continue };
@@ -1018,32 +1018,83 @@ pub fn publish(repo: &Path, family: Family, name: &str, key: &Key) -> Result<()>
 /// prebuilt repository with `gh` ([`publish_runtime_image`]).
 pub fn publish_runtime(repo: &Path) -> Result<()> {
     let slug = repository()?;
-    let (reference, tar) = crate::recipe::runtime_image(repo)?;
-    publish_runtime_image(&slug, &reference, &tar)?;
-    let (reference, tar) = crate::recipe::minimal_image(repo)?;
-    publish_runtime_image(&slug, &reference, &tar)
+    let (reference, layout) = crate::recipe::runtime_image(repo)?;
+    publish_runtime_image(&slug, &reference, &layout)?;
+    let (reference, layout) = crate::recipe::minimal_image(repo)?;
+    publish_runtime_image(&slug, &reference, &layout)
 }
 
-/// Compresses the runtime image `tar` named by `reference` and uploads it to the release
-/// `recipe-runtime-<digest16>` of the prebuilt repository `slug` with `gh`.
+/// The manifest digest (hex) of the uncompressed OCI layout tar `tar`: the one
+/// manifest its `index.json` names, after checking the tar holds that manifest
+/// blob with those bytes. `ginux import-image` verifies every blob again.
+fn layout_tar_manifest(tar: &Path) -> Result<String> {
+    let file = fs::File::open(tar).with_context(|| format!("opening '{}'", tar.display()))?;
+    let mut archive = ::tar::Archive::new(std::io::BufReader::new(file));
+    let mut index = None;
+    let mut blobs = BTreeMap::new();
+    for entry in archive.entries().with_context(|| format!("reading '{}'", tar.display()))? {
+        let mut entry = entry.with_context(|| format!("reading '{}'", tar.display()))?;
+        let name = entry.path()?.to_string_lossy().trim_start_matches("./").to_string();
+        if name == "index.json" {
+            let mut text = Vec::new();
+            entry.read_to_end(&mut text)?;
+            index = Some(text);
+        } else if let Some(hex) = name.strip_prefix("blobs/sha256/").filter(|hex| !hex.is_empty()) {
+            let mut hasher = Sha256::new();
+            std::io::copy(&mut entry, &mut hasher)?;
+            let digest: String = hasher.finalize().iter().map(|byte| format!("{byte:02x}")).collect();
+            blobs.insert(hex.to_string(), digest);
+        }
+    }
+    let index: serde_json::Value = serde_json::from_slice(
+        &index.with_context(|| format!("'{}' is not an image layout: it has no index.json", tar.display()))?,
+    )
+    .with_context(|| format!("parsing the index.json of '{}'", tar.display()))?;
+    let manifests = index["manifests"].as_array().map(Vec::as_slice).unwrap_or_default();
+    let [manifest] = manifests else {
+        bail!("the index.json of '{}' names {} manifests, not one", tar.display(), manifests.len());
+    };
+    let manifest = manifest["digest"]
+        .as_str()
+        .and_then(|digest| digest.strip_prefix("sha256:"))
+        .with_context(|| format!("the index.json of '{}' names no sha256 manifest", tar.display()))?;
+    match blobs.get(manifest) {
+        Some(found) if found == manifest => Ok(manifest.to_string()),
+        Some(found) => bail!("'{}' holds manifest {manifest} with bytes of SHA-256 {found}", tar.display()),
+        None => bail!("'{}' lacks its manifest blob {manifest}", tar.display()),
+    }
+}
+
+/// Compresses the runtime image layout tar `layout` named by `reference` and uploads it to
+/// the release `recipe-runtime-<manifest16>` of the prebuilt repository `slug` with `gh`.
 ///
-/// Recipe downloads `rootfs.tar.zst` from that release on first use (when the image is not
-/// shipped) and verifies the *decompressed* bytes against the SHA-256 digest of its
-/// reference (`oci:NAME@sha256:<digest>`), so the compressed bytes need no fixed form. The
-/// tag is named by the uncompressed digest: a release that already has `rootfs.tar.zst` is
-/// complete and is left alone (zstd output differs between versions, so it is not compared).
+/// Recipe downloads `image.oci.tar.zst` from that release on first use (when the image is
+/// not shipped), decompresses it and imports it with `ginux import-image`, which verifies
+/// every blob and prints the manifest digest Recipe compares with its reference
+/// (`local/NAME@sha256:<manifest>`), so the compressed bytes need no fixed form. The tag is
+/// named by the manifest digest: a release that already has `image.oci.tar.zst` is complete
+/// and is left alone (zstd output differs between versions, so it is not compared).
 /// `runtime.json` records the reference, digest and sizes. Plain `zstd -19` with the default
 /// window, so a default decoder reads it.
-fn publish_runtime_image(slug: &str, reference: &str, tar: &Path) -> Result<()> {
+fn publish_runtime_image(slug: &str, reference: &str, layout: &Path) -> Result<()> {
     let slug = slug.to_string();
     let digest = levitate_recipe::runtime::root_digest(reference)?.to_string();
-    let (tar_sha, tar_bytes) = sha256_file(tar)?;
-    if tar_sha != digest {
-        bail!("the runtime image '{}' has SHA-256 {tar_sha}, but its reference {reference} names {digest}", tar.display());
+    if !layout.is_file() {
+        bail!(
+            "the runtime image '{}' is not a layout tar ({}); publish the tar recipe-image writes",
+            layout.display(),
+            levitate_recipe::image::LAYOUT_TAR
+        );
     }
+    let tar = layout;
+    let manifest = layout_tar_manifest(tar)?;
+    if manifest != digest {
+        bail!("the runtime image '{}' has manifest {manifest}, but its reference {reference} names {digest}", tar.display());
+    }
+    let (_, tar_bytes) = sha256_file(tar)?;
     let short = &digest[..16];
     let tag = format!("recipe-runtime-{short}");
-    let asset = "rootfs.tar.zst";
+    let asset = "image.oci.tar.zst";
 
     let listing = Cmd::new("gh")
         .args(["release", "view", &tag, "-R", &slug, "--json", "assets", "-q", ".assets[].name"])

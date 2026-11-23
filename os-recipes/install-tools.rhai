@@ -5,9 +5,12 @@ const RECIPE_API = 1;
 //   --input source=<standalone vendored tree of the tool's crate>
 // BIN names the binary (default recstrap); INSTALL_PATH where it goes in the
 // package tree (default usr/bin/<BIN>). recipe also packages the official source of recipes
-// (the file that names it and a copy of it at the pinned commit) and the same
-// pinned runtime image/launcher the builder selected, and the minimal runtime image
-// the root effects recipe runs in (NEEDS.runtime "minimal"), supplied as typed inputs.
+// (the file that names it and a copy of it at the pinned commit), the five Ginux
+// tools the builder runs (the CLI, helper, image tool, runtime and allocator), Recipe's
+// guard (recipe-ginux-guard, the one program the sudoers rule names) with the
+// sudoers rule that lets the wheel group run the guard, the pinned runtime image
+// layout the builder selected, and the minimal runtime image layout the root
+// effects recipe runs in (NEEDS.runtime "minimal"), supplied as typed inputs.
 // Input `program`, when given, is the already compiled binary: it is
 // installed as it is and nothing compiles.
 // recupdate (the release checker every installed system has) also installs its
@@ -21,18 +24,33 @@ const RECIPE_API = 1;
 // The program output is published by Recipe for the consumer to install; the
 // rootfs output is the tree it installs.
 const NEEDS = #{
-    inputs: #{ source: "directory", catalog: "directory?", launcher: "file?", runtime_image: "file?",
-               runtime_reference: "file?", minimal_image: "file?", minimal_reference: "file?",
-               program: "file?", dist: "directory?", keys: "directory?" },
+    inputs: #{ source: "directory", catalog: "directory?", recipe_guard: "file?", ginux_cli: "file?", ginux_helper: "file?",
+               ginux_image: "file?", ginux_runtime: "file?", ginux_allocator: "file?",
+               runtime_layout: "file?", runtime_reference: "file?", minimal_layout: "file?",
+               minimal_reference: "file?", program: "file?", dist: "directory?", keys: "directory?" },
     defines: #{ BIN: "recstrap", INSTALL_PATH: "", INIT: "" },
     outputs: #{ program: "file", rootfs: "directory" },
     // Packaging Recipe retains compiler outputs while copying its selected
-    // runtime tar (the current compiler image is about 1.3 GiB).
+    // runtime image layout (the current compiler image is about 1.3 GiB).
     memory_mib: 8192,
     storage_max_bytes: 6442450944,
 };
 const PACKAGE = #{ name: "install-tools", description: "One install tool as a static musl program, and the tree it installs" };
 const RUST_TARGET = "x86_64-unknown-linux-musl";
+
+// The inputs Recipe's runtime is staged from.
+const RUNTIME_INPUTS = ["recipe_guard", "ginux_cli", "ginux_helper", "ginux_image", "ginux_runtime", "ginux_allocator",
+    "runtime_layout", "runtime_reference", "minimal_layout", "minimal_reference"];
+
+// What `runtime stage` writes that the installed system must own as root with
+// these modes: the guard sudo runs, the helper and the tools it runs as root, and the
+// sudoers rule (sudo ignores a rule file others can write).
+const RUNTIME_MODES = [["usr/libexec/recipe/ginux", 0o755], ["usr/libexec/recipe", 0o755],
+    ["usr/libexec/recipe/recipe-ginux-guard", 0o755], ["usr/libexec/ginux", 0o755],
+    ["usr/libexec/ginux/ginux-helper", 0o755], ["usr/libexec/ginux/ginux-image", 0o755],
+    ["usr/libexec/ginux/ginux-runtime", 0o755], ["usr/lib64/ginux", 0o755],
+    ["usr/lib64/ginux/libginux_allocator.so", 0o755], ["etc/sudoers.d", 0o750],
+    ["etc/sudoers.d/recipe-ginux", 0o440]];
 
 fn build(src, out) {
     let bin = DEFINES.BIN;
@@ -121,21 +139,33 @@ fn recipe_inputs() {
     if !is_file(join_path(INPUTS.catalog, "index.json")) {
         throw "the public catalog has no index.json; run 'recipe index' in recipes/ and commit it";
     }
-    for name in ["launcher", "runtime_image", "runtime_reference", "minimal_image", "minimal_reference"] {
+    for name in RUNTIME_INPUTS {
         if INPUTS[name] == () { throw "Recipe packaging requires input " + name; }
     }
 }
 
 fn recipe_runtime(out) {
     recipe_inputs();
-    // Recipe's `runtime stage` owns the runtime's layout and verifies each image against its reference's digest.
+    // Recipe's `runtime stage` owns the runtime's layout and checks each image layout
+    // against its reference's manifest digest. The wheel group (the administrators
+    // on both distros) may run Recipe's guard (which runs Ginux's helper for Recipe's
+    // instance verbs only) on Recipe's roots without a password.
     exec_checked(out.program, ["runtime", "stage", "--root", out.rootfs,
-        "--launcher", INPUTS.launcher,
+        "--ginux-cli", INPUTS.ginux_cli,
+        "--ginux-helper", INPUTS.ginux_helper,
+        "--ginux-image", INPUTS.ginux_image,
+        "--ginux-runtime", INPUTS.ginux_runtime,
+        "--ginux-allocator", INPUTS.ginux_allocator,
+        "--recipe-guard", INPUTS.recipe_guard,
         "--reference", trim(read_file(INPUTS.runtime_reference)),
-        "--image", INPUTS.runtime_image,
+        "--image", INPUTS.runtime_layout,
         "--minimal-reference", trim(read_file(INPUTS.minimal_reference)),
-        "--minimal-image", INPUTS.minimal_image,
-        "--catalog", INPUTS.catalog]);
+        "--minimal-image", INPUTS.minimal_layout,
+        "--catalog", INPUTS.catalog,
+        "--sudoers", "wheel"]);
+    for entry in RUNTIME_MODES {
+        target_mode(out.rootfs, entry[0], entry[1]);
+    }
 }
 
 // recupdate's service files for the INIT define and the release keys, as [source, path, mode].
@@ -188,9 +218,13 @@ fn verify(out) {
     if !is_file(out.program) { throw DEFINES.BIN + " program is missing"; }
     if !is_file(join_path(out.rootfs, install_path())) { throw "the installed package tree lacks /" + install_path(); }
     if DEFINES.BIN == "recipe" {
-        for path in ["usr/libexec/recipe/ginux", "usr/share/recipe/runtime/rootfs.tar",
-                     "usr/share/recipe/runtime/root-reference", "usr/share/recipe/runtime/minimal.tar",
-                     "usr/share/recipe/runtime/minimal-reference", "etc/profile.d/recipe.sh"] {
+        for path in ["usr/libexec/recipe/ginux", "usr/libexec/recipe/recipe-ginux-guard",
+                     "usr/libexec/ginux/ginux-helper",
+                     "usr/libexec/ginux/ginux-image", "usr/libexec/ginux/ginux-runtime",
+                     "usr/lib64/ginux/libginux_allocator.so", "usr/share/recipe/runtime/compiler.oci.tar",
+                     "usr/share/recipe/runtime/root-reference", "usr/share/recipe/runtime/minimal.oci.tar",
+                     "usr/share/recipe/runtime/minimal-reference", "etc/profile.d/recipe.sh",
+                     "etc/sudoers.d/recipe-ginux"] {
             if !is_file(join_path(out.rootfs, path)) { throw "Recipe runtime is missing " + path; }
         }
         for path in ["usr/share/recipe/sources/levitate.toml", "usr/share/recipe/sources/levitate/index.json"] {
